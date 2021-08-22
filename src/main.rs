@@ -53,24 +53,24 @@ impl<'a> Scanner<'a> {
 }
 
 #[derive(Debug)]
-enum VarPart<'a> {
+enum EvalPart<'a> {
     Literal(NStr<'a>),
     VarRef(NStr<'a>),
 }
 #[derive(Debug)]
-struct Var<'a> {
-    parts: Vec<VarPart<'a>>,
+struct EvalString<'a> {
+    parts: Vec<EvalPart<'a>>,
 }
 
 #[derive(Debug)]
 struct Env<'a>(HashMap<NStr<'a>, NString>);
 impl<'a> Env<'a> {
-    fn evaluate(&self, var: &Var) -> NString {
+    fn evaluate(&self, eval: &EvalString) -> NString {
         let mut val = Vec::new();
-        for part in &var.parts {
+        for part in &eval.parts {
             match part {
-                VarPart::Literal(s) => val.extend_from_slice(s.0),
-                VarPart::VarRef(v) => {
+                EvalPart::Literal(s) => val.extend_from_slice(s.0),
+                EvalPart::VarRef(v) => {
                     if let Some(v) = self.0.get(&v) {
                         val.extend_from_slice(&v.0);
                     }
@@ -82,7 +82,7 @@ impl<'a> Env<'a> {
 }
 
 #[derive(Debug)]
-struct DelayEnv<'a>(HashMap<NStr<'a>, Var<'a>>);
+struct DelayEnv<'a>(HashMap<NStr<'a>, EvalString<'a>>);
 
 #[derive(Debug)]
 struct Rule<'a> {
@@ -99,21 +99,10 @@ struct Build<'a> {
 }
 
 #[derive(Debug)]
-struct NFile<'a> {
-    rules: Vec<Rule<'a>>,
-    builds: Vec<Build<'a>>,
-    default: Option<NStr<'a>>,
-    vars: Env<'a>,
-}
-impl<'a> NFile<'a> {
-    fn new() -> NFile<'a> {
-        NFile {
-            rules: Vec::new(),
-            builds: Vec::new(),
-            default: None,
-            vars: Env(HashMap::new()),
-        }
-    }
+enum Statement<'a> {
+    Rule(Rule<'a>),
+    Build(Build<'a>),
+    Default(NStr<'a>),
 }
 
 struct Parser<'a> {
@@ -153,11 +142,10 @@ impl<'a> Parser<'a> {
         panic!("invalid offset when formatting error")
     }
 
-    fn parse(&mut self) -> ParseResult<NFile<'a>> {
-        let mut file = NFile::new();
+    fn read(&mut self, env: &mut Env<'a>) -> ParseResult<Option<Statement<'a>>> {
         loop {
             match self.scanner.peek() {
-                '\0' => break,
+                '\0' => return Ok(None),
                 '\n' => self.scanner.next(),
                 '#' => self.skip_comment()?,
                 ' ' | '\t' => return self.parse_error("unexpected whitespace"),
@@ -165,19 +153,18 @@ impl<'a> Parser<'a> {
                     let ident = self.read_ident()?;
                     self.skip_spaces();
                     match ident.0 {
-                        b"rule" => file.rules.push(self.read_rule()?),
-                        b"build" => file.builds.push(self.read_build()?),
-                        b"default" => file.default = Some(self.read_ident()?),
+                        b"rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
+                        b"build" => return Ok(Some(Statement::Build(self.read_build()?))),
+                        b"default" => return Ok(Some(Statement::Default(self.read_ident()?))),
                         ident => {
                             let valvar = self.read_vardef()?;
-                            let val = self.vars.evaluate(&valvar);
-                            self.vars.0.insert(NStr(ident), val);
+                            let val = env.evaluate(&valvar);
+                            env.0.insert(NStr(ident), val);
                         }
                     }
                 }
             }
         }
-        Ok(file)
     }
 
     fn expect(&mut self, ch: char) -> ParseResult<()> {
@@ -188,11 +175,11 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn read_vardef(&mut self) -> ParseResult<Var<'a>> {
+    fn read_vardef(&mut self) -> ParseResult<EvalString<'a>> {
         self.skip_spaces();
         self.expect('=')?;
         self.skip_spaces();
-        return self.read_value();
+        return self.read_eval();
     }
 
     fn read_scoped_vars(&mut self) -> ParseResult<DelayEnv<'a>> {
@@ -293,7 +280,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn read_value(&mut self) -> ParseResult<Var<'a>> {
+    fn read_eval(&mut self) -> ParseResult<EvalString<'a>> {
         let mut parts = Vec::new();
         let mut ofs = self.scanner.ofs;
         loop {
@@ -303,7 +290,7 @@ impl<'a> Parser<'a> {
                 '$' => {
                     let end = self.scanner.ofs - 1;
                     if end > ofs {
-                        parts.push(VarPart::Literal(NStr(&self.scanner.buf[ofs..end])));
+                        parts.push(EvalPart::Literal(NStr(&self.scanner.buf[ofs..end])));
                     }
                     parts.push(self.read_escape()?);
                     ofs = self.scanner.ofs;
@@ -313,9 +300,9 @@ impl<'a> Parser<'a> {
         }
         let end = self.scanner.ofs - 1;
         if end > ofs {
-            parts.push(VarPart::Literal(NStr(&self.scanner.buf[ofs..end])));
+            parts.push(EvalPart::Literal(NStr(&self.scanner.buf[ofs..end])));
         }
-        Ok(Var { parts: parts })
+        Ok(EvalString { parts: parts })
     }
 
     fn read_path(&mut self) -> ParseResult<Option<NString>> {
@@ -329,8 +316,8 @@ impl<'a> Parser<'a> {
                 '$' => {
                     let part = self.read_escape()?;
                     match part {
-                        VarPart::Literal(l) => path.extend_from_slice(l.0),
-                        VarPart::VarRef(v) => {
+                        EvalPart::Literal(l) => path.extend_from_slice(l.0),
+                        EvalPart::VarRef(v) => {
                             if let Some(v) = &self.vars.0.get(&v) {
                                 path.extend_from_slice(&v.0);
                             }
@@ -352,12 +339,12 @@ impl<'a> Parser<'a> {
         Ok(Some(NString(path)))
     }
 
-    fn read_escape(&mut self) -> ParseResult<VarPart<'a>> {
+    fn read_escape(&mut self) -> ParseResult<EvalPart<'a>> {
         match self.scanner.peek() {
             '\n' => {
                 self.scanner.next();
                 self.skip_spaces();
-                return Ok(VarPart::Literal(NStr(&self.scanner.buf[0..0])));
+                return Ok(EvalPart::Literal(NStr(&self.scanner.buf[0..0])));
             }
             '{' => {
                 self.scanner.next();
@@ -370,11 +357,11 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let end = self.scanner.ofs - 1;
-                return Ok(VarPart::VarRef(NStr(&self.scanner.buf[start..end])));
+                return Ok(EvalPart::VarRef(NStr(&self.scanner.buf[start..end])));
             }
             _ => {
                 let ident = self.read_ident()?;
-                return Ok(VarPart::VarRef(ident));
+                return Ok(EvalPart::VarRef(ident));
             }
         }
     }
@@ -384,9 +371,13 @@ fn read() -> std::io::Result<()> {
     let mut bytes = std::fs::read("build.ninja")?;
     bytes.push(0);
     let mut p = Parser::new(&bytes);
-    match p.parse() {
-        Err(err) => println!("{}", p.format_parse_error(err)),
-        Ok(p) => println!("parsed as {:#?}", p),
+    let mut env = Env(HashMap::new());
+    loop {
+        match p.read(&mut env) {
+            Err(err) => println!("{}", p.format_parse_error(err)),
+            Ok(None) => break,
+            Ok(Some(p)) => println!("parsed as {:#?}", p),
+        }
     }
     Ok(())
 }
