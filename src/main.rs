@@ -1,4 +1,5 @@
 mod parse;
+mod graph;
 
 struct LoadState<'a> {
     rules: Vec<parse::Rule<'a>>,
