@@ -16,13 +16,10 @@ fn read() -> Result<(), String> {
     let mut p = parse::Parser::new(&bytes);
     let mut env = parse::Env::new();
     loop {
-        match p.read(&mut env) {
-            Err(err) => {
-                println!("{}", p.format_parse_error(err));
-                break;
-            }
-            Ok(None) => break,
-            Ok(Some(p)) => println!("parsed as {:#?}", p),
+        let stmt = p.read(&mut env).map_err(|err| p.format_parse_error(err))?;
+        match stmt {
+            None => break,
+            Some(p) => println!("parsed as {:#?}", p),
         }
     }
     Ok(())
