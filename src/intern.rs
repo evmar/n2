@@ -5,21 +5,21 @@ use std::hash::Hasher;
 pub struct Symbol(usize);
 
 struct EndTab {
-    strs: String,
+    data: Vec<u8>,
     ends: Vec<usize>,
 }
 
 impl EndTab {
-    fn add(&mut self, s: &str) -> Symbol {
-        self.strs.push_str(s);
+    fn add(&mut self, s: &[u8]) -> Symbol {
+        self.data.extend_from_slice(s);
         let sym = Symbol(self.ends.len());
-        self.ends.push(self.strs.len());
+        self.ends.push(self.data.len());
         sym
     }
-    fn get(&self, sym: Symbol) -> &str {
+    fn get(&self, sym: Symbol) -> &[u8] {
         let start = if sym.0 > 0 { self.ends[sym.0 - 1] } else { 0 };
         let end = self.ends[sym.0];
-        &self.strs[start..end]
+        &self.data[start..end]
     }
 }
 
@@ -28,9 +28,9 @@ pub struct Intern {
     endtab: EndTab,
 }
 
-fn hash_str(s: &str) -> u64 {
+fn hash_bytes(s: &[u8]) -> u64 {
     let mut hasher = ahash::AHasher::default();
-    hasher.write(s.as_bytes());
+    hasher.write(s);
     hasher.finish()
 }
 
@@ -39,14 +39,14 @@ impl Intern {
         Intern {
             lookup: RawTable::new(),
             endtab: EndTab{
-                strs: String::new(),
+                data: Vec::new(),
                 ends: Vec::new(),
             }
         }
     }
 
-    pub fn add<'a>(&mut self, s: &'a str) -> Symbol {
-        let hash = hash_str(s);
+    pub fn add<'a>(&mut self, s: &'a [u8]) -> Symbol {
+        let hash = hash_bytes(s);
         if let Some(sym) = self
             .lookup
             .get(hash, |sym: &Symbol| s == self.endtab.get(*sym))
@@ -57,11 +57,11 @@ impl Intern {
 
         let endtab = &self.endtab;
         self.lookup
-            .insert(hash, sym, |sym: &Symbol| hash_str(endtab.get(*sym)));
+            .insert(hash, sym, |sym: &Symbol| hash_bytes(endtab.get(*sym)));
         sym
     }
 
-    pub fn get(&self, sym: Symbol) -> &str {
+    pub fn get(&self, sym: Symbol) -> &[u8] {
         self.endtab.get(sym)
     }
 }
@@ -73,13 +73,13 @@ mod tests {
     #[test]
     fn user() {
         let mut i = Intern::new();
-        let hi = i.add("hi");
-        let yo = i.add("yo");
-        let hi2 = i.add("hi");
+        let hi = i.add("hi".as_bytes());
+        let yo = i.add("yo".as_bytes());
+        let hi2 = i.add("hi".as_bytes());
         assert_eq!(hi, hi2);
         assert_ne!(hi, yo);
 
-        assert_eq!(i.get(hi), "hi");
-        assert_eq!(i.get(yo), "yo");
+        assert_eq!(i.get(hi), "hi".as_bytes());
+        assert_eq!(i.get(yo), "yo".as_bytes());
     }
 }
