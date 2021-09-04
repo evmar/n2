@@ -1,29 +1,8 @@
 extern crate getopts;
 
-mod parse;
 mod graph;
-
-struct LoadState<'a> {
-    rules: Vec<parse::Rule<'a>>,
-}
-
-fn read() -> Result<(), String> {
-    let mut bytes = match std::fs::read("build.ninja") {
-        Ok(b) => b,
-        Err(e) => return Err(format!("read build.ninja: {}", e)),
-    };
-    bytes.push(0);
-    let mut p = parse::Parser::new(&bytes);
-    let mut env = parse::Env::new();
-    loop {
-        let stmt = p.read(&mut env).map_err(|err| p.format_parse_error(err))?;
-        match stmt {
-            None => break,
-            Some(p) => println!("parsed as {:#?}", p),
-        }
-    }
-    Ok(())
-}
+mod load;
+mod parse;
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
@@ -46,7 +25,7 @@ fn main() {
         std::env::set_current_dir(dir).unwrap();
     }
 
-    if let Err(err) = read() {
+    if let Err(err) = load::read() {
         println!("ERROR: {}", err);
     }
 }

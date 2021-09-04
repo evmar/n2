@@ -8,11 +8,19 @@ pub struct ParseError {
 }
 type ParseResult<T> = Result<T, ParseError>;
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 pub struct NString(Vec<u8>);
 impl<'a> std::fmt::Debug for NString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(&self.0)))
+    }
+}
+impl NString {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+    pub fn as_nstr(&self) -> NStr {
+        NStr(&self.0)
     }
 }
 
@@ -21,6 +29,11 @@ pub struct NStr<'a>(&'a [u8]);
 impl<'a> std::fmt::Debug for NStr<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(self.0)))
+    }
+}
+impl NStr<'_> {
+    pub fn to_nstring(&self) -> NString {
+        NString(Vec::from(self.0))
     }
 }
 
@@ -86,7 +99,7 @@ impl<'a> Env<'a> {
 }
 
 #[derive(Debug)]
-struct DelayEnv<'a>(HashMap<NStr<'a>, EvalString<'a>>);
+pub struct DelayEnv<'a>(HashMap<NStr<'a>, EvalString<'a>>);
 
 #[derive(Debug)]
 pub struct Rule<'a> {
@@ -96,10 +109,10 @@ pub struct Rule<'a> {
 
 #[derive(Debug)]
 pub struct Build<'a> {
-    rule: NStr<'a>,
-    outs: Vec<NString>,
-    ins: Vec<NString>,
-    vars: DelayEnv<'a>,
+    pub rule: NStr<'a>,
+    pub outs: Vec<NString>,
+    pub ins: Vec<NString>,
+    pub vars: DelayEnv<'a>,
 }
 
 #[derive(Debug)]
@@ -146,7 +159,7 @@ impl<'a> Parser<'a> {
         panic!("invalid offset when formatting error")
     }
 
-    pub fn read(&mut self, env: &mut Env<'a>) -> ParseResult<Option<Statement<'a>>> {
+    pub fn read(&mut self) -> ParseResult<Option<Statement<'a>>> {
         loop {
             match self.scanner.peek() {
                 '\0' => return Ok(None),
@@ -162,8 +175,8 @@ impl<'a> Parser<'a> {
                         b"default" => return Ok(Some(Statement::Default(self.read_ident()?))),
                         ident => {
                             let valvar = self.read_vardef()?;
-                            let val = env.evaluate(&valvar);
-                            env.0.insert(NStr(ident), val);
+                            let val = self.vars.evaluate(&valvar);
+                            self.vars.0.insert(NStr(ident), val);
                         }
                     }
                 }
