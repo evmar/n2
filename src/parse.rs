@@ -9,13 +9,16 @@ pub struct ParseError {
 type ParseResult<T> = Result<T, ParseError>;
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-pub struct NString(Vec<u8>);
+pub struct NString(pub Vec<u8>);
 impl<'a> std::fmt::Debug for NString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(&self.0)))
     }
 }
 impl NString {
+    pub fn from_str(str: &str) -> NString {
+        NString(str.as_bytes().to_vec())
+    }
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -34,6 +37,9 @@ impl<'a> std::fmt::Debug for NStr<'a> {
 impl NStr<'_> {
     pub fn to_nstring(&self) -> NString {
         NString(Vec::from(self.0))
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0
     }
 }
 

@@ -1,7 +1,50 @@
 use crate::graph::FileId;
-use crate::parse::{NString, Statement};
+use crate::parse::{NStr, NString, Statement};
 use crate::{graph, parse};
 use std::collections::HashMap;
+
+use std::os::unix::ffi::OsStrExt;
+
+/*fn canon_path(path: &mut NString) {
+    let bytes = &mut path.0;
+    let mut src = 0;
+    let mut dst = 0;
+    let mut components = Vec::new();
+    while src < bytes.len() {
+        match bytes[src] as char {
+            '.' => {
+
+            }
+            c => {
+                bytes[dst] = c as u8;
+                dst += 1;
+            }
+        }
+        src += 1;
+    }
+    bytes.resize(dst, 0);
+}*/
+
+fn canon_path(pathstr: NStr) -> NString {
+    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(pathstr.as_bytes()));
+    let mut out = std::path::PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::Prefix(_) => panic!("unhandled"),
+            std::path::Component::RootDir => {
+                out.clear();
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::Normal(p) => {
+                out.push(p);
+            }
+        }
+    }
+    NString(out.into_os_string().as_bytes().to_vec())
+}
 
 pub fn read() -> Result<(), String> {
     let mut bytes = match std::fs::read("build.ninja") {
@@ -20,11 +63,12 @@ pub fn read() -> Result<(), String> {
         f: NString,
     ) -> FileId {
         // TODO: so many string copies :<
-        match hash.get(&f) {
+        let canon = canon_path(f.as_nstr());
+        match hash.get(&canon) {
             Some(id) => *id,
             None => {
-                let id = graph.add_file(f.clone());
-                hash.insert(f, id.clone());
+                let id = graph.add_file(canon.clone());
+                hash.insert(canon, id.clone());
                 id
             }
         }
@@ -61,6 +105,31 @@ pub fn read() -> Result<(), String> {
         };
     }
     println!("files {:?}", file_to_id);
-    println!("default {:?}", default);
+    println!("file count {}", file_to_id.len());
+    if let Some(d) = default {
+        println!("default {:?}", graph.file(d).name);
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn canon() {
+        assert_eq!(
+            canon_path(NString::from_str("foo").as_nstr()),
+            NString::from_str("foo")
+        );
+
+        assert_eq!(
+            canon_path(NString::from_str("foo/bar").as_nstr()),
+            NString::from_str("foo/bar")
+        );
+
+        assert_eq!(
+            canon_path(NString::from_str("foo/../bar").as_nstr()),
+            NString::from_str("bar")
+        );
+    }
 }

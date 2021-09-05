@@ -38,10 +38,10 @@ impl Intern {
     pub fn new() -> Intern {
         Intern {
             lookup: RawTable::new(),
-            endtab: EndTab{
+            endtab: EndTab {
                 data: Vec::new(),
                 ends: Vec::new(),
-            }
+            },
         }
     }
 

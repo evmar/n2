@@ -8,7 +8,7 @@ struct Hash(u64);
 pub struct FileId(usize);
 
 pub struct File {
-    name: NString,
+    pub name: NString,
     mtime: u64,
 }
 
