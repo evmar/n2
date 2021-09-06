@@ -2,7 +2,7 @@ extern crate getopts;
 extern crate hashbrown;
 
 mod graph;
-mod intern;
+//mod intern;
 mod load;
 mod parse;
 
