@@ -80,7 +80,18 @@ impl Graph {
     }
 
     pub fn add_build(&mut self, build: Build) {
+        let id = BuildId(self.builds.len());
+        for out in &build.outs {
+            let f = &mut self.files[out.index()];
+            match f.input {
+                Some(b) => panic!("double link {:?}", b),
+                None => f.input = Some(id),
+            }
+        }
         self.builds.push(build);
+    }
+    pub fn build(&self, id: BuildId) -> &Build {
+        &self.builds[id.index()]
     }
 }
 
@@ -140,15 +151,16 @@ impl State {
 }
 
 pub fn stat_recursive(graph: &Graph, state: &mut State, id: FileId) -> std::io::Result<()> {
-    let file = state.file_mut(id);
-    if file.mtime != MTime::Unknown {
+    if state.file(id).mtime != MTime::Unknown {
         return Ok(());
     }
     state.stat(&graph, id)?;
 
-    let file = state.file_mut(id);
-    println!("stat {:?} {:?}", graph.file(id), file);
+    if let Some(bid) = graph.file(id).input {
+        for fin in &graph.build(bid).ins {
+            stat_recursive(graph, state, *fin)?;
+        }
+    }
 
-    // stat inputs
     Ok(())
 }
