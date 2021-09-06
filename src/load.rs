@@ -26,7 +26,7 @@ use std::os::unix::ffi::OsStrExt;
 }*/
 
 fn canon_path(pathstr: NStr) -> NString {
-    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(pathstr.as_bytes()));
+    let path = pathstr.as_path();
     let mut out = std::path::PathBuf::new();
     for comp in path.components() {
         match comp {
@@ -108,6 +108,8 @@ pub fn read() -> Result<(), String> {
     println!("file count {}", file_to_id.len());
     if let Some(d) = default {
         println!("default {:?}", graph.file(d).name);
+        let mut state = graph::State::new(&graph);
+        graph::stat_recursive(&graph, &mut state, d).unwrap();
     }
     Ok(())
 }

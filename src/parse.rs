@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::os::unix::ffi::OsStrExt;
 use std::result::Result;
 
 #[derive(Debug)]
@@ -40,6 +41,9 @@ impl NStr<'_> {
     }
     pub fn as_bytes(&self) -> &[u8] {
         self.0
+    }
+    pub fn as_path(&self) -> &std::path::Path {
+        std::path::Path::new(std::ffi::OsStr::from_bytes(self.as_bytes()))
     }
 }
 
