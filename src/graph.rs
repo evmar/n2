@@ -3,10 +3,10 @@ use std::os::unix::fs::MetadataExt;
 
 use crate::parse::NString;
 
-#[derive(Debug, Copy, Clone)]
-struct Hash(u64);
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Hash(u64);
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FileId(usize);
 impl FileId {
     fn index(&self) -> usize {
@@ -14,7 +14,7 @@ impl FileId {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BuildId(usize);
 impl BuildId {
     fn index(&self) -> usize {
@@ -38,18 +38,7 @@ const UNIT_SEPARATOR: u8 = 0x1F;
 
 impl Build {
     fn cmdline(&self) -> String {
-        String::new()
-    }
-    fn hash(&self, g: &Graph) -> Hash {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        for id in &self.ins {
-            let inf = &g.files[id.0];
-            h.write(inf.name.as_bytes());
-            // XXX h.write_u64(inf.mtime);
-            h.write_u8(UNIT_SEPARATOR);
-        }
-        h.write(self.cmdline().as_bytes());
-        Hash(h.finish())
+        String::from("TODO")
     }
 }
 
@@ -95,22 +84,21 @@ impl Graph {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum MTime {
-    Unknown,
     Missing,
     Stamp(u32),
 }
 
 #[derive(Clone, Debug)]
 pub struct FileState {
-    mtime: MTime,
+    mtime: Option<MTime>,
     hash: Option<Hash>,
 }
 impl FileState {
     fn empty() -> FileState {
         FileState {
-            mtime: MTime::Unknown,
+            mtime: None,
             hash: None,
         }
     }
@@ -118,21 +106,71 @@ impl FileState {
 
 pub struct State {
     files: Vec<FileState>,
+    builds: Vec<Option<Hash>>,
 }
 
 impl State {
     pub fn new(graph: &Graph) -> Self {
         let mut files = Vec::new();
         files.resize(graph.files.len(), FileState::empty());
-        State { files: files }
+        let mut builds = Vec::new();
+        builds.resize(graph.builds.len(), None);
+        State {
+            files: files,
+            builds: builds,
+        }
     }
+
     fn file(&self, id: FileId) -> &FileState {
         &self.files[id.index()]
     }
     fn file_mut(&mut self, id: FileId) -> &mut FileState {
         &mut self.files[id.index()]
     }
-    fn stat(&mut self, graph: &Graph, id: FileId) -> std::io::Result<()> {
+
+    pub fn get_hash(&self, id: BuildId) -> Option<Hash> {
+        self.builds[id.index()]
+    }
+
+    pub fn hash(&mut self, graph: &Graph, id: BuildId) -> std::io::Result<Hash> {
+        let hash = match self.get_hash(id) {
+            Some(hash) => hash,
+            None => {
+                let hash = self.do_hash(graph, id)?;
+                self.builds[id.index()] = Some(hash);
+                hash
+            }
+        };
+        Ok(hash)
+    }
+
+    fn do_hash(&mut self, graph: &Graph, id: BuildId) -> std::io::Result<Hash> {
+        let build = graph.build(id);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for &id in &build.ins {
+            h.write(graph.file(id).name.as_nstr().as_bytes());
+            let mtime = self.mtime(graph, id)?;
+            let mtime_int = match mtime {
+                MTime::Missing => 0,
+                MTime::Stamp(t) => t + 1,
+            };
+            h.write_u32(mtime_int);
+            h.write_u8(UNIT_SEPARATOR);
+        }
+        h.write(build.cmdline().as_bytes());
+        Ok(Hash(h.finish()))
+    }
+
+    fn mtime(&mut self, graph: &Graph, id: FileId) -> std::io::Result<MTime> {
+        if let Some(mtime) = self.file(id).mtime {
+            return Ok(mtime);
+        }
+        let mtime = self.stat(graph, id)?;
+        self.file_mut(id).mtime = Some(mtime);
+        return Ok(mtime);
+    }
+
+    fn stat(&self, graph: &Graph, id: FileId) -> std::io::Result<MTime> {
         let name = &graph.file(id).name;
         // Consider: mtime_nsec(?)
         let mtime = match std::fs::metadata(name.as_nstr().as_path()) {
@@ -145,12 +183,11 @@ impl State {
                 }
             }
         };
-        self.file_mut(id).mtime = mtime;
-        Ok(())
+        Ok(mtime)
     }
 }
 
-pub fn stat_recursive(graph: &Graph, state: &mut State, id: FileId) -> std::io::Result<()> {
+/*pub fn stat_recursive(graph: &Graph, state: &mut State, id: FileId) -> std::io::Result<()> {
     if state.file(id).mtime != MTime::Unknown {
         return Ok(());
     }
@@ -164,3 +201,4 @@ pub fn stat_recursive(graph: &Graph, state: &mut State, id: FileId) -> std::io::
 
     Ok(())
 }
+*/

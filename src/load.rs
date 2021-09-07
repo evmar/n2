@@ -46,7 +46,7 @@ fn canon_path(pathstr: NStr) -> NString {
     NString(out.into_os_string().as_bytes().to_vec())
 }
 
-pub fn read() -> Result<(), String> {
+pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
     let mut bytes = match std::fs::read("build.ninja") {
         Ok(b) => b,
         Err(e) => return Err(format!("read build.ninja: {}", e)),
@@ -104,14 +104,8 @@ pub fn read() -> Result<(), String> {
             }
         };
     }
-    println!("files {:?}", file_to_id);
     println!("file count {}", file_to_id.len());
-    if let Some(d) = default {
-        println!("default {:?}", graph.file(d).name);
-        let mut state = graph::State::new(&graph);
-        graph::stat_recursive(&graph, &mut state, d).unwrap();
-    }
-    Ok(())
+    Ok((graph, default))
 }
 
 #[cfg(test)]

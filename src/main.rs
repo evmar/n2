@@ -5,6 +5,7 @@ mod graph;
 //mod intern;
 mod load;
 mod parse;
+mod work;
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
@@ -27,7 +28,22 @@ fn main() {
         std::env::set_current_dir(dir).unwrap();
     }
 
-    if let Err(err) = load::read() {
-        println!("ERROR: {}", err);
-    }
+    let (graph, default) = match load::read() {
+        Err(err) => {
+            println!("ERROR: {}", err);
+            return;
+        }
+        Ok(ok) => ok,
+    };
+
+    let target = default.expect("TODO");
+    println!("default {:?}", graph.file(target).name);
+    let last_state = graph::State::new(&graph);
+    let mut state = graph::State::new(&graph);
+    //graph::stat_recursive(&graph, &mut state, target).unwrap();
+    let mut work = work::Work::new();
+    let dirty = work
+        .want_file(&graph, &mut state, &last_state, target)
+        .unwrap();
+    println!("work {} {:?}", dirty, work);
 }

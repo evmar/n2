@@ -16,13 +16,13 @@ impl<'a> std::fmt::Debug for NString {
         f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(&self.0)))
     }
 }
+#[cfg(test)]
 impl NString {
     pub fn from_str(str: &str) -> NString {
         NString(str.as_bytes().to_vec())
     }
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
+}
+impl NString {
     pub fn as_nstr(&self) -> NStr {
         NStr(&self.0)
     }
@@ -141,7 +141,7 @@ impl<'a> Parser<'a> {
     pub fn new(text: &'a [u8]) -> Parser<'a> {
         Parser {
             scanner: Scanner { buf: text, ofs: 0 },
-            vars: Env(HashMap::new()),
+            vars: Env::new(),
         }
     }
     fn parse_error<T, S: Into<String>>(&self, msg: S) -> ParseResult<T> {
