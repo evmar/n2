@@ -85,7 +85,7 @@ pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
                 Some(id) => default = Some(*id),
                 None => return Err(format!("unknown default {:?}", f)),
             },
-            Statement::Rule(r) => println!("TODO {:?}", r),
+            Statement::Rule(_) => {} // println!("TODO {:?}", r),
             Statement::Build(b) => {
                 let ins: Vec<FileId> = b
                     .ins

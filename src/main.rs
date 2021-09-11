@@ -38,12 +38,11 @@ fn main() {
 
     let target = default.expect("TODO");
     println!("default {:?}", graph.file(target).name);
+    graph.dump_builds();
     let last_state = graph::State::new(&graph);
     let mut state = graph::State::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
-    let mut work = work::Work::new();
-    let dirty = work
-        .want_file(&graph, &mut state, &last_state, target)
-        .unwrap();
-    println!("work {} {:?}", dirty, work);
+    let mut work = work::Work::new(&graph);
+    work.want_file(&mut state, &last_state, target).unwrap();
+    work.run(&mut state).unwrap();
 }
