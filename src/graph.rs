@@ -37,6 +37,7 @@ pub struct File {
 
 #[derive(Debug)]
 pub struct Build {
+    pub cmdline: NString,
     pub ins: Vec<FileId>,
     pub outs: Vec<FileId>,
 }

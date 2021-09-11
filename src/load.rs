@@ -1,7 +1,7 @@
 use crate::graph::FileId;
 use crate::parse::{NStr, NString, Statement};
 use crate::{graph, parse};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use std::os::unix::ffi::OsStrExt;
 
@@ -43,7 +43,36 @@ fn canon_path(pathstr: NStr) -> NString {
             }
         }
     }
-    NString(out.into_os_string().as_bytes().to_vec())
+    NString::from(out.into_os_string().as_bytes().to_vec())
+}
+
+impl<'a> parse::Env<'a> for graph::Build {
+    fn get_var(&self, var: &NStr<'a>) -> Option<NString> {
+        match var.as_bytes() {
+            b"in" => Some(NString::from(vec!['i' as u8])),
+            b"out" => Some(NString::from(vec!['o' as u8])),
+            _ => None,
+        }
+    }
+}
+
+struct SavedRule<'a>(parse::Rule<'a>);
+
+impl<'a> PartialEq for SavedRule<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.name == other.0.name
+    }
+}
+impl<'a> Eq for SavedRule<'a> {}
+impl<'a> std::hash::Hash for SavedRule<'a> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.name.hash(state)
+    }
+}
+impl<'a> std::borrow::Borrow<NStr<'a>> for SavedRule<'a> {
+    fn borrow(&self) -> &NStr<'a> {
+        &self.0.name
+    }
 }
 
 pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
@@ -74,6 +103,11 @@ pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
         }
     }
 
+    let mut rules: HashSet<SavedRule> = HashSet::new();
+    rules.insert(SavedRule(parse::Rule {
+        name: NStr("phony".as_bytes()),
+        vars: parse::DelayEnv::new(),
+    }));
     let mut default: Option<FileId> = None;
     loop {
         let stmt = match p.read().map_err(|err| p.format_parse_error(err))? {
@@ -85,8 +119,14 @@ pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
                 Some(id) => default = Some(*id),
                 None => return Err(format!("unknown default {:?}", f)),
             },
-            Statement::Rule(_) => {} // println!("TODO {:?}", r),
+            Statement::Rule(r) => {
+                rules.insert(SavedRule(r));
+            }
             Statement::Build(b) => {
+                let rule = match rules.get(&b.rule) {
+                    Some(r) => r,
+                    None => return Err(format!("unknown rule {:?}", b.rule)),
+                };
                 let ins: Vec<FileId> = b
                     .ins
                     .into_iter()
@@ -97,10 +137,19 @@ pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
                     .into_iter()
                     .map(|f| file_id(&mut graph, &mut file_to_id, f))
                     .collect();
-                graph.add_build(graph::Build {
+                let mut build = graph::Build {
+                    cmdline: NString::from(Vec::new()),
                     ins: ins,
                     outs: outs,
-                });
+                };
+
+                let key = NStr(b"command");
+                if let Some(var) = b.vars.get(&key).or_else(|| rule.0.vars.get(&key)) {
+                    let envs: [&dyn parse::Env; 4] = [&build, &b.vars, &rule.0.vars, &p.vars];
+                    build.cmdline = var.evaluate(&envs);
+                }
+
+                graph.add_build(build);
             }
         };
     }

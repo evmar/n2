@@ -10,7 +10,7 @@ pub struct ParseError {
 type ParseResult<T> = Result<T, ParseError>;
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-pub struct NString(pub Vec<u8>);
+pub struct NString(Vec<u8>);
 impl<'a> std::fmt::Debug for NString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(&self.0)))
@@ -23,13 +23,16 @@ impl NString {
     }
 }
 impl NString {
+    pub fn from(vec: Vec<u8>) -> NString {
+        NString(vec)
+    }
     pub fn as_nstr(&self) -> NStr {
         NStr(&self.0)
     }
 }
 
 #[derive(Eq, PartialEq, Hash)]
-pub struct NStr<'a>(&'a [u8]);
+pub struct NStr<'a>(pub &'a [u8]);
 impl<'a> std::fmt::Debug for NStr<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(self.0)))
@@ -75,31 +78,30 @@ impl<'a> Scanner<'a> {
     }
 }
 
+pub trait Env<'a> {
+    fn get_var(&self, var: &NStr<'a>) -> Option<NString>;
+}
+
 #[derive(Debug)]
 enum EvalPart<'a> {
     Literal(NStr<'a>),
     VarRef(NStr<'a>),
 }
 #[derive(Debug)]
-struct EvalString<'a> {
-    parts: Vec<EvalPart<'a>>,
-}
+pub struct EvalString<'a>(Vec<EvalPart<'a>>);
 
-#[derive(Debug)]
-pub struct Env<'a>(HashMap<NStr<'a>, NString>);
-impl<'a> Env<'a> {
-    pub fn new() -> Env<'a> {
-        Env(HashMap::new())
-    }
-
-    fn evaluate(&self, eval: &EvalString) -> NString {
+impl<'a> EvalString<'a> {
+    pub fn evaluate(&self, envs: &[&dyn Env<'a>]) -> NString {
         let mut val = Vec::new();
-        for part in &eval.parts {
+        for part in &self.0 {
             match part {
                 EvalPart::Literal(s) => val.extend_from_slice(s.0),
                 EvalPart::VarRef(v) => {
-                    if let Some(v) = self.0.get(&v) {
-                        val.extend_from_slice(&v.0);
+                    for env in envs {
+                        if let Some(v) = env.get_var(v) {
+                            val.extend_from_slice(&v.0);
+                            break;
+                        }
                     }
                 }
             }
@@ -109,12 +111,38 @@ impl<'a> Env<'a> {
 }
 
 #[derive(Debug)]
+pub struct ResolvedEnv<'a>(HashMap<NStr<'a>, NString>);
+impl<'a> ResolvedEnv<'a> {
+    pub fn new() -> ResolvedEnv<'a> {
+        ResolvedEnv(HashMap::new())
+    }
+}
+impl<'a> Env<'a> for ResolvedEnv<'a> {
+    fn get_var(&self, var: &NStr<'a>) -> Option<NString> {
+        self.0.get(var).map(|val| val.clone())
+    }
+}
+
+#[derive(Debug)]
 pub struct DelayEnv<'a>(HashMap<NStr<'a>, EvalString<'a>>);
+impl<'a> DelayEnv<'a> {
+    pub fn new() -> Self {
+        DelayEnv(HashMap::new())
+    }
+    pub fn get(&self, key: &NStr<'a>) -> Option<&EvalString<'a>> {
+        self.0.get(key)
+    }
+}
+impl<'a> Env<'a> for DelayEnv<'a> {
+    fn get_var(&self, var: &NStr<'a>) -> Option<NString> {
+        self.get(var).map(|val| val.evaluate(&[]))
+    }
+}
 
 #[derive(Debug)]
 pub struct Rule<'a> {
-    name: NStr<'a>,
-    vars: DelayEnv<'a>,
+    pub name: NStr<'a>,
+    pub vars: DelayEnv<'a>,
 }
 
 #[derive(Debug)]
@@ -134,14 +162,14 @@ pub enum Statement<'a> {
 
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
-    vars: Env<'a>,
+    pub vars: ResolvedEnv<'a>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(text: &'a [u8]) -> Parser<'a> {
         Parser {
             scanner: Scanner { buf: text, ofs: 0 },
-            vars: Env::new(),
+            vars: ResolvedEnv::new(),
         }
     }
     fn parse_error<T, S: Into<String>>(&self, msg: S) -> ParseResult<T> {
@@ -184,8 +212,7 @@ impl<'a> Parser<'a> {
                         b"build" => return Ok(Some(Statement::Build(self.read_build()?))),
                         b"default" => return Ok(Some(Statement::Default(self.read_ident()?))),
                         ident => {
-                            let valvar = self.read_vardef()?;
-                            let val = self.vars.evaluate(&valvar);
+                            let val = self.read_vardef()?.evaluate(&[&self.vars]);
                             self.vars.0.insert(NStr(ident), val);
                         }
                     }
@@ -329,7 +356,7 @@ impl<'a> Parser<'a> {
         if end > ofs {
             parts.push(EvalPart::Literal(NStr(&self.scanner.buf[ofs..end])));
         }
-        Ok(EvalString { parts: parts })
+        Ok(EvalString(parts))
     }
 
     fn read_path(&mut self) -> ParseResult<Option<NString>> {
