@@ -65,7 +65,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         match var {
             "in" => Some(self.file_list(&self.build.ins)),
-            "out" => Some(self.file_list(&self.build.outs)),
+            "out" => Some(self.file_list(&self.build.outs[0..self.build.explicit_outs])),
             _ => None,
         }
     }
@@ -167,6 +167,7 @@ impl Loader {
                         cmdline: None,
                         ins: ins,
                         outs: outs,
+                        explicit_outs: b.explicit_outs,
                     };
 
                     let rule = match self.rules.get(b.rule) {

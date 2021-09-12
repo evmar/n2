@@ -65,6 +65,7 @@ pub struct Build<'a> {
     pub rule: &'a str,
     pub line: usize,
     pub outs: Vec<String>,
+    pub explicit_outs: usize,
     pub ins: Vec<String>,
     pub vars: LazyVars,
 }
@@ -187,17 +188,24 @@ impl<'a> Parser<'a> {
         let mut outs = Vec::new();
         loop {
             self.skip_spaces();
-            if self.scanner.peek() == '|' {
-                // TODO implicit output
-                self.scanner.next();
-                self.skip_spaces();
-            }
             match self.read_path()? {
                 Some(path) => outs.push(path),
                 None => break,
             }
         }
-        self.skip_spaces();
+        let explicit_outs = outs.len();
+
+        if self.scanner.peek() == '|' {
+            self.scanner.next();
+            loop {
+                self.skip_spaces();
+                match self.read_path()? {
+                    Some(path) => outs.push(path),
+                    None => break,
+                }
+            }
+        }
+
         self.expect(':')?;
         self.skip_spaces();
         let rule = self.read_ident()?;
@@ -222,6 +230,7 @@ impl<'a> Parser<'a> {
             line: line,
             rule: rule,
             outs: outs,
+            explicit_outs: explicit_outs,
             ins: ins,
             vars: vars,
         })

@@ -50,6 +50,7 @@ pub struct Build {
     pub cmdline: Option<String>,
     pub ins: Vec<FileId>,
     pub outs: Vec<FileId>,
+    pub explicit_outs: usize,
 }
 
 const UNIT_SEPARATOR: u8 = 0x1F;
