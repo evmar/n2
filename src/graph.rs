@@ -34,7 +34,19 @@ pub struct File {
 }
 
 #[derive(Debug)]
+pub struct FileLoc {
+    pub filename: std::rc::Rc<String>,
+    pub line: usize,
+}
+impl std::fmt::Display for FileLoc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(f, "{}:{}", self.filename, self.line)
+    }
+}
+
+#[derive(Debug)]
 pub struct Build {
+    pub location: FileLoc,
     pub cmdline: Option<String>,
     pub ins: Vec<FileId>,
     pub outs: Vec<FileId>,
@@ -42,13 +54,6 @@ pub struct Build {
 
 const UNIT_SEPARATOR: u8 = 0x1F;
 
-impl Build {
-    fn cmdline(&self) -> String {
-        String::from("TODO")
-    }
-}
-
-#[derive(Debug)]
 pub struct Graph {
     files: Vec<File>,
     builds: Vec<Build>,
@@ -168,7 +173,7 @@ impl State {
             h.write_u32(mtime_int);
             h.write_u8(UNIT_SEPARATOR);
         }
-        h.write(build.cmdline().as_bytes());
+        h.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
         Hash(h.finish())
     }
 

@@ -11,9 +11,13 @@ type ParseResult<T> = Result<T, ParseError>;
 struct Scanner<'a> {
     buf: &'a str,
     ofs: usize,
+    line: usize,
 }
 
 impl<'a> Scanner<'a> {
+    fn new(buf: &'a str) -> Self {
+        Scanner { buf: buf, ofs: 0, line: 1 }
+    }
     fn slice(&self, start: usize, end: usize) -> &'a str {
         unsafe { self.buf.get_unchecked(start..end) }
     }
@@ -21,6 +25,7 @@ impl<'a> Scanner<'a> {
         self.buf.as_bytes()[self.ofs] as char
     }
     fn next(&mut self) {
+        if self.peek() == '\n' { self.line += 1; }
         if self.ofs == self.buf.len() {
             panic!("scanned past end")
         }
@@ -31,6 +36,7 @@ impl<'a> Scanner<'a> {
             panic!("back at start")
         }
         self.ofs -= 1;
+        if self.peek() == '\n' { self.line -= 1; }
     }
     fn read(&mut self) -> char {
         let c = self.peek();
@@ -127,6 +133,7 @@ pub struct Rule {
 #[derive(Debug)]
 pub struct Build<'a> {
     pub rule: &'a str,
+    pub line: usize,
     pub outs: Vec<String>,
     pub ins: Vec<String>,
     pub vars: LazyVars,
@@ -148,7 +155,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(text: &'a str) -> Parser<'a> {
         Parser {
-            scanner: Scanner { buf: text, ofs: 0 },
+            scanner: Scanner::new(text),
             vars: ResolvedEnv::new(),
         }
     }
@@ -246,6 +253,7 @@ impl<'a> Parser<'a> {
     }
 
     fn read_build(&mut self) -> ParseResult<Build<'a>> {
+        let line = self.scanner.line;
         let mut outs = Vec::new();
         loop {
             self.skip_spaces();
@@ -281,6 +289,7 @@ impl<'a> Parser<'a> {
         self.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Build {
+            line: line,
             rule: rule,
             outs: outs,
             ins: ins,

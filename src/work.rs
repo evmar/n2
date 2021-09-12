@@ -1,7 +1,6 @@
 use crate::graph::*;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug)]
 pub struct Work<'a> {
     graph: &'a Graph,
     files: HashMap<FileId, bool>,
@@ -87,18 +86,23 @@ impl<'a> Work<'a> {
         Ok(dirty)
     }
 
-    fn recheck_ready(&mut self, state: &State, build: &Build) -> bool {
-        println!("recheck {:?}", build.cmdline);
-        build.ins.iter().all(|&id| {
-            let h = state.file(id).hash.is_some();
-            println!("  {:?} {}", id, h);
-            h
-        })
+    fn recheck_ready(&mut self, state: &State, id: BuildId) -> bool {
+        let build = self.graph.build(id);
+        println!("  recheck {:?} {}", id, build.location);
+        for &id in &build.ins {
+            let file = self.graph.file(id);
+            if state.file(id).hash.is_none() {
+                println!("    {:?} {} not ready", id, file.name);
+                return false;
+            }
+        }
+        println!("    now ready");
+        true
     }
 
     fn build_finished(&mut self, state: &mut State, id: BuildId) {
         let build = self.graph.build(id);
-        println!("finished {:?}", build);
+        println!("finished {:?} {}", id, build.location);
         let hash = state.hash(self.graph, id);
         for &id in &build.outs {
             let file = self.graph.file(id);
@@ -109,10 +113,9 @@ impl<'a> Work<'a> {
                 if !self.want.contains(&id) {
                     continue;
                 }
-                if !self.recheck_ready(state, self.graph.build(id)) {
+                if !self.recheck_ready(state, id) {
                     continue;
                 }
-                println!("now ready: {:?}", id);
                 self.ready.insert(id);
             }
         }
@@ -129,7 +132,7 @@ impl<'a> Work<'a> {
             self.want.remove(&id);
             self.ready.remove(&id);
             let build = self.graph.build(id);
-            println!("run {:?} {:?}", id, build);
+            println!("run {:?} {} {:?}", id, build.location, build.cmdline);
             self.build_finished(state, id);
         }
         Ok(())

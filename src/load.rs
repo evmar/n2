@@ -131,6 +131,7 @@ impl Loader {
     }
 
     fn read_file(&mut self, path: &str) -> Result<(), String> {
+        let filename = std::rc::Rc::new(path.to_owned());
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
@@ -159,6 +160,7 @@ impl Loader {
                     let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
                     let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.file_id(f)).collect();
                     let mut build = graph::Build {
+                        location: graph::FileLoc{filename:filename.clone(), line:b.line},
                         cmdline: None,
                         ins: ins,
                         outs: outs,
