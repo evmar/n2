@@ -44,11 +44,27 @@ fn canon_path(pathstr: &str) -> String {
     String::from(out.to_str().unwrap())
 }
 
-impl parse::Env for graph::Build {
+struct BuildImplicitVars<'a> {
+    graph: &'a graph::Graph,
+    build: &'a graph::Build,
+}
+impl<'a> BuildImplicitVars<'a> {
+    fn file_list(&self, ids: &[FileId]) -> String {
+        let mut out = String::new();
+        for &id in ids {
+            if out.len() > 0 {
+                out.push(' ');
+            }
+            out.push_str(&self.graph.file(id).name);
+        }
+        out
+    }
+}
+impl<'a> parse::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         match var.as_bytes() {
-            b"in" => Some(String::from("$in$")),
-            b"out" => Some(String::from("$out$")),
+            b"in" => Some(self.file_list(&self.build.ins)),
+            b"out" => Some(self.file_list(&self.build.outs)),
             _ => None,
         }
     }
@@ -152,7 +168,11 @@ impl Loader {
                         None => return Err(format!("unknown rule {:?}", b.rule)),
                     };
                     let key = "command";
-                    let envs: [&dyn parse::Env; 4] = [&build, &b.vars, &rule.vars, &parser.vars];
+                    let implicit_vars = BuildImplicitVars{
+                        graph: &self.graph,
+                        build: &build,
+                    };
+                    let envs: [&dyn parse::Env; 4] = [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
                     if let Some(var) = b.vars.get(key) {
                         build.cmdline = var.evaluate(&envs);
                     } else if let Some(var) = rule.vars.get(key) {
