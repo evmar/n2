@@ -92,17 +92,6 @@ impl Graph {
     pub fn build(&self, id: BuildId) -> &Build {
         &self.builds[id.index()]
     }
-    pub fn dump_builds(&self) {
-        for (n, build) in self.builds.iter().enumerate() {
-            println!(
-                "  b{} [in {:?}] [out {:?}] {:?}",
-                n,
-                build.ins,
-                build.outs,
-                self.files[build.outs[0].index()].name
-            );
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

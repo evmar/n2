@@ -38,7 +38,6 @@ fn main() {
 
     let target = default.expect("TODO");
     println!("default {:?}", graph.file(target).name);
-    graph.dump_builds();
     let last_state = graph::State::new(&graph);
     let mut state = graph::State::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
