@@ -88,7 +88,7 @@ impl<'a> Work<'a> {
     }
 
     fn recheck_ready(&mut self, state: &State, build: &Build) -> bool {
-        println!("recheck {:?}", build);
+        println!("recheck {:?}", build.cmdline);
         build.ins.iter().all(|&id| {
             let h = state.file(id).hash.is_some();
             println!("  {:?} {}", id, h);
@@ -109,7 +109,6 @@ impl<'a> Work<'a> {
                 if !self.want.contains(&id) {
                     continue;
                 }
-                println!("recheck {:?}", id);
                 if !self.recheck_ready(state, self.graph.build(id)) {
                     continue;
                 }

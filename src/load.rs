@@ -153,7 +153,6 @@ pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
             }
         };
     }
-    println!("file count {}", file_to_id.len());
     Ok((graph, default))
 }
 
