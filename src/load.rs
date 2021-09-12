@@ -130,7 +130,7 @@ impl Loader {
                 Some(s) => s,
             };
             match stmt {
-                Statement::Include(f) => println!("TODO: include {:?}", f),
+                Statement::Include(f) => self.read_file(&f)?,
                 Statement::Default(f) => match self.file_to_id.get(f) {
                     Some(id) => self.default = Some(*id),
                     None => return Err(format!("unknown default {:?}", f)),
