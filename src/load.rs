@@ -1,7 +1,7 @@
 use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::{graph, parse};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /*fn canon_path(path: &mut String) {
     let bytes = &mut path.0;
@@ -44,7 +44,7 @@ fn canon_path(pathstr: &str) -> String {
     String::from(out.to_str().unwrap())
 }
 
-impl<'a> parse::Env<'a> for graph::Build {
+impl parse::Env for graph::Build {
     fn get_var(&self, var: &str) -> Option<String> {
         match var.as_bytes() {
             b"in" => Some(String::from("$in$")),
@@ -54,100 +54,123 @@ impl<'a> parse::Env<'a> for graph::Build {
     }
 }
 
-struct SavedRule<'a>(parse::Rule<'a>);
+struct SavedRule(parse::Rule);
 
-impl<'a> PartialEq for SavedRule<'a> {
+impl PartialEq for SavedRule {
     fn eq(&self, other: &Self) -> bool {
         self.0.name == other.0.name
     }
 }
-impl<'a> Eq for SavedRule<'a> {}
-impl<'a> std::hash::Hash for SavedRule<'a> {
+impl Eq for SavedRule {}
+impl std::hash::Hash for SavedRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.name.hash(state)
     }
 }
-impl<'a> std::borrow::Borrow<str> for SavedRule<'a> {
+impl std::borrow::Borrow<str> for SavedRule {
     fn borrow(&self) -> &str {
         &self.0.name
     }
 }
 
-pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
-    let mut bytes = match std::fs::read("build.ninja") {
-        Ok(b) => b,
-        Err(e) => return Err(format!("read build.ninja: {}", e)),
-    };
-    bytes.push(0);
+struct Loader {
+    graph: graph::Graph,
+    file_to_id: HashMap<String, FileId>,
+    default: Option<FileId>,
+    rules: HashMap<String, parse::Rule>,
+}
 
-    let mut p = parse::Parser::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
+impl Loader {
+    fn new() -> Self {
+        let mut loader = Loader {
+            graph: graph::Graph::new(),
+            file_to_id: HashMap::new(),
+            default: None,
+            rules: HashMap::new(),
+        };
 
-    let mut graph = graph::Graph::new();
-    let mut file_to_id: HashMap<String, FileId> = HashMap::new();
-    fn file_id(graph: &mut graph::Graph, hash: &mut HashMap<String, FileId>, f: String) -> FileId {
+        loader.rules.insert(
+            "phony".to_owned(),
+            parse::Rule {
+                name: "phony".to_owned(),
+                vars: parse::LazyVars::new(),
+            },
+        );
+
+        loader
+    }
+
+    fn file_id(&mut self, f: String) -> FileId {
         // TODO: so many string copies :<
         let canon = canon_path(&f);
-        match hash.get(&canon) {
+        match self.file_to_id.get(&canon) {
             Some(id) => *id,
             None => {
-                let id = graph.add_file(canon.clone());
-                hash.insert(canon, id.clone());
+                let id = self.graph.add_file(canon.clone());
+                self.file_to_id.insert(canon, id.clone());
                 id
             }
         }
     }
 
-    let mut rules: HashSet<SavedRule> = HashSet::new();
-    rules.insert(SavedRule(parse::Rule {
-        name: "phony",
-        vars: parse::DelayEnv::new(),
-    }));
-    let mut default: Option<FileId> = None;
-    loop {
-        let stmt = match p.read().map_err(|err| p.format_parse_error(err))? {
-            None => break,
-            Some(s) => s,
+    fn read_file(&mut self, path: &str) -> Result<(), String> {
+        let mut bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => return Err(format!("read {}: {}", path, e)),
         };
-        match stmt {
-            Statement::Default(f) => match file_to_id.get(f) {
-                Some(id) => default = Some(*id),
-                None => return Err(format!("unknown default {:?}", f)),
-            },
-            Statement::Rule(r) => {
-                rules.insert(SavedRule(r));
-            }
-            Statement::Build(b) => {
-                let rule = match rules.get(b.rule) {
-                    Some(r) => r,
-                    None => return Err(format!("unknown rule {:?}", b.rule)),
-                };
-                let ins: Vec<FileId> = b
-                    .ins
-                    .into_iter()
-                    .map(|f| file_id(&mut graph, &mut file_to_id, f))
-                    .collect();
-                let outs: Vec<FileId> = b
-                    .outs
-                    .into_iter()
-                    .map(|f| file_id(&mut graph, &mut file_to_id, f))
-                    .collect();
-                let mut build = graph::Build {
-                    cmdline: String::from(""),
-                    ins: ins,
-                    outs: outs,
-                };
+        bytes.push(0);
 
-                let key = "command";
-                if let Some(var) = b.vars.get(&key).or_else(|| rule.0.vars.get(&key)) {
-                    let envs: [&dyn parse::Env; 4] = [&build, &b.vars, &rule.0.vars, &p.vars];
-                    build.cmdline = var.evaluate(&envs);
+        let mut parser = parse::Parser::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
+        loop {
+            let stmt = match parser
+                .read()
+                .map_err(|err| parser.format_parse_error(err))?
+            {
+                None => break,
+                Some(s) => s,
+            };
+            match stmt {
+                Statement::Include(f) => println!("TODO: include {:?}", f),
+                Statement::Default(f) => match self.file_to_id.get(f) {
+                    Some(id) => self.default = Some(*id),
+                    None => return Err(format!("unknown default {:?}", f)),
+                },
+                Statement::Rule(r) => {
+                    self.rules.insert(r.name.clone(), r);
                 }
+                Statement::Build(b) => {
+                    let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
+                    let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.file_id(f)).collect();
+                    let mut build = graph::Build {
+                        cmdline: String::new(),
+                        ins: ins,
+                        outs: outs,
+                    };
 
-                graph.add_build(build);
-            }
-        };
+                    let rule = match self.rules.get(b.rule) {
+                        Some(r) => r,
+                        None => return Err(format!("unknown rule {:?}", b.rule)),
+                    };
+                    let key = "command";
+                    let envs: [&dyn parse::Env; 4] = [&build, &b.vars, &rule.vars, &parser.vars];
+                    if let Some(var) = b.vars.get(key) {
+                        build.cmdline = var.evaluate(&envs);
+                    } else if let Some(var) = rule.vars.get(key) {
+                        build.cmdline = var.evaluate(&envs);
+                    }
+
+                    self.graph.add_build(build);
+                }
+            };
+        }
+        Ok(())
     }
-    Ok((graph, default))
+}
+
+pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
+    let mut loader = Loader::new();
+    loader.read_file("build.ninja")?;
+    Ok((loader.graph, loader.default))
 }
 
 #[cfg(test)]

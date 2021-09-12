@@ -39,27 +39,27 @@ impl<'a> Scanner<'a> {
     }
 }
 
-pub trait Env<'a> {
-    fn get_var(&self, var: &'a str) -> Option<String>;
+pub trait Env {
+    fn get_var(&self, var: &str) -> Option<String>;
 }
 
 #[derive(Debug)]
-enum EvalPart<'a> {
-    Literal(&'a str),
-    VarRef(&'a str),
+enum EvalPart<T: AsRef<str>> {
+    Literal(T),
+    VarRef(T),
 }
 #[derive(Debug)]
-pub struct EvalString<'a>(Vec<EvalPart<'a>>);
+pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
 
-impl<'a> EvalString<'a> {
-    pub fn evaluate(&self, envs: &[&dyn Env<'a>]) -> String {
+impl<T: AsRef<str>> EvalString<T> {
+    pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
         let mut val = String::new();
         for part in &self.0 {
             match part {
-                EvalPart::Literal(s) => val.push_str(s),
+                EvalPart::Literal(s) => val.push_str(s.as_ref()),
                 EvalPart::VarRef(v) => {
                     for env in envs {
-                        if let Some(v) = env.get_var(v) {
+                        if let Some(v) = env.get_var(v.as_ref()) {
                             val.push_str(&v);
                             break;
                         }
@@ -78,32 +78,37 @@ impl<'a> ResolvedEnv<'a> {
         ResolvedEnv(HashMap::new())
     }
 }
-impl<'a> Env<'a> for ResolvedEnv<'a> {
-    fn get_var(&self, var: &'a str) -> Option<String> {
+impl<'a> Env for ResolvedEnv<'a> {
+    fn get_var(&self, var: &str) -> Option<String> {
         self.0.get(var).map(|val| val.clone())
     }
 }
 
 #[derive(Debug)]
-pub struct DelayEnv<'a>(HashMap<&'a str, EvalString<'a>>);
-impl<'a> DelayEnv<'a> {
+pub struct LazyVars<T: AsRef<str>>(Vec<(T, EvalString<T>)>);
+impl<T: AsRef<str>> LazyVars<T> {
     pub fn new() -> Self {
-        DelayEnv(HashMap::new())
+        LazyVars(Vec::new())
     }
-    pub fn get(&self, key: &'a str) -> Option<&EvalString<'a>> {
-        self.0.get(key)
+    pub fn get(&self, key: &str) -> Option<&EvalString<T>> {
+        for (k, v) in &self.0 {
+            if k.as_ref() == key {
+                return Some(v);
+            }
+        }
+        None
     }
 }
-impl<'a> Env<'a> for DelayEnv<'a> {
-    fn get_var(&self, var: &'a str) -> Option<String> {
+impl<'a, T: AsRef<str>> Env for LazyVars<T> {
+    fn get_var(&self, var: &str) -> Option<String> {
         self.get(var).map(|val| val.evaluate(&[]))
     }
 }
 
 #[derive(Debug)]
-pub struct Rule<'a> {
-    pub name: &'a str,
-    pub vars: DelayEnv<'a>,
+pub struct Rule {
+    pub name: String,
+    pub vars: LazyVars<String>,
 }
 
 #[derive(Debug)]
@@ -111,14 +116,15 @@ pub struct Build<'a> {
     pub rule: &'a str,
     pub outs: Vec<String>,
     pub ins: Vec<String>,
-    pub vars: DelayEnv<'a>,
+    pub vars: LazyVars<&'a str>,
 }
 
 #[derive(Debug)]
 pub enum Statement<'a> {
-    Rule(Rule<'a>),
+    Rule(Rule),
     Build(Build<'a>),
     Default(&'a str),
+    Include(String),
 }
 
 pub struct Parser<'a> {
@@ -172,6 +178,13 @@ impl<'a> Parser<'a> {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
                         "build" => return Ok(Some(Statement::Build(self.read_build()?))),
                         "default" => return Ok(Some(Statement::Default(self.read_ident()?))),
+                        "include" => {
+                            let path = match self.read_path()? {
+                                None => return self.parse_error("expected path"),
+                                Some(p) => p,
+                            };
+                            return Ok(Some(Statement::Include(path)));
+                        }
                         ident => {
                             let val = self.read_vardef()?.evaluate(&[&self.vars]);
                             self.vars.0.insert(ident, val);
@@ -190,32 +203,32 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn read_vardef(&mut self) -> ParseResult<EvalString<'a>> {
+    fn read_vardef(&mut self) -> ParseResult<EvalString<&'a str>> {
         self.skip_spaces();
         self.expect('=')?;
         self.skip_spaces();
         return self.read_eval();
     }
 
-    fn read_scoped_vars(&mut self) -> ParseResult<DelayEnv<'a>> {
-        let mut vars = DelayEnv(HashMap::new());
+    fn read_scoped_vars(&mut self) -> ParseResult<LazyVars<&'a str>> {
+        let mut vars = LazyVars(Vec::new());
         while self.scanner.peek() == ' ' {
             self.skip_spaces();
             let name = self.read_ident()?;
             self.skip_spaces();
             let val = self.read_vardef()?;
-            vars.0.insert(name, val);
+            vars.0.push((name, val));
         }
         Ok(vars)
     }
 
-    fn read_rule(&mut self) -> ParseResult<Rule<'a>> {
+    fn read_rule(&mut self) -> ParseResult<Rule> {
         let name = self.read_ident()?;
         self.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Rule {
-            name: name,
-            vars: vars,
+            name: name.to_owned(),
+            vars: LazyVars(Vec::new()), // XXXvars,
         })
     }
 
@@ -274,7 +287,7 @@ impl<'a> Parser<'a> {
         let start = self.scanner.ofs;
         loop {
             match self.scanner.read() {
-                'a'..='z' | '_' => {}
+                'a'..='z' | 'A'..='Z' | '_' => {}
                 _ => {
                     self.scanner.back();
                     break;
@@ -295,7 +308,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn read_eval(&mut self) -> ParseResult<EvalString<'a>> {
+    fn read_eval(&mut self) -> ParseResult<EvalString<&'a str>> {
         let mut parts = Vec::new();
         let mut ofs = self.scanner.ofs;
         loop {
@@ -354,7 +367,7 @@ impl<'a> Parser<'a> {
         Ok(Some(path))
     }
 
-    fn read_escape(&mut self) -> ParseResult<EvalPart<'a>> {
+    fn read_escape(&mut self) -> ParseResult<EvalPart<&'a str>> {
         match self.scanner.peek() {
             '\n' => {
                 self.scanner.next();
