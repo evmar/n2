@@ -72,12 +72,15 @@ impl<T: AsRef<str>> EvalString<T> {
 }
 impl EvalString<&str> {
     pub fn to_owned(self) -> EvalString<String> {
-        EvalString(self.0.into_iter().map(|part| {
-            match part {
-                EvalPart::Literal(s) => EvalPart::Literal(s.to_owned()),
-                EvalPart::VarRef(s) => EvalPart::VarRef(s.to_owned()),
-            }
-        }).collect())
+        EvalString(
+            self.0
+                .into_iter()
+                .map(|part| match part {
+                    EvalPart::Literal(s) => EvalPart::Literal(s.to_owned()),
+                    EvalPart::VarRef(s) => EvalPart::VarRef(s.to_owned()),
+                })
+                .collect(),
+        )
     }
 }
 
@@ -246,7 +249,8 @@ impl<'a> Parser<'a> {
         let mut outs = Vec::new();
         loop {
             self.skip_spaces();
-            if self.scanner.peek() == '|' {  // TODO implicit output
+            if self.scanner.peek() == '|' {
+                // TODO implicit output
                 self.scanner.next();
                 self.skip_spaces();
             }

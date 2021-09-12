@@ -31,6 +31,7 @@ fn canon_path(pathstr: &str) -> String {
             std::path::Component::Prefix(_) => panic!("unhandled"),
             std::path::Component::RootDir => {
                 out.clear();
+                out.push("/");
             }
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
@@ -168,11 +169,12 @@ impl Loader {
                         None => return Err(format!("unknown rule {:?}", b.rule)),
                     };
                     let key = "command";
-                    let implicit_vars = BuildImplicitVars{
+                    let implicit_vars = BuildImplicitVars {
                         graph: &self.graph,
                         build: &build,
                     };
-                    let envs: [&dyn parse::Env; 4] = [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
+                    let envs: [&dyn parse::Env; 4] =
+                        [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
                     if let Some(var) = b.vars.get(key).or_else(|| rule.vars.get(key)) {
                         build.cmdline = var.evaluate(&envs);
                     }
@@ -196,10 +198,12 @@ mod tests {
     use super::*;
     #[test]
     fn canon() {
-        assert_eq!(canon_path("foo"), String::from("foo"));
+        assert_eq!(canon_path("foo"), "foo");
 
-        assert_eq!(canon_path("foo/bar"), String::from("foo/bar"));
+        assert_eq!(canon_path("foo/bar"), "foo/bar");
 
-        assert_eq!(canon_path("foo/../bar"), String::from("bar"));
+        assert_eq!(canon_path("foo/../bar"), "bar");
+
+        assert_eq!(canon_path("/foo/../bar"), "/bar");
     }
 }
