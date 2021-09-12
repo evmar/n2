@@ -64,7 +64,7 @@ impl<'a> BuildImplicitVars<'a> {
 impl<'a> eval::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         match var {
-            "in" => Some(self.file_list(&self.build.ins)),
+            "in" => Some(self.file_list(&self.build.ins[0..self.build.explicit_ins])),
             "out" => Some(self.file_list(&self.build.outs[0..self.build.explicit_outs])),
             _ => None,
         }
@@ -166,6 +166,8 @@ impl Loader {
                         },
                         cmdline: None,
                         ins: ins,
+                        explicit_ins: b.explicit_ins,
+                        implicit_ins: b.implicit_ins,
                         outs: outs,
                         explicit_outs: b.explicit_outs,
                     };

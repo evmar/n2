@@ -67,6 +67,8 @@ pub struct Build<'a> {
     pub outs: Vec<String>,
     pub explicit_outs: usize,
     pub ins: Vec<String>,
+    pub explicit_ins: usize,
+    pub implicit_ins: usize,
     pub vars: LazyVars,
 }
 
@@ -209,21 +211,45 @@ impl<'a> Parser<'a> {
         self.expect(':')?;
         self.skip_spaces();
         let rule = self.read_ident()?;
+
         let mut ins = Vec::new();
         loop {
             self.skip_spaces();
-            if self.scanner.peek() == '|' {
-                self.scanner.next();
-                if self.scanner.peek() == '|' {
-                    self.scanner.next();
-                }
-                self.skip_spaces();
-            }
             match self.read_path()? {
                 Some(path) => ins.push(path),
                 None => break,
             }
         }
+        let explicit_ins = ins.len();
+
+        if self.scanner.peek() == '|' {
+            self.scanner.next();
+            if self.scanner.peek() == '|' {
+                self.scanner.back();
+            } else {
+                loop {
+                    self.skip_spaces();
+                    match self.read_path()? {
+                        Some(path) => ins.push(path),
+                        None => break,
+                    }
+                }
+            }
+        }
+        let implicit_ins = ins.len() - explicit_ins;
+
+        if self.scanner.peek() == '|' {
+            self.scanner.next();
+            self.expect('|')?;
+            loop {
+                self.skip_spaces();
+                match self.read_path()? {
+                    Some(path) => ins.push(path),
+                    None => break,
+                }
+            }
+        }
+
         self.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Build {
@@ -232,6 +258,8 @@ impl<'a> Parser<'a> {
             outs: outs,
             explicit_outs: explicit_outs,
             ins: ins,
+            explicit_ins: explicit_ins,
+            implicit_ins: implicit_ins,
             vars: vars,
         })
     }
