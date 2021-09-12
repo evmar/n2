@@ -173,9 +173,7 @@ impl Loader {
                         build: &build,
                     };
                     let envs: [&dyn parse::Env; 4] = [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
-                    if let Some(var) = b.vars.get(key) {
-                        build.cmdline = var.evaluate(&envs);
-                    } else if let Some(var) = rule.vars.get(key) {
+                    if let Some(var) = b.vars.get(key).or_else(|| rule.vars.get(key)) {
                         build.cmdline = var.evaluate(&envs);
                     }
 
