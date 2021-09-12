@@ -1,6 +1,6 @@
 use crate::graph::FileId;
 use crate::parse::Statement;
-use crate::{graph, parse};
+use crate::{eval, graph, parse};
 use std::collections::HashMap;
 
 /*fn canon_path(path: &mut String) {
@@ -61,7 +61,7 @@ impl<'a> BuildImplicitVars<'a> {
         out
     }
 }
-impl<'a> parse::Env for BuildImplicitVars<'a> {
+impl<'a> eval::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         match var {
             "in" => Some(self.file_list(&self.build.ins)),
@@ -110,7 +110,7 @@ impl Loader {
             "phony".to_owned(),
             parse::Rule {
                 name: "phony".to_owned(),
-                vars: parse::LazyVars::new(),
+                vars: eval::LazyVars::new(),
             },
         );
 
@@ -160,7 +160,10 @@ impl Loader {
                     let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
                     let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.file_id(f)).collect();
                     let mut build = graph::Build {
-                        location: graph::FileLoc{filename:filename.clone(), line:b.line},
+                        location: graph::FileLoc {
+                            filename: filename.clone(),
+                            line: b.line,
+                        },
                         cmdline: None,
                         ins: ins,
                         outs: outs,
@@ -175,7 +178,7 @@ impl Loader {
                         graph: &self.graph,
                         build: &build,
                     };
-                    let envs: [&dyn parse::Env; 4] =
+                    let envs: [&dyn eval::Env; 4] =
                         [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
                     if let Some(var) = b.vars.get(key).or_else(|| rule.vars.get(key)) {
                         build.cmdline = Some(var.evaluate(&envs));

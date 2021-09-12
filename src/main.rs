@@ -3,6 +3,7 @@ extern crate hashbrown;
 
 mod graph;
 //mod intern;
+mod eval;
 mod load;
 mod parse;
 mod work;

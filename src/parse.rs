@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::result::Result;
+
+use crate::eval::{EvalPart, EvalString, LazyVars, ResolvedEnv};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -16,7 +17,11 @@ struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     fn new(buf: &'a str) -> Self {
-        Scanner { buf: buf, ofs: 0, line: 1 }
+        Scanner {
+            buf: buf,
+            ofs: 0,
+            line: 1,
+        }
     }
     fn slice(&self, start: usize, end: usize) -> &'a str {
         unsafe { self.buf.get_unchecked(start..end) }
@@ -25,7 +30,9 @@ impl<'a> Scanner<'a> {
         self.buf.as_bytes()[self.ofs] as char
     }
     fn next(&mut self) {
-        if self.peek() == '\n' { self.line += 1; }
+        if self.peek() == '\n' {
+            self.line += 1;
+        }
         if self.ofs == self.buf.len() {
             panic!("scanned past end")
         }
@@ -36,91 +43,14 @@ impl<'a> Scanner<'a> {
             panic!("back at start")
         }
         self.ofs -= 1;
-        if self.peek() == '\n' { self.line -= 1; }
+        if self.peek() == '\n' {
+            self.line -= 1;
+        }
     }
     fn read(&mut self) -> char {
         let c = self.peek();
         self.next();
         c
-    }
-}
-
-pub trait Env {
-    fn get_var(&self, var: &str) -> Option<String>;
-}
-
-#[derive(Debug)]
-enum EvalPart<T: AsRef<str>> {
-    Literal(T),
-    VarRef(T),
-}
-#[derive(Debug)]
-pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
-
-impl<T: AsRef<str>> EvalString<T> {
-    pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
-        let mut val = String::new();
-        for part in &self.0 {
-            match part {
-                EvalPart::Literal(s) => val.push_str(s.as_ref()),
-                EvalPart::VarRef(v) => {
-                    for env in envs {
-                        if let Some(v) = env.get_var(v.as_ref()) {
-                            val.push_str(&v);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        val
-    }
-}
-impl EvalString<&str> {
-    pub fn to_owned(self) -> EvalString<String> {
-        EvalString(
-            self.0
-                .into_iter()
-                .map(|part| match part {
-                    EvalPart::Literal(s) => EvalPart::Literal(s.to_owned()),
-                    EvalPart::VarRef(s) => EvalPart::VarRef(s.to_owned()),
-                })
-                .collect(),
-        )
-    }
-}
-
-#[derive(Debug)]
-pub struct ResolvedEnv<'a>(HashMap<&'a str, String>);
-impl<'a> ResolvedEnv<'a> {
-    pub fn new() -> ResolvedEnv<'a> {
-        ResolvedEnv(HashMap::new())
-    }
-}
-impl<'a> Env for ResolvedEnv<'a> {
-    fn get_var(&self, var: &str) -> Option<String> {
-        self.0.get(var).map(|val| val.clone())
-    }
-}
-
-#[derive(Debug)]
-pub struct LazyVars(Vec<(String, EvalString<String>)>);
-impl LazyVars {
-    pub fn new() -> Self {
-        LazyVars(Vec::new())
-    }
-    pub fn get(&self, key: &str) -> Option<&EvalString<String>> {
-        for (k, v) in &self.0 {
-            if k == key {
-                return Some(v);
-            }
-        }
-        None
-    }
-}
-impl Env for LazyVars {
-    fn get_var(&self, var: &str) -> Option<String> {
-        self.get(var).map(|val| val.evaluate(&[]))
     }
 }
 
@@ -207,7 +137,7 @@ impl<'a> Parser<'a> {
                         }
                         ident => {
                             let val = self.read_vardef()?.evaluate(&[&self.vars]);
-                            self.vars.0.insert(ident, val);
+                            self.vars.insert(ident, val);
                         }
                     }
                 }
@@ -231,13 +161,13 @@ impl<'a> Parser<'a> {
     }
 
     fn read_scoped_vars(&mut self) -> ParseResult<LazyVars> {
-        let mut vars = LazyVars(Vec::new());
+        let mut vars = LazyVars::new();
         while self.scanner.peek() == ' ' {
             self.skip_spaces();
             let name = self.read_ident()?;
             self.skip_spaces();
             let val = self.read_vardef()?;
-            vars.0.push((name.to_owned(), val.to_owned()));
+            vars.insert(name.to_owned(), val.to_owned());
         }
         Ok(vars)
     }
@@ -325,8 +255,7 @@ impl<'a> Parser<'a> {
         if end == start {
             return self.parse_error("failed to scan ident");
         }
-        let var = &self.scanner.buf[start..end];
-        Ok(var)
+        Ok(self.scanner.slice(start, end))
     }
 
     fn skip_spaces(&mut self) {
@@ -357,7 +286,7 @@ impl<'a> Parser<'a> {
         if end > ofs {
             parts.push(EvalPart::Literal(self.scanner.slice(ofs, end)));
         }
-        Ok(EvalString(parts))
+        Ok(EvalString::new(parts))
     }
 
     fn read_path(&mut self) -> ParseResult<Option<String>> {
@@ -373,7 +302,7 @@ impl<'a> Parser<'a> {
                     match part {
                         EvalPart::Literal(l) => path.push_str(l),
                         EvalPart::VarRef(v) => {
-                            if let Some(v) = self.vars.0.get(v) {
+                            if let Some(v) = self.vars.get(v) {
                                 path.push_str(v);
                             }
                         }
