@@ -63,9 +63,9 @@ impl<'a> BuildImplicitVars<'a> {
 }
 impl<'a> parse::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
-        match var.as_bytes() {
-            b"in" => Some(self.file_list(&self.build.ins)),
-            b"out" => Some(self.file_list(&self.build.outs)),
+        match var {
+            "in" => Some(self.file_list(&self.build.ins)),
+            "out" => Some(self.file_list(&self.build.outs)),
             _ => None,
         }
     }
