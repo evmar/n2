@@ -70,6 +70,16 @@ impl<T: AsRef<str>> EvalString<T> {
         val
     }
 }
+impl EvalString<&str> {
+    pub fn to_owned(self) -> EvalString<String> {
+        EvalString(self.0.into_iter().map(|part| {
+            match part {
+                EvalPart::Literal(s) => EvalPart::Literal(s.to_owned()),
+                EvalPart::VarRef(s) => EvalPart::VarRef(s.to_owned()),
+            }
+        }).collect())
+    }
+}
 
 #[derive(Debug)]
 pub struct ResolvedEnv<'a>(HashMap<&'a str, String>);
@@ -85,21 +95,21 @@ impl<'a> Env for ResolvedEnv<'a> {
 }
 
 #[derive(Debug)]
-pub struct LazyVars<T: AsRef<str>>(Vec<(T, EvalString<T>)>);
-impl<T: AsRef<str>> LazyVars<T> {
+pub struct LazyVars(Vec<(String, EvalString<String>)>);
+impl LazyVars {
     pub fn new() -> Self {
         LazyVars(Vec::new())
     }
-    pub fn get(&self, key: &str) -> Option<&EvalString<T>> {
+    pub fn get(&self, key: &str) -> Option<&EvalString<String>> {
         for (k, v) in &self.0 {
-            if k.as_ref() == key {
+            if k == key {
                 return Some(v);
             }
         }
         None
     }
 }
-impl<'a, T: AsRef<str>> Env for LazyVars<T> {
+impl Env for LazyVars {
     fn get_var(&self, var: &str) -> Option<String> {
         self.get(var).map(|val| val.evaluate(&[]))
     }
@@ -108,7 +118,7 @@ impl<'a, T: AsRef<str>> Env for LazyVars<T> {
 #[derive(Debug)]
 pub struct Rule {
     pub name: String,
-    pub vars: LazyVars<String>,
+    pub vars: LazyVars,
 }
 
 #[derive(Debug)]
@@ -116,7 +126,7 @@ pub struct Build<'a> {
     pub rule: &'a str,
     pub outs: Vec<String>,
     pub ins: Vec<String>,
-    pub vars: LazyVars<&'a str>,
+    pub vars: LazyVars,
 }
 
 #[derive(Debug)]
@@ -210,14 +220,14 @@ impl<'a> Parser<'a> {
         return self.read_eval();
     }
 
-    fn read_scoped_vars(&mut self) -> ParseResult<LazyVars<&'a str>> {
+    fn read_scoped_vars(&mut self) -> ParseResult<LazyVars> {
         let mut vars = LazyVars(Vec::new());
         while self.scanner.peek() == ' ' {
             self.skip_spaces();
             let name = self.read_ident()?;
             self.skip_spaces();
             let val = self.read_vardef()?;
-            vars.0.push((name, val));
+            vars.0.push((name.to_owned(), val.to_owned()));
         }
         Ok(vars)
     }
@@ -228,7 +238,7 @@ impl<'a> Parser<'a> {
         let vars = self.read_scoped_vars()?;
         Ok(Rule {
             name: name.to_owned(),
-            vars: LazyVars(Vec::new()), // XXXvars,
+            vars: vars,
         })
     }
 
