@@ -159,7 +159,7 @@ impl Loader {
                     let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
                     let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.file_id(f)).collect();
                     let mut build = graph::Build {
-                        cmdline: String::new(),
+                        cmdline: None,
                         ins: ins,
                         outs: outs,
                     };
@@ -176,7 +176,7 @@ impl Loader {
                     let envs: [&dyn parse::Env; 4] =
                         [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
                     if let Some(var) = b.vars.get(key).or_else(|| rule.vars.get(key)) {
-                        build.cmdline = var.evaluate(&envs);
+                        build.cmdline = Some(var.evaluate(&envs));
                     }
 
                     self.graph.add_build(build);

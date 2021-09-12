@@ -35,7 +35,7 @@ pub struct File {
 
 #[derive(Debug)]
 pub struct Build {
-    pub cmdline: String,
+    pub cmdline: Option<String>,
     pub ins: Vec<FileId>,
     pub outs: Vec<FileId>,
 }
