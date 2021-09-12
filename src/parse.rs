@@ -246,6 +246,10 @@ impl<'a> Parser<'a> {
         let mut outs = Vec::new();
         loop {
             self.skip_spaces();
+            if self.scanner.peek() == '|' {  // TODO implicit output
+                self.scanner.next();
+                self.skip_spaces();
+            }
             match self.read_path()? {
                 Some(path) => outs.push(path),
                 None => break,
