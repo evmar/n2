@@ -1,8 +1,6 @@
 use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
 
-use crate::parse::NString;
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Hash(u64);
 
@@ -30,14 +28,14 @@ impl BuildId {
 
 #[derive(Debug)]
 pub struct File {
-    pub name: NString,
+    pub name: String,
     pub input: Option<BuildId>,
     pub dependents: Vec<BuildId>,
 }
 
 #[derive(Debug)]
 pub struct Build {
-    pub cmdline: NString,
+    pub cmdline: String,
     pub ins: Vec<FileId>,
     pub outs: Vec<FileId>,
 }
@@ -64,7 +62,7 @@ impl Graph {
         }
     }
 
-    pub fn add_file(&mut self, name: NString) -> FileId {
+    pub fn add_file(&mut self, name: String) -> FileId {
         let id = self.files.len();
         self.files.push(File {
             name: name,
@@ -172,7 +170,7 @@ impl State {
         let build = graph.build(id);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for &id in &build.ins {
-            h.write(graph.file(id).name.as_nstr().as_bytes());
+            h.write(graph.file(id).name.as_bytes());
             let mtime = self.file(id).mtime.unwrap();
             let mtime_int = match mtime {
                 MTime::Missing => 0,
@@ -191,7 +189,7 @@ impl State {
         }
         let name = &graph.file(id).name;
         // TODO: consider mtime_nsec(?)
-        let mtime = match std::fs::metadata(name.as_nstr().as_path()) {
+        let mtime = match std::fs::metadata(name) {
             Ok(meta) => MTime::Stamp(meta.mtime() as u32),
             Err(err) => {
                 if err.kind() == std::io::ErrorKind::NotFound {

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::os::unix::ffi::OsStrExt;
 use std::result::Result;
 
 #[derive(Debug)]
@@ -9,55 +8,17 @@ pub struct ParseError {
 }
 type ParseResult<T> = Result<T, ParseError>;
 
-#[derive(Eq, PartialEq, Hash, Clone)]
-pub struct NString(Vec<u8>);
-impl<'a> std::fmt::Debug for NString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(&self.0)))
-    }
-}
-#[cfg(test)]
-impl NString {
-    pub fn from_str(str: &str) -> NString {
-        NString(str.as_bytes().to_vec())
-    }
-}
-impl NString {
-    pub fn from(vec: Vec<u8>) -> NString {
-        NString(vec)
-    }
-    pub fn as_nstr(&self) -> NStr {
-        NStr(&self.0)
-    }
-}
-
-#[derive(Eq, PartialEq, Hash)]
-pub struct NStr<'a>(pub &'a [u8]);
-impl<'a> std::fmt::Debug for NStr<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_fmt(format_args!("{:?}", &String::from_utf8_lossy(self.0)))
-    }
-}
-impl NStr<'_> {
-    pub fn to_nstring(&self) -> NString {
-        NString(Vec::from(self.0))
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0
-    }
-    pub fn as_path(&self) -> &std::path::Path {
-        std::path::Path::new(std::ffi::OsStr::from_bytes(self.as_bytes()))
-    }
-}
-
 struct Scanner<'a> {
-    buf: &'a [u8],
+    buf: &'a str,
     ofs: usize,
 }
 
 impl<'a> Scanner<'a> {
+    fn slice(&self, start: usize, end: usize) -> &'a str {
+        unsafe { self.buf.get_unchecked(start..end) }
+    }
     fn peek(&self) -> char {
-        self.buf[self.ofs] as char
+        self.buf.as_bytes()[self.ofs] as char
     }
     fn next(&mut self) {
         if self.ofs == self.buf.len() {
@@ -79,77 +40,77 @@ impl<'a> Scanner<'a> {
 }
 
 pub trait Env<'a> {
-    fn get_var(&self, var: &NStr<'a>) -> Option<NString>;
+    fn get_var(&self, var: &'a str) -> Option<String>;
 }
 
 #[derive(Debug)]
 enum EvalPart<'a> {
-    Literal(NStr<'a>),
-    VarRef(NStr<'a>),
+    Literal(&'a str),
+    VarRef(&'a str),
 }
 #[derive(Debug)]
 pub struct EvalString<'a>(Vec<EvalPart<'a>>);
 
 impl<'a> EvalString<'a> {
-    pub fn evaluate(&self, envs: &[&dyn Env<'a>]) -> NString {
-        let mut val = Vec::new();
+    pub fn evaluate(&self, envs: &[&dyn Env<'a>]) -> String {
+        let mut val = String::new();
         for part in &self.0 {
             match part {
-                EvalPart::Literal(s) => val.extend_from_slice(s.0),
+                EvalPart::Literal(s) => val.push_str(s),
                 EvalPart::VarRef(v) => {
                     for env in envs {
                         if let Some(v) = env.get_var(v) {
-                            val.extend_from_slice(&v.0);
+                            val.push_str(&v);
                             break;
                         }
                     }
                 }
             }
         }
-        NString(val)
+        val
     }
 }
 
 #[derive(Debug)]
-pub struct ResolvedEnv<'a>(HashMap<NStr<'a>, NString>);
+pub struct ResolvedEnv<'a>(HashMap<&'a str, String>);
 impl<'a> ResolvedEnv<'a> {
     pub fn new() -> ResolvedEnv<'a> {
         ResolvedEnv(HashMap::new())
     }
 }
 impl<'a> Env<'a> for ResolvedEnv<'a> {
-    fn get_var(&self, var: &NStr<'a>) -> Option<NString> {
+    fn get_var(&self, var: &'a str) -> Option<String> {
         self.0.get(var).map(|val| val.clone())
     }
 }
 
 #[derive(Debug)]
-pub struct DelayEnv<'a>(HashMap<NStr<'a>, EvalString<'a>>);
+pub struct DelayEnv<'a>(HashMap<&'a str, EvalString<'a>>);
 impl<'a> DelayEnv<'a> {
     pub fn new() -> Self {
         DelayEnv(HashMap::new())
     }
-    pub fn get(&self, key: &NStr<'a>) -> Option<&EvalString<'a>> {
+    pub fn get(&self, key: &'a str) -> Option<&EvalString<'a>> {
         self.0.get(key)
     }
 }
 impl<'a> Env<'a> for DelayEnv<'a> {
-    fn get_var(&self, var: &NStr<'a>) -> Option<NString> {
+    fn get_var(&self, var: &'a str) -> Option<String> {
         self.get(var).map(|val| val.evaluate(&[]))
     }
 }
 
 #[derive(Debug)]
 pub struct Rule<'a> {
-    pub name: NStr<'a>,
+    pub name: &'a str,
     pub vars: DelayEnv<'a>,
 }
 
 #[derive(Debug)]
 pub struct Build<'a> {
-    pub rule: NStr<'a>,
-    pub outs: Vec<NString>,
-    pub ins: Vec<NString>,
+    pub rule: &'a str,
+    pub outs: Vec<String>,
+    pub ins: Vec<String>,
     pub vars: DelayEnv<'a>,
 }
 
@@ -157,7 +118,7 @@ pub struct Build<'a> {
 pub enum Statement<'a> {
     Rule(Rule<'a>),
     Build(Build<'a>),
-    Default(NStr<'a>),
+    Default(&'a str),
 }
 
 pub struct Parser<'a> {
@@ -166,7 +127,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(text: &'a [u8]) -> Parser<'a> {
+    pub fn new(text: &'a str) -> Parser<'a> {
         Parser {
             scanner: Scanner { buf: text, ofs: 0 },
             vars: ResolvedEnv::new(),
@@ -181,12 +142,12 @@ impl<'a> Parser<'a> {
 
     pub fn format_parse_error(&self, err: ParseError) -> String {
         let mut ofs = 0;
-        let lines = self.scanner.buf.split(|c| (*c as char) == '\n');
+        let lines = self.scanner.buf.split('\n');
         for line in lines {
             if ofs + line.len() >= err.ofs {
                 let mut msg = err.msg.clone();
                 msg.push('\n');
-                msg.push_str(&String::from_utf8_lossy(line));
+                msg.push_str(line);
                 msg.push('\n');
                 msg.push_str(&" ".repeat(err.ofs - ofs));
                 msg.push_str("^\n");
@@ -207,13 +168,13 @@ impl<'a> Parser<'a> {
                 _ => {
                     let ident = self.read_ident()?;
                     self.skip_spaces();
-                    match ident.0 {
-                        b"rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
-                        b"build" => return Ok(Some(Statement::Build(self.read_build()?))),
-                        b"default" => return Ok(Some(Statement::Default(self.read_ident()?))),
+                    match ident {
+                        "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
+                        "build" => return Ok(Some(Statement::Build(self.read_build()?))),
+                        "default" => return Ok(Some(Statement::Default(self.read_ident()?))),
                         ident => {
                             let val = self.read_vardef()?.evaluate(&[&self.vars]);
-                            self.vars.0.insert(NStr(ident), val);
+                            self.vars.0.insert(ident, val);
                         }
                     }
                 }
@@ -309,7 +270,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn read_ident(&mut self) -> ParseResult<NStr<'a>> {
+    fn read_ident(&mut self) -> ParseResult<&'a str> {
         let start = self.scanner.ofs;
         loop {
             match self.scanner.read() {
@@ -325,7 +286,7 @@ impl<'a> Parser<'a> {
             return self.parse_error("failed to scan ident");
         }
         let var = &self.scanner.buf[start..end];
-        Ok(NStr(var))
+        Ok(var)
     }
 
     fn skip_spaces(&mut self) {
@@ -344,7 +305,7 @@ impl<'a> Parser<'a> {
                 '$' => {
                     let end = self.scanner.ofs - 1;
                     if end > ofs {
-                        parts.push(EvalPart::Literal(NStr(&self.scanner.buf[ofs..end])));
+                        parts.push(EvalPart::Literal(self.scanner.slice(ofs, end)));
                     }
                     parts.push(self.read_escape()?);
                     ofs = self.scanner.ofs;
@@ -354,13 +315,13 @@ impl<'a> Parser<'a> {
         }
         let end = self.scanner.ofs - 1;
         if end > ofs {
-            parts.push(EvalPart::Literal(NStr(&self.scanner.buf[ofs..end])));
+            parts.push(EvalPart::Literal(self.scanner.slice(ofs, end)));
         }
         Ok(EvalString(parts))
     }
 
-    fn read_path(&mut self) -> ParseResult<Option<NString>> {
-        let mut path = Vec::new();
+    fn read_path(&mut self) -> ParseResult<Option<String>> {
+        let mut path = String::new();
         loop {
             match self.scanner.read() {
                 '\0' => {
@@ -370,10 +331,10 @@ impl<'a> Parser<'a> {
                 '$' => {
                     let part = self.read_escape()?;
                     match part {
-                        EvalPart::Literal(l) => path.extend_from_slice(l.0),
+                        EvalPart::Literal(l) => path.push_str(l),
                         EvalPart::VarRef(v) => {
-                            if let Some(v) = &self.vars.0.get(&v) {
-                                path.extend_from_slice(&v.0);
+                            if let Some(v) = self.vars.0.get(v) {
+                                path.push_str(v);
                             }
                         }
                     }
@@ -383,14 +344,14 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 c => {
-                    path.push(c as u8);
+                    path.push(c);
                 }
             }
         }
         if path.len() == 0 {
             return Ok(None);
         }
-        Ok(Some(NString(path)))
+        Ok(Some(path))
     }
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<'a>> {
@@ -398,7 +359,7 @@ impl<'a> Parser<'a> {
             '\n' => {
                 self.scanner.next();
                 self.skip_spaces();
-                return Ok(EvalPart::Literal(NStr(&self.scanner.buf[0..0])));
+                return Ok(EvalPart::Literal(self.scanner.slice(0, 0)));
             }
             '{' => {
                 self.scanner.next();
@@ -411,7 +372,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let end = self.scanner.ofs - 1;
-                return Ok(EvalPart::VarRef(NStr(&self.scanner.buf[start..end])));
+                return Ok(EvalPart::VarRef(self.scanner.slice(start, end)));
             }
             _ => {
                 let ident = self.read_ident()?;
