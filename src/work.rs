@@ -132,7 +132,19 @@ impl<'a> Work<'a> {
             self.want.remove(&id);
             self.ready.remove(&id);
             let build = self.graph.build(id);
-            println!("run {:?} {} {:?}", id, build.location, build.cmdline);
+            if let Some(cmdline) = &build.cmdline {
+                println!("$ {}", cmdline);
+                let output = std::process::Command::new("sh").arg("-c").arg(cmdline).output()?;
+                if !output.stdout.is_empty() {
+                    println!("{:?}", output.stdout);
+                }
+                if !output.stderr.is_empty() {
+                    println!("{:?}", output.stdout);
+                }
+                if !output.status.success() {
+                    break;
+                }
+            }
             self.build_finished(state, id);
         }
         Ok(())
