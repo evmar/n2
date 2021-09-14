@@ -3,9 +3,11 @@ extern crate hashbrown;
 
 mod graph;
 //mod intern;
+mod depfile;
 mod eval;
 mod load;
 mod parse;
+mod scanner;
 mod work;
 
 fn main() {

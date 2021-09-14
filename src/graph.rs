@@ -166,7 +166,7 @@ impl State {
     fn do_hash(&mut self, graph: &Graph, id: BuildId) -> Hash {
         let build = graph.build(id);
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        for &id in &build.ins[0..(build.explicit_ins+build.implicit_ins)] {
+        for &id in &build.ins[0..(build.explicit_ins + build.implicit_ins)] {
             h.write(graph.file(id).name.as_bytes());
             let mtime = self.file(id).mtime.unwrap();
             let mtime_int = match mtime {

@@ -134,7 +134,10 @@ impl<'a> Work<'a> {
             let build = self.graph.build(id);
             if let Some(cmdline) = &build.cmdline {
                 println!("$ {}", cmdline);
-                let output = std::process::Command::new("sh").arg("-c").arg(cmdline).output()?;
+                let output = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(cmdline)
+                    .output()?;
                 if !output.stdout.is_empty() {
                     println!("{:?}", output.stdout);
                 }
