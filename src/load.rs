@@ -1,5 +1,6 @@
 use crate::graph::FileId;
 use crate::parse::Statement;
+use crate::scanner::Scanner;
 use crate::{eval, graph, parse};
 use std::collections::HashMap;
 
@@ -130,15 +131,65 @@ impl Loader {
         }
     }
 
+    fn add_build<'a>(
+        &mut self,
+        filename: std::rc::Rc<String>,
+        env: &eval::ResolvedEnv<'a>,
+        b: parse::Build,
+    ) -> Result<(), String> {
+        let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
+        let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.file_id(f)).collect();
+        let mut build = graph::Build {
+            location: graph::FileLoc {
+                filename: filename,
+                line: b.line,
+            },
+            cmdline: None,
+            depfile: None,
+            ins: ins,
+            explicit_ins: b.explicit_ins,
+            implicit_ins: b.implicit_ins,
+            outs: outs,
+            explicit_outs: b.explicit_outs,
+        };
+
+        let rule = match self.rules.get(b.rule) {
+            Some(r) => r,
+            None => return Err(format!("unknown rule {:?}", b.rule)),
+        };
+
+        let implicit_vars = BuildImplicitVars {
+            graph: &self.graph,
+            build: &build,
+        };
+        let envs: [&dyn eval::Env; 4] = [&implicit_vars, &b.vars, &rule.vars, env];
+
+        let cmdline = match b.vars.get("command").or_else(|| rule.vars.get("command")) {
+            Some(var) => Some(var.evaluate(&envs)),
+            None => None,
+        };
+        let depfile = match b.vars.get("depfile").or_else(|| rule.vars.get("depfile")) {
+            Some(var) => Some(var.evaluate(&envs)),
+            None => None,
+        };
+        build.cmdline = cmdline;
+        build.depfile = depfile;
+
+        self.graph.add_build(build);
+        Ok(())
+    }
+
     fn read_file(&mut self, path: &str) -> Result<(), String> {
-        let filename = std::rc::Rc::new(path.to_owned());
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
         };
         bytes.push(0);
+        let filename = std::rc::Rc::new(String::from(path));
 
-        let mut parser = parse::Parser::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
+        let mut parser = parse::Parser::new(Scanner::new(unsafe {
+            std::str::from_utf8_unchecked(&bytes)
+        }));
         loop {
             let stmt = match parser
                 .read()
@@ -157,37 +208,7 @@ impl Loader {
                     self.rules.insert(r.name.clone(), r);
                 }
                 Statement::Build(b) => {
-                    let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
-                    let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.file_id(f)).collect();
-                    let mut build = graph::Build {
-                        location: graph::FileLoc {
-                            filename: filename.clone(),
-                            line: b.line,
-                        },
-                        cmdline: None,
-                        ins: ins,
-                        explicit_ins: b.explicit_ins,
-                        implicit_ins: b.implicit_ins,
-                        outs: outs,
-                        explicit_outs: b.explicit_outs,
-                    };
-
-                    let rule = match self.rules.get(b.rule) {
-                        Some(r) => r,
-                        None => return Err(format!("unknown rule {:?}", b.rule)),
-                    };
-                    let key = "command";
-                    let implicit_vars = BuildImplicitVars {
-                        graph: &self.graph,
-                        build: &build,
-                    };
-                    let envs: [&dyn eval::Env; 4] =
-                        [&implicit_vars, &b.vars, &rule.vars, &parser.vars];
-                    if let Some(var) = b.vars.get(key).or_else(|| rule.vars.get(key)) {
-                        build.cmdline = Some(var.evaluate(&envs));
-                    }
-
-                    self.graph.add_build(build);
+                    self.add_build(filename.clone(), &parser.vars, b)?;
                 }
             };
         }

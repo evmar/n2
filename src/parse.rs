@@ -33,9 +33,9 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(text: &'a str) -> Parser<'a> {
+    pub fn new(scanner: Scanner<'a>) -> Parser<'a> {
         Parser {
-            scanner: Scanner::new(text),
+            scanner: scanner,
             vars: ResolvedEnv::new(),
         }
     }

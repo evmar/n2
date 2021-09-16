@@ -48,6 +48,7 @@ impl std::fmt::Display for FileLoc {
 pub struct Build {
     pub location: FileLoc,
     pub cmdline: Option<String>,
+    pub depfile: Option<String>,
     pub ins: Vec<FileId>,
     pub explicit_ins: usize,
     pub implicit_ins: usize,

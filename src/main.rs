@@ -31,7 +31,7 @@ fn main() {
         std::env::set_current_dir(dir).unwrap();
     }
 
-    let (graph, default) = match load::read() {
+    let (mut graph, default) = match load::read() {
         Err(err) => {
             println!("ERROR: {}", err);
             return;
@@ -44,7 +44,12 @@ fn main() {
     let last_state = graph::State::new(&graph);
     let mut state = graph::State::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
-    let mut work = work::Work::new(&graph);
+    let mut work = work::Work::new(&mut graph);
     work.want_file(&mut state, &last_state, target).unwrap();
-    work.run(&mut state).unwrap();
+    match work.run(&mut state) {
+        Ok(_) => {}
+        Err(err) => {
+            println!("error: {}", err);
+        }
+    }
 }

@@ -1,4 +1,6 @@
+use crate::depfile;
 use crate::graph::*;
+use crate::scanner::Scanner;
 use std::collections::{HashMap, HashSet};
 
 pub struct Work<'a> {
@@ -9,7 +11,7 @@ pub struct Work<'a> {
 }
 
 impl<'a> Work<'a> {
-    pub fn new(graph: &'a Graph) -> Self {
+    pub fn new(graph: &'a mut Graph) -> Self {
         Work {
             graph: graph,
             files: HashMap::new(),
@@ -100,6 +102,20 @@ impl<'a> Work<'a> {
         true
     }
 
+    fn read_depfile(&self, path: &str) -> std::result::Result<(), String> {
+        let mut bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => return Err(format!("read {}: {}", path, e)),
+        };
+        bytes.push(0);
+
+        let mut scanner = Scanner::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
+        let deps = depfile::parse(&mut scanner)
+            .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
+        println!("TODO: add deps to graph {:?}", deps);
+        Ok(())
+    }
+
     fn build_finished(&mut self, state: &mut State, id: BuildId) {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
@@ -121,7 +137,7 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn run(&mut self, state: &mut State) -> std::io::Result<()> {
+    pub fn run(&mut self, state: &mut State) -> std::result::Result<(), String> {
         while !self.want.is_empty() {
             let id = match self.ready.iter().next() {
                 None => {
@@ -137,7 +153,8 @@ impl<'a> Work<'a> {
                 let output = std::process::Command::new("sh")
                     .arg("-c")
                     .arg(cmdline)
-                    .output()?;
+                    .output()
+                    .map_err(|err| format!("{}", err))?;
                 if !output.stdout.is_empty() {
                     println!("{:?}", output.stdout);
                 }
@@ -146,6 +163,9 @@ impl<'a> Work<'a> {
                 }
                 if !output.status.success() {
                     break;
+                }
+                if let Some(depfile) = &build.depfile {
+                    self.read_depfile(depfile)?;
                 }
             }
             self.build_finished(state, id);

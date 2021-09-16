@@ -21,6 +21,7 @@ impl<'a> Scanner<'a> {
             line: 1,
         }
     }
+
     pub fn slice(&self, start: usize, end: usize) -> &'a str {
         unsafe { self.buf.get_unchecked(start..end) }
     }

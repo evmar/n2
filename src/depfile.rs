@@ -6,8 +6,26 @@ pub struct Deps<'a> {
     pub deps: Vec<&'a str>,
 }
 
-fn read_path<'a>(scanner: &mut Scanner<'a>) -> Option<&'a str> {
-    scanner.skip_spaces();
+/// Skip spaces and backslashed newlines.
+fn skip_spaces(scanner: &mut Scanner) -> ParseResult<()> {
+    loop {
+        match scanner.read() {
+            ' ' => {}
+            '\\' => match scanner.read() {
+                '\n' => {}
+                _ => return scanner.parse_error("invalid backslash escape"),
+            },
+            _ => {
+                scanner.back();
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
+    skip_spaces(scanner)?;
     let start = scanner.ofs;
     loop {
         match scanner.read() {
@@ -20,20 +38,20 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> Option<&'a str> {
     }
     let end = scanner.ofs;
     if end == start {
-        return None;
+        return Ok(None);
     }
-    Some(scanner.slice(start, end))
+    Ok(Some(scanner.slice(start, end)))
 }
 
 pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
-    let target = match read_path(scanner) {
+    let target = match read_path(scanner)? {
         None => return scanner.parse_error("expected file"),
         Some(o) => o,
     };
     scanner.expect(':')?;
     let mut deps = Vec::new();
     loop {
-        match read_path(scanner) {
+        match read_path(scanner)? {
             None => break,
             Some(p) => deps.push(p),
         }
