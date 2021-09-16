@@ -25,7 +25,7 @@ impl<'a> Work<'a> {
         state: &mut State,
         last_state: &State,
         id: BuildId,
-    ) -> std::io::Result<bool> {
+    ) -> Result<bool, String> {
         if self.want.contains(&id) {
             return Ok(true);
         }
@@ -58,14 +58,14 @@ impl<'a> Work<'a> {
         state: &mut State,
         last_state: &State,
         id: FileId,
-    ) -> std::io::Result<bool> {
+    ) -> Result<bool, String> {
         if let Some(dirty) = self.files.get(&id) {
             return Ok(*dirty);
         }
 
         let dirty = match self.graph.file(id).input {
             None => {
-                state.stat(self.graph, id)?;
+                self.stat(state, id)?;
                 state.file_mut(id).hash = Some(Hash::todo()); // ready
                 false
             }
@@ -73,7 +73,7 @@ impl<'a> Work<'a> {
                 if self.want_build(state, last_state, bid)? {
                     true
                 } else {
-                    match state.stat(self.graph, id)? {
+                    match self.stat(state, id)? {
                         MTime::Missing => true,
                         MTime::Stamp(_) => {
                             // compare hash
@@ -86,6 +86,12 @@ impl<'a> Work<'a> {
 
         self.files.insert(id, dirty);
         Ok(dirty)
+    }
+
+    pub fn stat(&self, state: &mut State, id: FileId) -> Result<MTime, String> {
+        state
+            .stat(self.graph, id)
+            .map_err(|err| format!("stat {}: {}", self.graph.file(id).name, err))
     }
 
     fn recheck_ready(&mut self, state: &State, id: BuildId) -> bool {
@@ -102,7 +108,7 @@ impl<'a> Work<'a> {
         true
     }
 
-    fn read_depfile(&self, path: &str) -> std::result::Result<(), String> {
+    fn read_depfile(&self, path: &str) -> Result<(), String> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
@@ -137,7 +143,7 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn run(&mut self, state: &mut State) -> std::result::Result<(), String> {
+    pub fn run(&mut self, state: &mut State) -> Result<(), String> {
         while !self.want.is_empty() {
             let id = match self.ready.iter().next() {
                 None => {
