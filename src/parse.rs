@@ -1,3 +1,5 @@
+//! Parser for .ninja files.
+
 use crate::eval::{EvalPart, EvalString, LazyVars, ResolvedEnv};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 

@@ -1,3 +1,5 @@
+//! The build graph, a graph between files and commands.
+
 use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
 

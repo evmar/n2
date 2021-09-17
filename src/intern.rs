@@ -1,3 +1,5 @@
+//! String interning.
+
 use hashbrown::raw::RawTable;
 use std::hash::Hasher;
 

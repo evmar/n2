@@ -1,6 +1,5 @@
 //! Represents parsed Ninja strings with embedded variable references, e.g.
-//!   c++ $in -o $out
-//! and mechanisms for expanding those into plain strings.
+//! `c++ $in -o $out`, and mechanisms for expanding those into plain strings.
 
 use std::collections::HashMap;
 

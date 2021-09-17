@@ -1,3 +1,5 @@
+//! Build runner, choosing and executing tasks as determined by out of date inputs.
+
 use crate::depfile;
 use crate::graph::*;
 use crate::scanner::Scanner;
@@ -108,7 +110,7 @@ impl<'a> Work<'a> {
         true
     }
 
-    fn read_depfile(&self, path: &str) -> Result<(), String> {
+    fn read_depfile(&self, id: BuildId, path: &str) -> Result<(), String> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
@@ -118,6 +120,7 @@ impl<'a> Work<'a> {
         let mut scanner = Scanner::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
         let deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
+        // TODO verify deps refers to correct output
         println!("TODO: add deps to graph {:?}", deps);
         Ok(())
     }
@@ -171,7 +174,7 @@ impl<'a> Work<'a> {
                     break;
                 }
                 if let Some(depfile) = &build.depfile {
-                    self.read_depfile(depfile)?;
+                    self.read_depfile(id, depfile)?;
                 }
             }
             self.build_finished(state, id);

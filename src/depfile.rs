@@ -1,3 +1,5 @@
+//! Parsing of Makefile syntax as found in `.d` files emitted by C compilers.
+
 use crate::scanner::{ParseResult, Scanner};
 
 #[derive(Debug)]

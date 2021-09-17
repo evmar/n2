@@ -1,3 +1,5 @@
+//! State loading: combines .ninja parsing with constructing the build graph.
+
 use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::scanner::Scanner;
