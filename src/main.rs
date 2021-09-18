@@ -1,6 +1,7 @@
 extern crate getopts;
 extern crate hashbrown;
 
+mod db;
 mod graph;
 //mod intern;
 mod depfile;
@@ -31,7 +32,7 @@ fn main() {
         std::env::set_current_dir(dir).unwrap();
     }
 
-    let (mut graph, default) = match load::read() {
+    let (mut graph, mut db, default) = match load::read() {
         Err(err) => {
             println!("ERROR: {}", err);
             return;
@@ -44,7 +45,7 @@ fn main() {
     let last_state = graph::State::new(&graph);
     let mut state = graph::State::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
-    let mut work = work::Work::new(&mut graph);
+    let mut work = work::Work::new(&mut graph, &mut db);
     work.want_file(&mut state, &last_state, target).unwrap();
     match work.run(&mut state) {
         Ok(_) => {}

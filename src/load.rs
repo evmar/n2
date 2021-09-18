@@ -3,7 +3,7 @@
 use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::scanner::Scanner;
-use crate::{eval, graph, parse};
+use crate::{eval, graph, parse, db};
 use std::collections::HashMap;
 
 /*fn canon_path(path: &mut String) {
@@ -93,7 +93,7 @@ impl std::borrow::Borrow<str> for SavedRule {
     }
 }
 
-struct Loader {
+pub struct Loader {
     graph: graph::Graph,
     file_to_id: HashMap<String, FileId>,
     default: Option<FileId>,
@@ -120,7 +120,7 @@ impl Loader {
         loader
     }
 
-    fn file_id(&mut self, f: String) -> FileId {
+    pub fn file_id(&mut self, f: String) -> FileId {
         // TODO: so many string copies :<
         let canon = canon_path(&f);
         match self.file_to_id.get(&canon) {
@@ -218,10 +218,11 @@ impl Loader {
     }
 }
 
-pub fn read() -> Result<(graph::Graph, Option<FileId>), String> {
+pub fn read() -> Result<(graph::Graph, db::Writer, Option<FileId>), String> {
     let mut loader = Loader::new();
     loader.read_file("build.ninja")?;
-    Ok((loader.graph, loader.default))
+    let db = db::open(&mut loader, ".n2_db").map_err(|err| format!("load .n2_db: {}", err))?;
+    Ok((loader.graph, db, loader.default))
 }
 
 #[cfg(test)]

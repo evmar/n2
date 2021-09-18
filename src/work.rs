@@ -1,5 +1,6 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
+use crate::db;
 use crate::depfile;
 use crate::graph::*;
 use crate::scanner::Scanner;
@@ -7,18 +8,20 @@ use std::collections::{HashMap, HashSet};
 
 pub struct Work<'a> {
     graph: &'a Graph,
+    db: &'a mut db::Writer,
     files: HashMap<FileId, bool>,
     want: HashSet<BuildId>,
     ready: HashSet<BuildId>,
 }
 
 impl<'a> Work<'a> {
-    pub fn new(graph: &'a mut Graph) -> Self {
+    pub fn new(graph: &'a Graph, db: &'a mut db::Writer) -> Self {
         Work {
             graph: graph,
             files: HashMap::new(),
             want: HashSet::new(),
             ready: HashSet::new(),
+            db: db,
         }
     }
 
@@ -110,7 +113,7 @@ impl<'a> Work<'a> {
         true
     }
 
-    fn read_depfile(&self, id: BuildId, path: &str) -> Result<(), String> {
+    fn read_depfile(&mut self, _id: BuildId, path: &str) -> Result<Vec<FileId>, String> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
@@ -121,11 +124,11 @@ impl<'a> Work<'a> {
         let deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
-        println!("TODO: add deps to graph {:?}", deps);
-        Ok(())
+        let ids = Vec::new(); // XXX deps.deps.into_iter().map(|n| self.graph.add_file(n.to_string())).collect();
+        Ok(ids)
     }
 
-    fn build_finished(&mut self, state: &mut State, id: BuildId) {
+    fn build_finished(&mut self, state: &mut State, id: BuildId) -> std::io::Result<()> {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
         let hash = state.hash(self.graph, id);
@@ -144,6 +147,7 @@ impl<'a> Work<'a> {
                 self.ready.insert(id);
             }
         }
+        self.db.write_state(self.graph, id)
     }
 
     pub fn run(&mut self, state: &mut State) -> Result<(), String> {
@@ -177,7 +181,8 @@ impl<'a> Work<'a> {
                     self.read_depfile(id, depfile)?;
                 }
             }
-            self.build_finished(state, id);
+            self.build_finished(state, id)
+                .map_err(|err| format!("{}", err))?;
         }
         Ok(())
     }
