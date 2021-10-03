@@ -3,7 +3,7 @@
 use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::scanner::Scanner;
-use crate::{eval, graph, parse, db};
+use crate::{db, eval, graph, parse};
 use std::collections::HashMap;
 
 /*fn canon_path(path: &mut String) {

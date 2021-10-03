@@ -5,9 +5,10 @@ use crate::depfile;
 use crate::graph::*;
 use crate::scanner::Scanner;
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 
 pub struct Work<'a> {
-    graph: &'a Graph,
+    graph: &'a mut Graph,
     db: &'a mut db::Writer,
     files: HashMap<FileId, bool>,
     want: HashSet<BuildId>,
@@ -15,7 +16,7 @@ pub struct Work<'a> {
 }
 
 impl<'a> Work<'a> {
-    pub fn new(graph: &'a Graph, db: &'a mut db::Writer) -> Self {
+    pub fn new(graph: &'a mut Graph, db: &'a mut db::Writer) -> Self {
         Work {
             graph: graph,
             files: HashMap::new(),
@@ -37,7 +38,8 @@ impl<'a> Work<'a> {
 
         // Visit inputs first, to discover if any are out of date.
         let mut input_dirty = false;
-        for &id in &self.graph.build(id).ins {
+        let ins = self.graph.build(id).ins.clone();
+        for id in ins {
             let d = self.want_file(state, last_state, id)?;
             input_dirty = input_dirty || d;
         }
@@ -113,7 +115,7 @@ impl<'a> Work<'a> {
         true
     }
 
-    fn read_depfile(&mut self, _id: BuildId, path: &str) -> Result<Vec<FileId>, String> {
+    fn read_depfile(&self, _build: &Build, path: &str) -> Result<Vec<String>, String> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
@@ -124,14 +126,47 @@ impl<'a> Work<'a> {
         let deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
-        let ids = Vec::new(); // XXX deps.deps.into_iter().map(|n| self.graph.add_file(n.to_string())).collect();
-        Ok(ids)
+        Ok(deps.deps.into_iter().map(|n| n.to_string()).collect())
+    }
+
+    fn run_one(&mut self, id: BuildId) -> Result<(), String> {
+        let build = self.graph.build(id);
+        let cmdline = match &build.cmdline {
+            None => return Ok(()),
+            Some(c) => c,
+        };
+        println!("$ {}", cmdline);
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmdline)
+            .output()
+            .map_err(|err| format!("{}", err))?;
+        if !output.stdout.is_empty() {
+            std::io::stdout()
+                .write_all(&output.stdout)
+                .map_err(|err| format!("{}", err))?;
+        }
+        if !output.stderr.is_empty() {
+            std::io::stdout()
+                .write_all(&output.stderr)
+                .map_err(|err| format!("{}", err))?;
+        }
+        if !output.status.success() {
+            return Err(format!("subcommand failed"));
+        }
+        if let Some(depfile) = &build.depfile {
+            for dep in self.read_depfile(build, depfile)? {
+                println!("add {:?}", self.graph.add_file(dep));
+            }
+        }
+        Ok(())
     }
 
     fn build_finished(&mut self, state: &mut State, id: BuildId) -> std::io::Result<()> {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
         let hash = state.hash(self.graph, id);
+        let mut ready_files = HashSet::new();
         for &id in &build.outs {
             let file = self.graph.file(id);
             println!("  wrote {:?} {:?}", id, file.name);
@@ -141,11 +176,14 @@ impl<'a> Work<'a> {
                 if !self.want.contains(&id) {
                     continue;
                 }
-                if !self.recheck_ready(state, id) {
-                    continue;
-                }
-                self.ready.insert(id);
+                ready_files.insert(id);
             }
+        }
+        for id in ready_files {
+            if !self.recheck_ready(state, id) {
+                continue;
+            }
+            self.ready.insert(id);
         }
         self.db.write_state(self.graph, id)
     }
@@ -160,27 +198,7 @@ impl<'a> Work<'a> {
             };
             self.want.remove(&id);
             self.ready.remove(&id);
-            let build = self.graph.build(id);
-            if let Some(cmdline) = &build.cmdline {
-                println!("$ {}", cmdline);
-                let output = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(cmdline)
-                    .output()
-                    .map_err(|err| format!("{}", err))?;
-                if !output.stdout.is_empty() {
-                    println!("{:?}", output.stdout);
-                }
-                if !output.stderr.is_empty() {
-                    println!("{:?}", output.stdout);
-                }
-                if !output.status.success() {
-                    break;
-                }
-                if let Some(depfile) = &build.depfile {
-                    self.read_depfile(id, depfile)?;
-                }
-            }
+            self.run_one(id)?;
             self.build_finished(state, id)
                 .map_err(|err| format!("{}", err))?;
         }

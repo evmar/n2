@@ -1,10 +1,10 @@
 //! The n2 database stores information about previous builds for determining which files are up
 //! to date.
 
-use crate::load::Loader;
 use crate::graph::BuildId;
 use crate::graph::FileId;
 use crate::graph::Graph;
+use crate::load::Loader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -22,7 +22,10 @@ pub struct State {
 }
 impl State {
     pub fn new() -> Self {
-        State { fileids: Vec::new(), db_ids: HashMap::new(), }
+        State {
+            fileids: Vec::new(),
+            db_ids: HashMap::new(),
+        }
     }
 }
 
@@ -152,10 +155,8 @@ pub fn open(loader: &mut Loader, path: &str) -> Result<Writer> {
         }
         Ok(f) => read(loader, f)?,
     };
-    Ok(
-        Writer {
-            state: prev.state,
-            w: BufWriter::new(prev.file),
-        },
-    )
+    Ok(Writer {
+        state: prev.state,
+        w: BufWriter::new(prev.file),
+    })
 }
