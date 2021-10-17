@@ -71,7 +71,12 @@ impl Writer {
         Ok(id)
     }
 
-    pub fn write_deps(&mut self, graph: &Graph, outs: &[FileId], deps: &[FileId]) -> std::io::Result<()> {
+    pub fn write_deps(
+        &mut self,
+        graph: &Graph,
+        outs: &[FileId],
+        deps: &[FileId],
+    ) -> std::io::Result<()> {
         let mut dbdeps = Vec::new();
         for &dep in deps {
             let id = self.ensure_id(graph, dep)?;

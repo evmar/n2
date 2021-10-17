@@ -126,8 +126,14 @@ impl<'a> Work<'a> {
         let deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
-        let depids: Vec<_> = deps.deps.into_iter().map(|dep| self.graph.file_id(dep)).collect();
-        self.db.write_deps(self.graph, &self.graph.build(id).outs, &depids).map_err(|err| err.to_string())?;
+        let depids: Vec<_> = deps
+            .deps
+            .into_iter()
+            .map(|dep| self.graph.file_id(dep))
+            .collect();
+        self.db
+            .write_deps(self.graph, &self.graph.build(id).outs, &depids)
+            .map_err(|err| err.to_string())?;
         Ok(())
     }
 

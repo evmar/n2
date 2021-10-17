@@ -54,10 +54,42 @@ pub struct Build {
     pub cmdline: Option<String>,
     pub depfile: Option<String>,
     pub ins: Vec<FileId>,
-    pub explicit_ins: usize,
-    pub implicit_ins: usize,
+    explicit_ins: usize,
+    implicit_ins: usize,
     pub outs: Vec<FileId>,
-    pub explicit_outs: usize,
+    explicit_outs: usize,
+}
+impl Build {
+    pub fn new(loc: FileLoc) -> Self {
+        Build {
+            location: loc,
+            cmdline: None,
+            depfile: None,
+            ins: Vec::new(),
+            explicit_ins: 0,
+            implicit_ins: 0,
+            outs: Vec::new(),
+            explicit_outs: 0,
+        }
+    }
+    pub fn set_ins(&mut self, ins: Vec<FileId>, exp: usize, imp: usize) {
+        self.ins = ins;
+        self.explicit_ins = exp;
+        self.implicit_ins = imp;
+    }
+    pub fn set_outs(&mut self, outs: Vec<FileId>, exp: usize) {
+        self.outs = outs;
+        self.explicit_outs = exp;
+    }
+    pub fn explicit_ins(&self) -> &[FileId] {
+        &self.ins[0..self.explicit_ins]
+    }
+    pub fn dirtying_ins(&self) -> &[FileId] {
+        &self.ins[0..(self.explicit_ins + self.implicit_ins)]
+    }
+    pub fn explicit_outs(&self) -> &[FileId] {
+        &self.outs[0..self.explicit_outs]
+    }
 }
 
 const UNIT_SEPARATOR: u8 = 0x1F;
@@ -185,7 +217,7 @@ impl State {
     fn do_hash(&mut self, graph: &Graph, id: BuildId) -> Hash {
         let build = graph.build(id);
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        for &id in &build.ins[0..(build.explicit_ins + build.implicit_ins)] {
+        for &id in build.dirtying_ins() {
             h.write(graph.file(id).name.as_bytes());
             let mtime = self.file(id).mtime.unwrap();
             let mtime_int = match mtime {

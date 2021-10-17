@@ -25,8 +25,8 @@ impl<'a> BuildImplicitVars<'a> {
 impl<'a> eval::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         match var {
-            "in" => Some(self.file_list(&self.build.ins[0..self.build.explicit_ins])),
-            "out" => Some(self.file_list(&self.build.outs[0..self.build.explicit_outs])),
+            "in" => Some(self.file_list(&self.build.explicit_ins())),
+            "out" => Some(self.file_list(&self.build.explicit_outs())),
             _ => None,
         }
     }
@@ -82,21 +82,19 @@ impl Loader {
         env: &eval::Vars<'a>,
         b: parse::Build,
     ) -> Result<(), String> {
-        let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.graph.file_id(&f)).collect();
-        let outs: Vec<FileId> = b.outs.into_iter().map(|f| self.graph.file_id(&f)).collect();
-        let mut build = graph::Build {
-            location: graph::FileLoc {
-                filename: filename,
-                line: b.line,
-            },
-            cmdline: None,
-            depfile: None,
-            ins: ins,
-            explicit_ins: b.explicit_ins,
-            implicit_ins: b.implicit_ins,
-            outs: outs,
-            explicit_outs: b.explicit_outs,
-        };
+        let mut build = graph::Build::new(graph::FileLoc {
+            filename: filename,
+            line: b.line,
+        });
+        build.set_ins(
+            b.ins.into_iter().map(|f| self.graph.file_id(&f)).collect(),
+            b.explicit_ins,
+            b.implicit_ins,
+        );
+        build.set_outs(
+            b.outs.into_iter().map(|f| self.graph.file_id(&f)).collect(),
+            b.explicit_outs,
+        );
 
         let rule = match self.rules.get(b.rule) {
             Some(r) => r,
@@ -145,9 +143,7 @@ impl Loader {
             };
             match stmt {
                 Statement::Include(f) => self.read_file(&f)?,
-                Statement::Default(f) => 
-                    self.default = Some(self.graph.file_id(f))
-                ,
+                Statement::Default(f) => self.default = Some(self.graph.file_id(f)),
                 Statement::Rule(r) => {
                     self.rules.insert(r.name.clone(), r);
                 }
