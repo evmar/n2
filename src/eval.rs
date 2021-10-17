@@ -3,6 +3,9 @@
 
 use std::collections::HashMap;
 
+/// An environment providing a mapping of variable name to variable value.
+/// A given EvalString may be expanded with multiple environments as possible
+/// context.
 pub trait Env {
     fn get_var(&self, var: &str) -> Option<String>;
 }
@@ -14,7 +17,7 @@ pub enum EvalPart<T: AsRef<str>> {
     VarRef(T),
 }
 
-/// An parsed but unexpanded variable-reference string, e.g. "cc $in -o $out".
+/// A parsed but unexpanded variable-reference string, e.g. "cc $in -o $out".
 #[derive(Debug)]
 pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
 impl<T: AsRef<str>> EvalString<T> {
@@ -53,11 +56,12 @@ impl EvalString<&str> {
     }
 }
 
+/// A single scope's worth of variable definitions.
 #[derive(Debug)]
-pub struct ResolvedEnv<'a>(HashMap<&'a str, String>);
-impl<'a> ResolvedEnv<'a> {
-    pub fn new() -> ResolvedEnv<'a> {
-        ResolvedEnv(HashMap::new())
+pub struct Vars<'a>(HashMap<&'a str, String>);
+impl<'a> Vars<'a> {
+    pub fn new() -> Vars<'a> {
+        Vars(HashMap::new())
     }
     pub fn insert(&mut self, key: &'a str, val: String) {
         self.0.insert(key, val);
@@ -66,12 +70,16 @@ impl<'a> ResolvedEnv<'a> {
         self.0.get(key)
     }
 }
-impl<'a> Env for ResolvedEnv<'a> {
+impl<'a> Env for Vars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         self.0.get(var).map(|val| val.clone())
     }
 }
 
+/// A single scope's worth of variable definitions, before $-expansion.
+/// For variables attached to a rule we keep them unexpanded in memory because
+/// they may be expanded in multiple different ways depending on which rule uses
+/// them.
 #[derive(Debug)]
 pub struct LazyVars(Vec<(String, EvalString<String>)>);
 impl LazyVars {

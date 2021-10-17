@@ -2,9 +2,12 @@
 
 use crate::scanner::{ParseResult, Scanner};
 
+/// Dependency information for a single target.
 #[derive(Debug)]
 pub struct Deps<'a> {
+    /// Output name, as found in the `.d` input.
     pub target: &'a str,
+    /// Input names, as found in the `.d` input.
     pub deps: Vec<&'a str>,
 }
 
@@ -26,6 +29,7 @@ fn skip_spaces(scanner: &mut Scanner) -> ParseResult<()> {
     Ok(())
 }
 
+/// Read one path from the input scanner.
 fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
     skip_spaces(scanner)?;
     let start = scanner.ofs;
@@ -45,6 +49,7 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
     Ok(Some(scanner.slice(start, end)))
 }
 
+/// Parse a `.d` file into `Deps`.
 pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
     let target = match read_path(scanner)? {
         None => return scanner.parse_error("expected file"),

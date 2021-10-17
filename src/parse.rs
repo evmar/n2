@@ -1,6 +1,6 @@
 //! Parser for .ninja files.
 
-use crate::eval::{EvalPart, EvalString, LazyVars, ResolvedEnv};
+use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
 #[derive(Debug)]
@@ -31,14 +31,14 @@ pub enum Statement<'a> {
 
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
-    pub vars: ResolvedEnv<'a>,
+    pub vars: Vars<'a>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(scanner: Scanner<'a>) -> Parser<'a> {
         Parser {
             scanner: scanner,
-            vars: ResolvedEnv::new(),
+            vars: Vars::new(),
         }
     }
 

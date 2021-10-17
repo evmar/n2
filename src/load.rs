@@ -1,4 +1,4 @@
-//! State loading: combines .ninja parsing with constructing the build graph.
+//! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::graph::FileId;
 use crate::parse::Statement;
@@ -136,7 +136,7 @@ impl Loader {
     fn add_build<'a>(
         &mut self,
         filename: std::rc::Rc<String>,
-        env: &eval::ResolvedEnv<'a>,
+        env: &eval::Vars<'a>,
         b: parse::Build,
     ) -> Result<(), String> {
         let ins: Vec<FileId> = b.ins.into_iter().map(|f| self.file_id(f)).collect();
