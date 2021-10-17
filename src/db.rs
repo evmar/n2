@@ -1,7 +1,6 @@
 //! The n2 database stores information about previous builds for determining which files are up
 //! to date.
 
-use crate::graph::BuildId;
 use crate::graph::FileId;
 use crate::graph::Graph;
 use crate::load::Loader;
@@ -72,12 +71,16 @@ impl Writer {
         Ok(id)
     }
 
-    pub fn write_state(&mut self, graph: &Graph, id: BuildId) -> std::io::Result<()> {
-        let build = graph.build(id);
-        for &id in &build.outs {
-            self.ensure_id(graph, id)?;
+    pub fn write_deps(&mut self, graph: &Graph, outs: &[FileId], deps: &[FileId]) -> std::io::Result<()> {
+        let mut dbdeps = Vec::new();
+        for &dep in deps {
+            let id = self.ensure_id(graph, dep)?;
+            dbdeps.push(id);
         }
-        // TODO write build
+        for &out in outs {
+            let _id = self.ensure_id(graph, out)?;
+            // TODO write edge info
+        }
         Ok(())
     }
 }
@@ -119,7 +122,7 @@ fn read(loader: &mut Loader, mut f: File) -> Result<Writer, String> {
         };
         if len & 0b1000_0000_0000_0000 == 0 {
             let name = r.read_str(len as usize).map_err(|err| err.to_string())?;
-            let fileid = loader.file_id(name);
+            let fileid = loader.graph.file_id(&name);
             state.db_ids.insert(fileid, Id(state.fileids.len()));
             state.fileids.push(fileid);
         } else {

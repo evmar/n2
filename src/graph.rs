@@ -1,5 +1,7 @@
 //! The build graph, a graph between files and commands.
 
+use crate::canon::canon_path;
+use std::collections::HashMap;
 use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
 
@@ -63,6 +65,7 @@ const UNIT_SEPARATOR: u8 = 0x1F;
 pub struct Graph {
     files: Vec<File>,
     builds: Vec<Build>,
+    file_to_id: HashMap<String, FileId>,
 }
 
 impl Graph {
@@ -70,10 +73,11 @@ impl Graph {
         Graph {
             files: Vec::new(),
             builds: Vec::new(),
+            file_to_id: HashMap::new(),
         }
     }
 
-    pub fn add_file(&mut self, name: String) -> FileId {
+    fn add_file(&mut self, name: String) -> FileId {
         let id = self.files.len();
         self.files.push(File {
             name: name,
@@ -84,6 +88,18 @@ impl Graph {
     }
     pub fn file(&self, id: FileId) -> &File {
         &self.files[id.index()]
+    }
+    pub fn file_id(&mut self, f: &str) -> FileId {
+        // TODO: so many string copies :<
+        let canon = canon_path(f);
+        match self.file_to_id.get(&canon) {
+            Some(id) => *id,
+            None => {
+                let id = self.add_file(canon.clone());
+                self.file_to_id.insert(canon, id.clone());
+                id
+            }
+        }
     }
 
     pub fn add_build(&mut self, build: Build) {

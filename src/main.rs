@@ -1,6 +1,7 @@
 extern crate getopts;
 extern crate hashbrown;
 
+mod canon;
 mod db;
 mod graph;
 //mod intern;

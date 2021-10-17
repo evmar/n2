@@ -115,7 +115,7 @@ impl<'a> Work<'a> {
         true
     }
 
-    fn read_depfile(&self, _build: &Build, path: &str) -> Result<Vec<String>, String> {
+    fn read_depfile(&mut self, id: BuildId, path: &str) -> Result<(), String> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return Err(format!("read {}: {}", path, e)),
@@ -126,7 +126,9 @@ impl<'a> Work<'a> {
         let deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
-        Ok(deps.deps.into_iter().map(|n| n.to_string()).collect())
+        let depids: Vec<_> = deps.deps.into_iter().map(|dep| self.graph.file_id(dep)).collect();
+        self.db.write_deps(self.graph, &self.graph.build(id).outs, &depids).map_err(|err| err.to_string())?;
+        Ok(())
     }
 
     fn run_one(&mut self, id: BuildId) -> Result<(), String> {
@@ -155,14 +157,13 @@ impl<'a> Work<'a> {
             return Err(format!("subcommand failed"));
         }
         if let Some(depfile) = &build.depfile {
-            for dep in self.read_depfile(build, depfile)? {
-                println!("add {:?}", self.graph.add_file(dep));
-            }
+            let depfile = &depfile.clone();
+            self.read_depfile(id, depfile)?;
         }
         Ok(())
     }
 
-    fn build_finished(&mut self, state: &mut State, id: BuildId) -> std::io::Result<()> {
+    fn build_finished(&mut self, state: &mut State, id: BuildId) {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
         let hash = state.hash(self.graph, id);
@@ -185,7 +186,6 @@ impl<'a> Work<'a> {
             }
             self.ready.insert(id);
         }
-        self.db.write_state(self.graph, id)
     }
 
     pub fn run(&mut self, state: &mut State) -> Result<(), String> {
@@ -199,8 +199,7 @@ impl<'a> Work<'a> {
             self.want.remove(&id);
             self.ready.remove(&id);
             self.run_one(id)?;
-            self.build_finished(state, id)
-                .map_err(|err| format!("{}", err))?;
+            self.build_finished(state, id);
         }
         Ok(())
     }
