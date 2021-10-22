@@ -53,10 +53,11 @@ pub struct Build {
     pub location: FileLoc,
     pub cmdline: Option<String>,
     pub depfile: Option<String>,
-    pub ins: Vec<FileId>,
+    ins: Vec<FileId>,
     explicit_ins: usize,
     implicit_ins: usize,
-    pub outs: Vec<FileId>,
+    deps_ins: usize,
+    outs: Vec<FileId>,
     explicit_outs: usize,
 }
 impl Build {
@@ -68,6 +69,7 @@ impl Build {
             ins: Vec::new(),
             explicit_ins: 0,
             implicit_ins: 0,
+            deps_ins: 0,
             outs: Vec::new(),
             explicit_outs: 0,
         }
@@ -81,14 +83,37 @@ impl Build {
         self.outs = outs;
         self.explicit_outs = exp;
     }
+    /// Input paths that appear in `$in`.
     pub fn explicit_ins(&self) -> &[FileId] {
         &self.ins[0..self.explicit_ins]
     }
+    /// Input paths that, if changed, invalidate the output.
     pub fn dirtying_ins(&self) -> &[FileId] {
-        &self.ins[0..(self.explicit_ins + self.implicit_ins)]
+        &self.ins[0..(self.explicit_ins + self.implicit_ins + self.deps_ins)]
     }
+    /// Input paths that are needed before building.
+    pub fn depend_ins(&self) -> &[FileId] {
+        // TODO order-only
+        &self.ins[0..(self.explicit_ins + self.implicit_ins + self.deps_ins)]
+    }
+    /// Input paths that were discovered after building, for use in the next build.
+    pub fn take_deps_ins(&mut self) -> Vec<FileId> {
+        let mut deps = Vec::new();
+        for i in (self.explicit_ins + self.implicit_ins)
+            ..(self.explicit_ins + self.implicit_ins + self.deps_ins)
+        {
+            deps.push(self.ins.swap_remove(i));
+        }
+        self.deps_ins = 0;
+        deps
+    }
+    /// Output paths that appear in `$in`.
     pub fn explicit_outs(&self) -> &[FileId] {
         &self.outs[0..self.explicit_outs]
+    }
+    /// Output paths that are updated when the build runs.
+    pub fn outs(&self) -> &[FileId] {
+        &self.outs
     }
 }
 
@@ -150,6 +175,9 @@ impl Graph {
     }
     pub fn build(&self, id: BuildId) -> &Build {
         &self.builds[id.index()]
+    }
+    pub fn build_mut(&mut self, id: BuildId) -> &mut Build {
+        &mut self.builds[id.index()]
     }
 }
 

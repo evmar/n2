@@ -38,6 +38,14 @@ pub struct Writer {
     w: BufWriter<File>,
 }
 
+fn write_id(w: &mut BufWriter<File>, id: Id) -> std::io::Result<()> {
+    let n = id.0 as u32;
+    if n > (1 << 24) {
+        panic!("too many fileids");
+    }
+    w.write_all(&[(n >> 16) as u8, (n >> 8) as u8, n as u8])
+}
+
 impl Writer {
     fn new(state: State, w: File) -> Self {
         Writer {
@@ -53,7 +61,7 @@ impl Writer {
         if len == 0 {
             panic!("no name");
         }
-        self.w.write_all(&[(len & 0xFF) as u8, (len >> 8) as u8])?;
+        self.w.write_all(&[(len >> 8) as u8, (len & 0xFF) as u8])?;
         self.w.write_all(name.as_bytes())?;
         self.w.flush()
     }
@@ -64,6 +72,7 @@ impl Writer {
             None => {
                 let id = Id(self.state.fileids.len());
                 self.state.db_ids.insert(fileid, id);
+                self.state.fileids.push(fileid);
                 self.write_file(&graph.file(fileid).name)?;
                 id
             }
@@ -82,11 +91,18 @@ impl Writer {
             let id = self.ensure_id(graph, dep)?;
             dbdeps.push(id);
         }
+        let mark: u16 = dbdeps.len() as u16;
+        println!("deps {:?}", dbdeps);
         for &out in outs {
-            let _id = self.ensure_id(graph, out)?;
-            // TODO write edge info
+            let id = self.ensure_id(graph, out)?;
+            self.w
+                .write_all(&[((mark >> 8) as u8) | 0b1000_0000, (mark & 0xFF) as u8])?;
+            write_id(&mut self.w, id)?;
+            for &dep in &dbdeps {
+                write_id(&mut self.w, dep)?;
+            }
         }
-        Ok(())
+        self.w.flush()
     }
 }
 
@@ -102,7 +118,15 @@ impl<'a> BReader<'a> {
             buf = std::mem::uninitialized();
             self.r.read_exact(&mut buf)?;
         }
-        Ok(((buf[1] as u16) << 8) | (buf[0] as u16))
+        Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
+    }
+    fn read_u24(&mut self)  -> std::io::Result<u32> {
+        let mut buf: [u8; 3];
+        unsafe {
+            buf = std::mem::uninitialized();
+            self.r.read_exact(&mut buf)?;
+        }
+        Ok(((buf[0] as u32) << 16) | ((buf[1] as u32) << 8)| (buf[2] as u32))
     }
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {
         // TODO: use uninit memory here
@@ -120,18 +144,24 @@ fn read(loader: &mut Loader, mut f: File) -> Result<Writer, String> {
     let mut state = State::new();
 
     loop {
-        let len = match r.read_u16() {
+        let mut len = match r.read_u16() {
             Ok(r) => r,
             Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(err) => return Err(err.to_string()),
         };
-        if len & 0b1000_0000_0000_0000 == 0 {
+        let mask = 0b1000_0000_0000_0000;
+        if len & mask  == 0 {
             let name = r.read_str(len as usize).map_err(|err| err.to_string())?;
             let fileid = loader.graph.file_id(&name);
             state.db_ids.insert(fileid, Id(state.fileids.len()));
             state.fileids.push(fileid);
         } else {
-            // TODO: deps
+            len = len & !mask;
+            let out = r.read_u24().map_err(|err| err.to_string())?;
+            let mut ins = Vec::new();
+            for _ in 0..len {
+                ins.push(r.read_u24().map_err(|err| err.to_string())?);
+            }
         }
     }
 

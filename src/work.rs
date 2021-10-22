@@ -38,7 +38,7 @@ impl<'a> Work<'a> {
 
         // Visit inputs first, to discover if any are out of date.
         let mut input_dirty = false;
-        let ins = self.graph.build(id).ins.clone();
+        let ins = self.graph.build(id).depend_ins().to_vec();
         for id in ins {
             let d = self.want_file(state, last_state, id)?;
             input_dirty = input_dirty || d;
@@ -104,7 +104,7 @@ impl<'a> Work<'a> {
     fn recheck_ready(&mut self, state: &State, id: BuildId) -> bool {
         let build = self.graph.build(id);
         println!("  recheck {:?} {}", id, build.location);
-        for &id in &build.ins {
+        for &id in build.depend_ins() {
             let file = self.graph.file(id);
             if state.file(id).hash.is_none() {
                 println!("    {:?} {} not ready", id, file.name);
@@ -123,17 +123,37 @@ impl<'a> Work<'a> {
         bytes.push(0);
 
         let mut scanner = Scanner::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
-        let deps = depfile::parse(&mut scanner)
+        let parsed_deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
-        let depids: Vec<_> = deps
-            .deps
-            .into_iter()
-            .map(|dep| self.graph.file_id(dep))
-            .collect();
-        self.db
-            .write_deps(self.graph, &self.graph.build(id).outs, &depids)
-            .map_err(|err| err.to_string())?;
+        let previous_deps = self.graph.build_mut(id).take_deps_ins();
+        let mut deps: Vec<FileId> = Vec::new();
+        for dep in parsed_deps.deps {
+            let depid = self.graph.file_id(dep);
+            if !self.graph.build(id).depend_ins().contains(&depid) {
+                deps.push(depid);
+            }
+        }
+        if deps != previous_deps {
+            println!(
+                "deps change: {:?} => {:?}",
+                previous_deps,
+                deps,
+            );
+            println!(
+                "deps change: {:?} => {:?}",
+                previous_deps
+                    .iter()
+                    .map(|&id| &self.graph.file(id).name)
+                    .collect::<Vec<_>>(),
+                deps.iter()
+                    .map(|&id| &self.graph.file(id).name)
+                    .collect::<Vec<_>>(),
+            );
+            self.db
+                .write_deps(self.graph, &self.graph.build(id).outs(), &deps)
+                .map_err(|err| err.to_string())?;
+        }
         Ok(())
     }
 
@@ -174,7 +194,7 @@ impl<'a> Work<'a> {
         println!("finished {:?} {}", id, build.location);
         let hash = state.hash(self.graph, id);
         let mut ready_files = HashSet::new();
-        for &id in &build.outs {
+        for &id in build.outs() {
             let file = self.graph.file(id);
             println!("  wrote {:?} {:?}", id, file.name);
             state.file_mut(id).mtime = Some(MTime::Stamp(1));
