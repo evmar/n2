@@ -41,8 +41,12 @@ fn main() {
         Ok(ok) => ok,
     };
 
-    let target = default.expect("TODO");
-    println!("default {:?}", graph.file(target).name);
+    let target = match matches.free.len() {
+        0 => default.expect("TODO"),
+        1 => graph.file_id(&matches.free[0]),
+        _ => panic!("unimpl: multiple args"),
+    };
+    println!("target {:?}", graph.file(target).name);
     let last_state = graph::State::new(&graph);
     let mut state = graph::State::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
