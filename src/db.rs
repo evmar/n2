@@ -3,7 +3,6 @@
 
 use crate::graph::FileId;
 use crate::graph::Graph;
-use crate::load::Loader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -172,7 +171,7 @@ impl<'a> BReader<'a> {
     }
 }
 
-fn read(loader: &mut Loader, mut f: File) -> Result<Writer, String> {
+fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
     let mut r = BReader {
         r: std::io::BufReader::new(&mut f),
     };
@@ -187,7 +186,7 @@ fn read(loader: &mut Loader, mut f: File) -> Result<Writer, String> {
         let mask = 0b1000_0000_0000_0000;
         if len & mask == 0 {
             let name = r.read_str(len as usize).map_err(|err| err.to_string())?;
-            let fileid = loader.graph.file_id(&name);
+            let fileid = graph.file_id(&name);
             state.db_ids.insert(fileid, Id(state.fileids.len()));
             state.fileids.push(fileid);
         } else {
@@ -207,14 +206,14 @@ fn read(loader: &mut Loader, mut f: File) -> Result<Writer, String> {
     Ok(Writer::new(state, f))
 }
 
-/// Opens an on-disk database, loading its state into the provided Loader.
-pub fn open(loader: &mut Loader, path: &str) -> Result<Writer, String> {
+/// Opens an on-disk database, loading its state into the provided Graph.
+pub fn open(graph: &mut Graph, path: &str) -> Result<Writer, String> {
     match std::fs::OpenOptions::new()
         .read(true)
         .append(true)
         .open(path)
     {
-        Ok(f) => Ok(read(loader, f)?),
+        Ok(f) => Ok(read(graph, f)?),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let f =
                 std::fs::File::create(path).map_err(|err| format!("create {}: {}", path, err))?;

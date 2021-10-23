@@ -159,6 +159,7 @@ impl Loader {
 pub fn read() -> Result<(graph::Graph, db::Writer, Option<FileId>), String> {
     let mut loader = Loader::new();
     loader.read_file("build.ninja")?;
-    let db = db::open(&mut loader, ".n2_db").map_err(|err| format!("load .n2_db: {}", err))?;
+    let db =
+        db::open(&mut loader.graph, ".n2_db").map_err(|err| format!("load .n2_db: {}", err))?;
     Ok((loader.graph, db, loader.default))
 }
