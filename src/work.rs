@@ -135,11 +135,7 @@ impl<'a> Work<'a> {
             }
         }
         if deps != previous_deps {
-            println!(
-                "deps change: {:?} => {:?}",
-                previous_deps,
-                deps,
-            );
+            println!("deps change: {:?} => {:?}", previous_deps, deps,);
             println!(
                 "deps change: {:?} => {:?}",
                 previous_deps

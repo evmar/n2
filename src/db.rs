@@ -7,7 +7,6 @@ use crate::load::Loader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::io::BufWriter;
 use std::io::Read;
 use std::io::Write;
 
@@ -32,38 +31,73 @@ impl State {
     }
 }
 
+struct WriteBuf {
+    buf: [u8; 4096],
+    len: usize,
+}
+
+impl WriteBuf {
+    #[allow(deprecated)]
+    fn new() -> Self {
+        unsafe {
+            WriteBuf {
+                buf: std::mem::uninitialized(),
+                len: 0,
+            }
+        }
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.buf[self.len] = n;
+        self.len += 1;
+    }
+
+    fn write_u16(&mut self, n: u16) {
+        self.write_u8((n >> 8) as u8);
+        self.write_u8((n & 0xFF) as u8);
+    }
+
+    fn write_str(&mut self, s: &str) {
+        self.write_u16(s.len() as u16);
+        self.buf[self.len..self.len + s.len()].copy_from_slice(s.as_bytes());
+        self.len += s.len();
+    }
+
+    fn write_id(&mut self, id: Id) {
+        let n = id.0 as u32;
+        if n > (1 << 24) {
+            panic!("too many fileids");
+        }
+        self.write_u8((n >> 16) as u8);
+        self.write_u8((n >> 8) as u8);
+        self.write_u8(n as u8);
+    }
+
+    fn flush<W: Write>(&mut self, w: &mut W) -> std::io::Result<()> {
+        w.write_all(&self.buf[0..self.len])?;
+        self.len = 0;
+        Ok(())
+    }
+}
+
 /// An opened database, ready for writes.
 pub struct Writer {
     state: State,
-    w: BufWriter<File>,
-}
-
-fn write_id(w: &mut BufWriter<File>, id: Id) -> std::io::Result<()> {
-    let n = id.0 as u32;
-    if n > (1 << 24) {
-        panic!("too many fileids");
-    }
-    w.write_all(&[(n >> 16) as u8, (n >> 8) as u8, n as u8])
+    w: File,
 }
 
 impl Writer {
     fn new(state: State, w: File) -> Self {
-        Writer {
-            state: state,
-            w: BufWriter::new(w),
-        }
+        Writer { state: state, w: w }
     }
+
     fn write_file(&mut self, name: &str) -> std::io::Result<()> {
         if name.len() >= 0b1000_0000 {
             panic!("filename too long");
         }
-        let len = name.len() as u16;
-        if len == 0 {
-            panic!("no name");
-        }
-        self.w.write_all(&[(len >> 8) as u8, (len & 0xFF) as u8])?;
-        self.w.write_all(name.as_bytes())?;
-        self.w.flush()
+        let mut buf = WriteBuf::new();
+        buf.write_str(name);
+        buf.flush(&mut self.w)
     }
 
     fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> std::io::Result<Id> {
@@ -86,23 +120,21 @@ impl Writer {
         outs: &[FileId],
         deps: &[FileId],
     ) -> std::io::Result<()> {
-        let mut dbdeps = Vec::new();
-        for &dep in deps {
-            let id = self.ensure_id(graph, dep)?;
-            dbdeps.push(id);
-        }
-        let mark: u16 = dbdeps.len() as u16;
-        println!("deps {:?}", dbdeps);
+        let mut buf = WriteBuf::new();
+        let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
+        buf.write_u16(mark);
         for &out in outs {
             let id = self.ensure_id(graph, out)?;
-            self.w
-                .write_all(&[((mark >> 8) as u8) | 0b1000_0000, (mark & 0xFF) as u8])?;
-            write_id(&mut self.w, id)?;
-            for &dep in &dbdeps {
-                write_id(&mut self.w, dep)?;
-            }
+            buf.write_id(id);
         }
-        self.w.flush()
+
+        buf.write_u16(deps.len() as u16);
+        for &dep in deps {
+            let id = self.ensure_id(graph, dep)?;
+            buf.write_id(id);
+        }
+
+        buf.flush(&mut self.w)
     }
 }
 
@@ -120,13 +152,16 @@ impl<'a> BReader<'a> {
         }
         Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
     }
-    fn read_u24(&mut self)  -> std::io::Result<u32> {
+    fn read_u24(&mut self) -> std::io::Result<u32> {
         let mut buf: [u8; 3];
         unsafe {
             buf = std::mem::uninitialized();
             self.r.read_exact(&mut buf)?;
         }
-        Ok(((buf[0] as u32) << 16) | ((buf[1] as u32) << 8)| (buf[2] as u32))
+        Ok(((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32))
+    }
+    fn read_id(&mut self) -> std::io::Result<Id> {
+        self.read_u24().map(|n| Id(n as usize))
     }
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {
         // TODO: use uninit memory here
@@ -150,14 +185,18 @@ fn read(loader: &mut Loader, mut f: File) -> Result<Writer, String> {
             Err(err) => return Err(err.to_string()),
         };
         let mask = 0b1000_0000_0000_0000;
-        if len & mask  == 0 {
+        if len & mask == 0 {
             let name = r.read_str(len as usize).map_err(|err| err.to_string())?;
             let fileid = loader.graph.file_id(&name);
             state.db_ids.insert(fileid, Id(state.fileids.len()));
             state.fileids.push(fileid);
         } else {
             len = len & !mask;
-            let out = r.read_u24().map_err(|err| err.to_string())?;
+            let mut outs = Vec::new();
+            for _ in 0..len {
+                outs.push(r.read_id().map_err(|err| err.to_string())?);
+            }
+            let len = r.read_u16().map_err(|err| err.to_string())?;
             let mut ins = Vec::new();
             for _ in 0..len {
                 ins.push(r.read_u24().map_err(|err| err.to_string())?);
