@@ -126,28 +126,17 @@ impl<'a> Work<'a> {
         let parsed_deps = depfile::parse(&mut scanner)
             .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
-        let previous_deps = self.graph.build_mut(id).take_deps_ins();
-        let mut deps: Vec<FileId> = Vec::new();
-        for dep in parsed_deps.deps {
-            let depid = self.graph.file_id(dep);
-            if !self.graph.build(id).depend_ins().contains(&depid) {
-                deps.push(depid);
-            }
-        }
-        if deps != previous_deps {
-            println!("deps change: {:?} => {:?}", previous_deps, deps,);
-            println!(
-                "deps change: {:?} => {:?}",
-                previous_deps
-                    .iter()
-                    .map(|&id| &self.graph.file(id).name)
-                    .collect::<Vec<_>>(),
-                deps.iter()
-                    .map(|&id| &self.graph.file(id).name)
-                    .collect::<Vec<_>>(),
-            );
+        let deps: Vec<FileId> = parsed_deps
+            .deps
+            .iter()
+            .map(|dep| self.graph.file_id(dep))
+            .collect();
+
+        if self.graph.build_mut(id).update_deps(deps) {
+            let new_deps = self.graph.build(id).deps_ins();
+            println!("deps changed {:?}", new_deps);
             self.db
-                .write_deps(self.graph, &self.graph.build(id).outs(), &deps)
+                .write_deps(self.graph, &self.graph.build(id).outs(), new_deps)
                 .map_err(|err| err.to_string())?;
         }
         Ok(())
@@ -185,14 +174,19 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    fn build_finished(&mut self, state: &mut State, id: BuildId) {
+    fn build_finished(&mut self, state: &mut State, id: BuildId) -> Result<(), String> {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
+        // We may have discovered new deps, so ensure we have mtimes for those.
+        for &id in build.deps_ins() {
+            state.stat(self.graph, id).map_err(|err| err.to_string())?;
+        }
         let hash = state.hash(self.graph, id);
         let mut ready_files = HashSet::new();
         for &id in build.outs() {
             let file = self.graph.file(id);
             println!("  wrote {:?} {:?}", id, file.name);
+            // TODO: actually stat
             state.file_mut(id).mtime = Some(MTime::Stamp(1));
             state.file_mut(id).hash = Some(hash);
             for &id in &file.dependents {
@@ -208,6 +202,7 @@ impl<'a> Work<'a> {
             }
             self.ready.insert(id);
         }
+        Ok(())
     }
 
     pub fn run(&mut self, state: &mut State) -> Result<(), String> {
@@ -221,7 +216,7 @@ impl<'a> Work<'a> {
             self.want.remove(&id);
             self.ready.remove(&id);
             self.run_one(id)?;
-            self.build_finished(state, id);
+            self.build_finished(state, id)?;
         }
         Ok(())
     }

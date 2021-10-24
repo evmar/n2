@@ -1,16 +1,18 @@
-//! The n2 database stores information about previous builds for determining which files are up
-//! to date.
+//! The n2 database stores information about previous builds for determining
+//! which files are up to date.
 
+use crate::graph::BuildId;
 use crate::graph::FileId;
 use crate::graph::Graph;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 
 /// Files are represented as integers that are stable across n2 executions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Id(usize);
 
 /// The loaded state of a database, as needed to make updates to the stored
@@ -177,6 +179,12 @@ fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
     };
     let mut state = State::new();
 
+    // Any given file may occur in the input multiple times, and we only want
+    // to use the recorded state for the last one.  So for each file we see,
+    // map it to the corresponding build and only store the most recent state
+    // we have for it.
+
+    let mut id_to_deps: HashMap<BuildId, Vec<FileId>> = HashMap::new();
     loop {
         let mut len = match r.read_u16() {
             Ok(r) => r,
@@ -191,16 +199,33 @@ fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
             state.fileids.push(fileid);
         } else {
             len = len & !mask;
-            let mut outs = Vec::new();
+            let mut bids = HashSet::new();
             for _ in 0..len {
-                outs.push(r.read_id().map_err(|err| err.to_string())?);
+                let id = r.read_id().map_err(|err| err.to_string())?;
+                if let Some(bid) = graph.file(state.fileids[id.0]).input {
+                    bids.insert(bid);
+                }
             }
             let len = r.read_u16().map_err(|err| err.to_string())?;
-            let mut ins = Vec::new();
+            let mut deps = Vec::new();
             for _ in 0..len {
-                ins.push(r.read_u24().map_err(|err| err.to_string())?);
+                let id = r.read_id().map_err(|err| err.to_string())?;
+                deps.push(state.fileids[id.0]);
+            }
+            if bids.len() == 1 {
+                // Common case: only one associated build.
+                let &id = bids.iter().next().unwrap();
+                id_to_deps.insert(id, deps);
+            } else {
+                for &id in &bids {
+                    id_to_deps.insert(id, deps.clone());
+                }
             }
         }
+    }
+
+    for (id, deps) in id_to_deps {
+        graph.build_mut(id).set_deps(deps.as_slice());
     }
 
     Ok(Writer::new(state, f))

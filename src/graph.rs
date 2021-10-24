@@ -96,16 +96,36 @@ impl Build {
         // TODO order-only
         &self.ins[0..(self.explicit_ins + self.implicit_ins + self.deps_ins)]
     }
-    /// Input paths that were discovered after building, for use in the next build.
-    pub fn take_deps_ins(&mut self) -> Vec<FileId> {
-        let mut deps = Vec::new();
-        for i in (self.explicit_ins + self.implicit_ins)
-            ..(self.explicit_ins + self.implicit_ins + self.deps_ins)
-        {
-            deps.push(self.ins.swap_remove(i));
+    /// Potentially update deps with a new set of deps, returning true if they
+    /// changed.
+    pub fn update_deps(&mut self, mut deps: Vec<FileId>) -> bool {
+        // Filter out any deps that were explicitly listed in the build file.
+        // This is only a minor optimization.
+        let to_filter = &self.ins[0..(self.explicit_ins + self.implicit_ins)];
+        deps.retain(|id| !to_filter.contains(id));
+
+        if deps == self.deps_ins() {
+            return false;
         }
-        self.deps_ins = 0;
-        deps
+        self.set_deps(&deps);
+        return true;
+    }
+    pub fn set_deps(&mut self, deps: &[FileId]) {
+        if self.deps_ins > 0 {
+            // TODO move order-only deps back
+            self.ins.truncate(self.ins.len() - self.deps_ins);
+            self.deps_ins = 0;
+        }
+        // TODO move order-only deps fwd
+        for &dep in deps {
+            self.ins.push(dep);
+            self.deps_ins += 1;
+        }
+    }
+    /// Input paths that were discovered after building, for use in the next build.
+    pub fn deps_ins(&self) -> &[FileId] {
+        &self.ins[(self.explicit_ins + self.implicit_ins)
+            ..(self.explicit_ins + self.implicit_ins + self.deps_ins)]
     }
     /// Output paths that appear in `$in`.
     pub fn explicit_outs(&self) -> &[FileId] {
@@ -260,8 +280,8 @@ impl State {
     }
 
     pub fn stat(&mut self, graph: &Graph, id: FileId) -> std::io::Result<MTime> {
-        if self.file(id).mtime.is_some() {
-            panic!("redundant stat");
+        if let Some(mtime) = self.file(id).mtime {
+            return Ok(mtime);
         }
         let name = &graph.file(id).name;
         // TODO: consider mtime_nsec(?)
