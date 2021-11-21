@@ -38,10 +38,12 @@ impl<'a> Work<'a> {
 
         // Visit inputs first, to discover if any are out of date.
         let mut input_dirty = false;
-        let ins = self.graph.build(id).depend_ins().to_vec();
-        for id in ins {
+        for id in self.graph.build(id).dirtying_ins().collect::<Vec<_>>() {
             let d = self.want_file(state, last_state, id)?;
             input_dirty = input_dirty || d;
+        }
+        for id in self.graph.build(id).order_only_ins().to_vec() {
+            self.want_file(state, last_state, id)?;
         }
 
         let dirty = input_dirty
@@ -70,24 +72,22 @@ impl<'a> Work<'a> {
             return Ok(*dirty);
         }
 
-        let dirty = match self.graph.file(id).input {
+        let file = self.graph.file(id);
+        let dirty = match file.input {
             None => {
-                self.stat(state, id)?;
-                state.file_mut(id).hash = Some(Hash::todo()); // ready
+                let mtime = self.stat(&file.name)?;
+                state.set_state(
+                    id,
+                    FileState {
+                        mtime: mtime,
+                        hash: Hash::todo(),
+                    },
+                );
                 false
             }
             Some(bid) => {
-                if self.want_build(state, last_state, bid)? {
-                    true
-                } else {
-                    match self.stat(state, id)? {
-                        MTime::Missing => true,
-                        MTime::Stamp(_) => {
-                            // compare hash
-                            false
-                        }
-                    }
-                }
+                self.want_build(state, last_state, bid)?;
+                true
             }
         };
 
@@ -95,18 +95,16 @@ impl<'a> Work<'a> {
         Ok(dirty)
     }
 
-    pub fn stat(&self, state: &mut State, id: FileId) -> Result<MTime, String> {
-        state
-            .stat(self.graph, id)
-            .map_err(|err| format!("stat {}: {}", self.graph.file(id).name, err))
+    pub fn stat(&self, path: &str) -> Result<MTime, String> {
+        stat(path).map_err(|err| format!("stat {}: {}", path, err))
     }
 
     fn recheck_ready(&mut self, state: &State, id: BuildId) -> bool {
         let build = self.graph.build(id);
         println!("  recheck {:?} {}", id, build.location);
-        for &id in build.depend_ins() {
+        for id in build.depend_ins() {
             let file = self.graph.file(id);
-            if state.file(id).hash.is_none() {
+            if state.file(id).is_none() {
                 println!("    {:?} {} not ready", id, file.name);
                 return false;
             }
@@ -179,7 +177,22 @@ impl<'a> Work<'a> {
         println!("finished {:?} {}", id, build.location);
         // We may have discovered new deps, so ensure we have mtimes for those.
         for &id in build.deps_ins() {
-            state.stat(self.graph, id).map_err(|err| err.to_string())?;
+            if state.file(id).is_some() {
+                // Already have state for this file.
+                continue;
+            }
+            let file = self.graph.file(id);
+            if file.input.is_some() {
+                panic!("discovered new dep on generated file {}", file.name);
+            }
+            let mtime = self.stat(&file.name)?;
+            state.set_state(
+                id,
+                FileState {
+                    mtime: mtime,
+                    hash: Hash::todo(),
+                },
+            );
         }
         let hash = state.hash(self.graph, id);
         let mut ready_files = HashSet::new();
@@ -187,8 +200,13 @@ impl<'a> Work<'a> {
             let file = self.graph.file(id);
             println!("  wrote {:?} {:?}", id, file.name);
             // TODO: actually stat
-            state.file_mut(id).mtime = Some(MTime::Stamp(1));
-            state.file_mut(id).hash = Some(hash);
+            state.set_state(
+                id,
+                FileState {
+                    mtime: MTime::Stamp(1),
+                    hash: hash,
+                },
+            );
             for &id in &file.dependents {
                 if !self.want.contains(&id) {
                     continue;

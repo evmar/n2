@@ -90,6 +90,7 @@ impl Loader {
             b.ins.into_iter().map(|f| self.graph.file_id(&f)).collect(),
             b.explicit_ins,
             b.implicit_ins,
+            b.order_only_ins,
         );
         build.set_outs(
             b.outs.into_iter().map(|f| self.graph.file_id(&f)).collect(),

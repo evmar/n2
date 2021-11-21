@@ -225,7 +225,7 @@ fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
     }
 
     for (id, deps) in id_to_deps {
-        graph.build_mut(id).set_deps(deps.as_slice());
+        graph.build_mut(id).set_deps(deps);
     }
 
     Ok(Writer::new(state, f))

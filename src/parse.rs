@@ -18,6 +18,7 @@ pub struct Build<'a> {
     pub ins: Vec<String>,
     pub explicit_ins: usize,
     pub implicit_ins: usize,
+    pub order_only_ins: usize,
     pub vars: LazyVars,
 }
 
@@ -170,6 +171,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        let order_only_ins = ins.len() - implicit_ins - explicit_ins;
 
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
@@ -181,6 +183,7 @@ impl<'a> Parser<'a> {
             ins: ins,
             explicit_ins: explicit_ins,
             implicit_ins: implicit_ins,
+            order_only_ins: order_only_ins,
             vars: vars,
         })
     }
