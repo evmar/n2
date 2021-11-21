@@ -121,7 +121,7 @@ impl Build {
     pub fn deps_ins(&self) -> &[FileId] {
         &self.deps_ins
     }
-    /// Output paths that appear in `$in`.
+    /// Output paths that appear in `$out`.
     pub fn explicit_outs(&self) -> &[FileId] {
         &self.outs[0..self.explicit_outs]
     }
@@ -224,19 +224,13 @@ pub struct FileState {
 
 pub struct State {
     files: Vec<Option<FileState>>,
-    builds: Vec<Option<Hash>>,
 }
 
 impl State {
     pub fn new(graph: &Graph) -> Self {
         let mut files = Vec::new();
         files.resize(graph.files.len(), None);
-        let mut builds = Vec::new();
-        builds.resize(graph.builds.len(), None);
-        State {
-            files: files,
-            builds: builds,
-        }
+        State { files: files }
     }
 
     pub fn file(&self, id: FileId) -> Option<&FileState> {
@@ -252,35 +246,52 @@ impl State {
         self.files[id.index()] = Some(state)
     }
 
-    pub fn get_hash(&self, id: BuildId) -> Option<Hash> {
-        self.builds[id.index()]
+    pub fn hash_changed(&self, last_state: &State, id: FileId) -> bool {
+        let hash = match self.file(id) {
+            None => return true,
+            Some(filestate) => filestate.hash,
+        };
+        let last_hash = match last_state.file(id) {
+            None => return true,
+            Some(filestate) => filestate.hash,
+        };
+        return hash != last_hash;
     }
 
-    pub fn hash(&mut self, graph: &Graph, id: BuildId) -> Hash {
-        match self.get_hash(id) {
-            Some(hash) => hash,
-            None => {
-                let hash = self.do_hash(graph, id);
-                self.builds[id.index()] = Some(hash);
-                hash
-            }
-        }
-    }
-
-    fn do_hash(&mut self, graph: &Graph, id: BuildId) -> Hash {
+    pub fn hash_outputs(&mut self, graph: &Graph, id: BuildId) -> std::io::Result<()> {
         let build = graph.build(id);
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut in_hash = std::collections::hash_map::DefaultHasher::new();
         for id in build.dirtying_ins() {
-            h.write(graph.file(id).name.as_bytes());
+            in_hash.write(graph.file(id).name.as_bytes());
             let mtime = self.file(id).unwrap().mtime;
             let mtime_int = match mtime {
                 MTime::Missing => 0,
                 MTime::Stamp(t) => t + 1,
             };
-            h.write_u32(mtime_int);
-            h.write_u8(UNIT_SEPARATOR);
+            in_hash.write_u32(mtime_int);
+            in_hash.write_u8(UNIT_SEPARATOR);
         }
-        h.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
-        Hash(h.finish())
+        in_hash.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
+        in_hash.write_u8(UNIT_SEPARATOR);
+
+        for &id in build.outs() {
+            let file = graph.file(id);
+            let mtime = stat(&file.name)?;
+            let mtime_int = match mtime {
+                MTime::Missing => 0,
+                MTime::Stamp(t) => t + 1,
+            };
+            let mut hash = in_hash.clone();
+            hash.write(file.name.as_bytes());
+            hash.write_u32(mtime_int);
+            self.set_state(
+                id,
+                FileState {
+                    mtime: mtime,
+                    hash: Hash(hash.finish()),
+                },
+            );
+        }
+        Ok(())
     }
 }
