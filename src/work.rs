@@ -4,6 +4,7 @@ use crate::db;
 use crate::depfile;
 use crate::graph::*;
 use crate::scanner::Scanner;
+use anyhow::{anyhow, bail};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -34,7 +35,7 @@ impl<'a> Work<'a> {
         state: &mut State,
         last_state: &State,
         id: BuildId,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         if self.want.contains(&id) {
             return Ok(true);
         }
@@ -53,9 +54,7 @@ impl<'a> Work<'a> {
         let mut output_dirty = false;
         if !input_dirty {
             // Ensure outputs are up to date relative to the build.
-            state
-                .hash_outputs(self.graph, id)
-                .map_err(|err| err.to_string())?;
+            state.hash_outputs(self.graph, id)?;
             for &id in self.graph.build(id).outs() {
                 if state.hash_changed(last_state, id) {
                     output_dirty = true;
@@ -83,7 +82,7 @@ impl<'a> Work<'a> {
         state: &mut State,
         last_state: &State,
         id: FileId,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         if let Some(&dirty) = self.files.get(&id) {
             return Ok(dirty);
         }
@@ -113,8 +112,8 @@ impl<'a> Work<'a> {
         Ok(dirty)
     }
 
-    pub fn stat(&self, path: &str) -> Result<MTime, String> {
-        stat(path).map_err(|err| format!("stat {}: {}", path, err))
+    pub fn stat(&self, path: &str) -> anyhow::Result<MTime> {
+        Ok(stat(path)?)
     }
 
     fn recheck_ready(&mut self, state: &State, id: BuildId) -> bool {
@@ -131,16 +130,16 @@ impl<'a> Work<'a> {
         true
     }
 
-    fn read_depfile(&mut self, id: BuildId, path: &str) -> Result<(), String> {
+    fn read_depfile(&mut self, id: BuildId, path: &str) -> anyhow::Result<()> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
-            Err(e) => return Err(format!("read {}: {}", path, e)),
+            Err(e) => bail!("read {}: {}", path, e),
         };
         bytes.push(0);
 
         let mut scanner = Scanner::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
         let parsed_deps = depfile::parse(&mut scanner)
-            .map_err(|err| format!("in {}: {}", path, scanner.format_parse_error(err)))?;
+            .map_err(|err| anyhow!("in {}: {}", path, scanner.format_parse_error(err)))?;
         // TODO verify deps refers to correct output
         let deps: Vec<FileId> = parsed_deps
             .deps
@@ -152,13 +151,12 @@ impl<'a> Work<'a> {
             let new_deps = self.graph.build(id).deps_ins();
             println!("deps changed {:?}", new_deps);
             self.db
-                .write_deps(self.graph, &self.graph.build(id).outs(), new_deps)
-                .map_err(|err| err.to_string())?;
+                .write_deps(self.graph, &self.graph.build(id).outs(), new_deps)?;
         }
         Ok(())
     }
 
-    fn run_one(&mut self, id: BuildId) -> Result<(), String> {
+    fn run_one(&mut self, id: BuildId) -> anyhow::Result<()> {
         let build = self.graph.build(id);
         let cmdline = match &build.cmdline {
             None => return Ok(()),
@@ -168,20 +166,15 @@ impl<'a> Work<'a> {
         let output = std::process::Command::new("sh")
             .arg("-c")
             .arg(cmdline)
-            .output()
-            .map_err(|err| format!("{}", err))?;
+            .output()?;
         if !output.stdout.is_empty() {
-            std::io::stdout()
-                .write_all(&output.stdout)
-                .map_err(|err| format!("{}", err))?;
+            std::io::stdout().write_all(&output.stdout)?;
         }
         if !output.stderr.is_empty() {
-            std::io::stdout()
-                .write_all(&output.stderr)
-                .map_err(|err| format!("{}", err))?;
+            std::io::stdout().write_all(&output.stderr)?;
         }
         if !output.status.success() {
-            return Err(format!("subcommand failed"));
+            bail!("subcommand failed");
         }
         if let Some(depfile) = &build.depfile {
             let depfile = &depfile.clone();
@@ -190,7 +183,7 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    fn build_finished(&mut self, state: &mut State, id: BuildId) -> Result<(), String> {
+    fn build_finished(&mut self, state: &mut State, id: BuildId) -> anyhow::Result<()> {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
         // We may have discovered new deps, so ensure we have mtimes for those.
@@ -213,9 +206,7 @@ impl<'a> Work<'a> {
             );
         }
 
-        state
-            .hash_outputs(self.graph, id)
-            .map_err(|err| err.to_string())?;
+        state.hash_outputs(self.graph, id)?;
 
         let mut ready_files = HashSet::new();
         for &id in build.outs() {
@@ -236,7 +227,7 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    pub fn run(&mut self, state: &mut State) -> Result<(), String> {
+    pub fn run(&mut self, state: &mut State) -> anyhow::Result<()> {
         while !self.want.is_empty() {
             let id = match self.ready.iter().next() {
                 None => {

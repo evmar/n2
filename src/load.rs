@@ -4,6 +4,7 @@ use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::scanner::Scanner;
 use crate::{db, eval, graph, parse};
+use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 
 struct BuildImplicitVars<'a> {
@@ -81,7 +82,7 @@ impl Loader {
         filename: std::rc::Rc<String>,
         env: &eval::Vars<'a>,
         b: parse::Build,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let mut build = graph::Build::new(graph::FileLoc {
             filename: filename,
             line: b.line,
@@ -99,7 +100,7 @@ impl Loader {
 
         let rule = match self.rules.get(b.rule) {
             Some(r) => r,
-            None => return Err(format!("unknown rule {:?}", b.rule)),
+            None => bail!("unknown rule {:?}", b.rule),
         };
 
         let implicit_vars = BuildImplicitVars {
@@ -123,10 +124,10 @@ impl Loader {
         Ok(())
     }
 
-    fn read_file(&mut self, path: &str) -> Result<(), String> {
+    fn read_file(&mut self, path: &str) -> anyhow::Result<()> {
         let mut bytes = match std::fs::read(path) {
             Ok(b) => b,
-            Err(e) => return Err(format!("read {}: {}", path, e)),
+            Err(e) => bail!("read {}: {}", path, e),
         };
         bytes.push(0);
         let filename = std::rc::Rc::new(String::from(path));
@@ -137,7 +138,7 @@ impl Loader {
         loop {
             let stmt = match parser
                 .read()
-                .map_err(|err| parser.format_parse_error(err))?
+                .map_err(|err| anyhow!(parser.format_parse_error(err)))?
             {
                 None => break,
                 Some(s) => s,
@@ -157,10 +158,10 @@ impl Loader {
     }
 }
 
-pub fn read() -> Result<(graph::Graph, db::Writer, Option<FileId>), String> {
+pub fn read() -> anyhow::Result<(graph::Graph, db::Writer, Option<FileId>)> {
     let mut loader = Loader::new();
     loader.read_file("build.ninja")?;
     let db =
-        db::open(&mut loader.graph, ".n2_db").map_err(|err| format!("load .n2_db: {}", err))?;
+        db::open(&mut loader.graph, ".n2_db").map_err(|err| anyhow!("load .n2_db: {}", err))?;
     Ok((loader.graph, db, loader.default))
 }

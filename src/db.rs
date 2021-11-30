@@ -4,6 +4,7 @@
 use crate::graph::BuildId;
 use crate::graph::FileId;
 use crate::graph::Graph;
+use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
@@ -173,7 +174,7 @@ impl<'a> BReader<'a> {
     }
 }
 
-fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
+fn read(graph: &mut Graph, mut f: File) -> anyhow::Result<Writer> {
     let mut r = BReader {
         r: std::io::BufReader::new(&mut f),
     };
@@ -189,11 +190,11 @@ fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
         let mut len = match r.read_u16() {
             Ok(r) => r,
             Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(err) => return Err(err.to_string()),
+            Err(err) => bail!(err),
         };
         let mask = 0b1000_0000_0000_0000;
         if len & mask == 0 {
-            let name = r.read_str(len as usize).map_err(|err| err.to_string())?;
+            let name = r.read_str(len as usize)?;
             let fileid = graph.file_id(&name);
             state.db_ids.insert(fileid, Id(state.fileids.len()));
             state.fileids.push(fileid);
@@ -201,15 +202,15 @@ fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
             len = len & !mask;
             let mut bids = HashSet::new();
             for _ in 0..len {
-                let id = r.read_id().map_err(|err| err.to_string())?;
+                let id = r.read_id()?;
                 if let Some(bid) = graph.file(state.fileids[id.0]).input {
                     bids.insert(bid);
                 }
             }
-            let len = r.read_u16().map_err(|err| err.to_string())?;
+            let len = r.read_u16()?;
             let mut deps = Vec::new();
             for _ in 0..len {
-                let id = r.read_id().map_err(|err| err.to_string())?;
+                let id = r.read_id()?;
                 deps.push(state.fileids[id.0]);
             }
             if bids.len() == 1 {
@@ -232,18 +233,17 @@ fn read(graph: &mut Graph, mut f: File) -> Result<Writer, String> {
 }
 
 /// Opens an on-disk database, loading its state into the provided Graph.
-pub fn open(graph: &mut Graph, path: &str) -> Result<Writer, String> {
+pub fn open(graph: &mut Graph, path: &str) -> anyhow::Result<Writer> {
     match std::fs::OpenOptions::new()
         .read(true)
         .append(true)
         .open(path)
     {
-        Ok(f) => Ok(read(graph, f)?),
+        Ok(f) => read(graph, f),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            let f =
-                std::fs::File::create(path).map_err(|err| format!("create {}: {}", path, err))?;
+            let f = std::fs::File::create(path)?;
             Ok(Writer::new(State::new(), f))
         }
-        Err(err) => Err(err.to_string()),
+        Err(err) => Err(anyhow!(err)),
     }
 }
