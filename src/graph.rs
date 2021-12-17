@@ -232,10 +232,15 @@ impl FileState {
         self.files[id.index()]
     }
     pub fn set_mtime(&mut self, id: FileId, mtime: MTime) {
+        // The set of files may grow after initialization time due to discovering deps after builds.
         if id.index() >= self.files.len() {
             self.files.resize(id.index() + 1, None);
         }
         self.files[id.index()] = Some(mtime)
+    }
+    pub fn restat(&mut self, id: FileId, path: &str) -> std::io::Result<()> {
+        self.set_mtime(id, stat(path)?);
+        Ok(())
     }
     pub fn set_hash(&mut self, id: BuildId, hash: Hash) {
         self.builds[id.index()] = Some(hash);
