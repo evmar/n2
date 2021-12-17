@@ -54,8 +54,8 @@ fn main() {
     println!("target {:?}", graph.file(target).name);
     let mut state = graph::FileState::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
-    let mut work = work::Work::new(&mut graph, &mut db);
-    work.want_file(&mut state, &last_state, target).unwrap();
+    let mut work = work::Work::new(&mut graph, &last_state, &mut db);
+    work.want_file(&mut state, target).unwrap();
     match work.run(&mut state) {
         Ok(_) => {}
         Err(err) => {
