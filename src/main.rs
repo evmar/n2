@@ -33,7 +33,12 @@ fn main() {
         std::env::set_current_dir(dir).unwrap();
     }
 
-    let (mut graph, mut db, default) = match load::read() {
+    let load::State {
+        mut graph,
+        mut db,
+        default,
+        filestate: last_state,
+    } = match load::read() {
         Err(err) => {
             println!("ERROR: {}", err);
             return;
@@ -47,8 +52,7 @@ fn main() {
         _ => panic!("unimpl: multiple args"),
     };
     println!("target {:?}", graph.file(target).name);
-    let last_state = graph::State::new(&graph);
-    let mut state = graph::State::new(&graph);
+    let mut state = graph::FileState::new(&graph);
     //graph::stat_recursive(&graph, &mut state, target).unwrap();
     let mut work = work::Work::new(&mut graph, &mut db);
     work.want_file(&mut state, &last_state, target).unwrap();

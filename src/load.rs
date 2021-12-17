@@ -52,10 +52,17 @@ impl std::borrow::Borrow<str> for SavedRule {
     }
 }
 
-pub struct Loader {
-    pub graph: graph::Graph,
+struct Loader {
+    graph: graph::Graph,
     default: Option<FileId>,
     rules: HashMap<String, parse::Rule>,
+}
+
+pub struct State {
+    pub graph: graph::Graph,
+    pub db: db::Writer,
+    pub filestate: graph::FileState,
+    pub default: Option<FileId>,
 }
 
 impl Loader {
@@ -158,10 +165,16 @@ impl Loader {
     }
 }
 
-pub fn read() -> anyhow::Result<(graph::Graph, db::Writer, Option<FileId>)> {
+pub fn read() -> anyhow::Result<State> {
     let mut loader = Loader::new();
     loader.read_file("build.ninja")?;
-    let db =
-        db::open(&mut loader.graph, ".n2_db").map_err(|err| anyhow!("load .n2_db: {}", err))?;
-    Ok((loader.graph, db, loader.default))
+    let mut filestate = graph::FileState::new(&loader.graph);
+    let db = db::open(".n2_db", &mut loader.graph, &mut filestate)
+        .map_err(|err| anyhow!("load .n2_db: {}", err))?;
+    Ok(State {
+        graph: loader.graph,
+        filestate: filestate,
+        db: db,
+        default: loader.default,
+    })
 }

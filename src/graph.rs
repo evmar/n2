@@ -6,13 +6,7 @@ use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Hash(u64);
-
-impl Hash {
-    pub fn todo() -> Self {
-        Hash(0)
-    }
-}
+pub struct Hash(pub u64);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FileId(usize);
@@ -214,84 +208,81 @@ pub fn stat(path: &str) -> std::io::Result<MTime> {
     })
 }
 
-#[derive(Clone, Debug)]
 pub struct FileState {
-    // used by downstream builds for computing their hash.
-    pub mtime: MTime,
-    // hash of input + mtime, used to tell if file is up to date.
-    pub hash: Hash,
+    files: Vec<Option<MTime>>,
+    builds: Vec<Option<Hash>>,
 }
 
-pub struct State {
-    files: Vec<Option<FileState>>,
-}
-
-impl State {
+impl FileState {
     pub fn new(graph: &Graph) -> Self {
         let mut files = Vec::new();
         files.resize(graph.files.len(), None);
-        State { files: files }
+        let mut builds = Vec::new();
+        builds.resize(graph.builds.len(), None);
+        FileState {
+            files: files,
+            builds: builds,
+        }
     }
 
-    pub fn file(&self, id: FileId) -> Option<&FileState> {
+    pub fn file(&self, id: FileId) -> Option<MTime> {
         if id.index() >= self.files.len() {
             return None;
         }
-        self.files[id.index()].as_ref()
+        self.files[id.index()]
     }
-    pub fn set_state(&mut self, id: FileId, state: FileState) {
+    pub fn set_mtime(&mut self, id: FileId, mtime: MTime) {
         if id.index() >= self.files.len() {
             self.files.resize(id.index() + 1, None);
         }
-        self.files[id.index()] = Some(state)
+        self.files[id.index()] = Some(mtime)
+    }
+    pub fn set_hash(&mut self, id: BuildId, hash: Hash) {
+        self.builds[id.index()] = Some(hash);
     }
 
-    pub fn hash_changed(&self, last_state: &State, id: FileId) -> bool {
-        let hash = match self.file(id) {
+    pub fn hash_changed(&self, last_state: &FileState, id: BuildId) -> bool {
+        let hash = match self.builds[id.0] {
             None => return true,
-            Some(filestate) => filestate.hash,
+            Some(h) => h,
         };
-        let last_hash = match last_state.file(id) {
+        let last_hash = match last_state.builds[id.0] {
             None => return true,
-            Some(filestate) => filestate.hash,
+            Some(h) => h,
         };
         return hash != last_hash;
     }
 
-    pub fn hash_outputs(&mut self, graph: &Graph, id: BuildId) -> std::io::Result<()> {
+    pub fn hash(&mut self, graph: &Graph, id: BuildId) -> std::io::Result<Hash> {
         let build = graph.build(id);
-        let mut in_hash = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for id in build.dirtying_ins() {
-            in_hash.write(graph.file(id).name.as_bytes());
-            let mtime = self.file(id).unwrap().mtime;
+            hasher.write(graph.file(id).name.as_bytes());
+            let mtime = self.file(id).unwrap();
             let mtime_int = match mtime {
                 MTime::Missing => 0,
                 MTime::Stamp(t) => t + 1,
             };
-            in_hash.write_u32(mtime_int);
-            in_hash.write_u8(UNIT_SEPARATOR);
+            hasher.write_u32(mtime_int);
+            hasher.write_u8(UNIT_SEPARATOR);
         }
-        in_hash.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
-        in_hash.write_u8(UNIT_SEPARATOR);
+        hasher.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
+        hasher.write_u8(UNIT_SEPARATOR);
 
         for &id in build.outs() {
             let file = graph.file(id);
             let mtime = stat(&file.name)?;
+            self.set_mtime(id, mtime);
             let mtime_int = match mtime {
                 MTime::Missing => 0,
                 MTime::Stamp(t) => t + 1,
             };
-            let mut hash = in_hash.clone();
-            hash.write(file.name.as_bytes());
-            hash.write_u32(mtime_int);
-            self.set_state(
-                id,
-                FileState {
-                    mtime: mtime,
-                    hash: Hash(hash.finish()),
-                },
-            );
+            hasher.write(file.name.as_bytes());
+            hasher.write_u32(mtime_int);
         }
-        Ok(())
+
+        let hash = Hash(hasher.finish());
+        self.builds[id.0] = Some(hash);
+        Ok(hash)
     }
 }
