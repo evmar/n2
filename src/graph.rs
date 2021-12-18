@@ -92,11 +92,9 @@ impl Build {
             .map(|id| *id)
     }
     /// Inputs that are needed before building.
+    /// Distinct from dirtying_ins in that it includes order-only dependencies.
     pub fn depend_ins(&self) -> impl Iterator<Item = FileId> + '_ {
         self.ins.iter().chain(self.deps_ins.iter()).map(|id| *id)
-    }
-    pub fn order_only_ins(&self) -> &[FileId] {
-        &self.ins[(self.explicit_ins + self.implicit_ins)..self.ins.len()]
     }
     /// Potentially update deps with a new set of deps, returning true if they changed.
     pub fn update_deps(&mut self, mut deps: Vec<FileId>) -> bool {

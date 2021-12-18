@@ -11,9 +11,13 @@ use std::io::Write;
 pub struct Work<'a> {
     graph: &'a mut Graph,
     db: &'a mut db::Writer,
+
     file_state: FileState,
     last_hashes: &'a Hashes,
+
+    /// Builds we want to ensure are up to date.
     want: HashSet<BuildId>,
+    /// Builds whose inputs are up to date and are ready to be hashes/run.
     ready: HashSet<BuildId>,
 }
 
@@ -37,30 +41,19 @@ impl<'a> Work<'a> {
             return Ok(());
         }
 
-        let mut inputs_ready = true;
-        for id in self.graph.build(id).dirtying_ins().collect::<Vec<_>>() {
-            let ready = self.want_file(id)?;
-            inputs_ready = inputs_ready && ready;
+        // Any Build that doesn't depend on an output of another Build is ready.
+        let mut ready = true;
+        for id in self.graph.build(id).depend_ins().collect::<Vec<_>>() {
+            let file_ready = self.want_file(id)?;
+            ready = ready && file_ready;
         }
-        for id in self.graph.build(id).order_only_ins().to_vec() {
-            self.want_file(id)?;
-            inputs_ready = inputs_ready && self.file_state.get(id).is_none();
-        }
+
         self.want.insert(id);
-        if inputs_ready {
+        if ready {
             self.ready.insert(id);
         }
 
         Ok(())
-    }
-
-    fn update_build(&mut self, id: BuildId) -> anyhow::Result<bool> {
-        let hash = hash_build(self.graph, &mut self.file_state, id)?;
-        if self.last_hashes.changed(id, hash) {
-            self.run_one(id)?;
-        }
-        self.build_finished(id)?;
-        Ok(true)
     }
 
     /// Visits a FileId that is an input to the desired output.
@@ -171,7 +164,8 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    fn build_finished(&mut self, id: BuildId) -> anyhow::Result<()> {
+    /// Given a build that just finished, check whether its dependent builds are now ready.
+    fn ready_dependents(&mut self, id: BuildId) -> anyhow::Result<()> {
         let build = self.graph.build(id);
         println!("finished {:?} {}", id, build.location);
         let mut ready_builds = HashSet::new();
@@ -189,6 +183,15 @@ impl<'a> Work<'a> {
             }
             self.ready.insert(id);
         }
+        Ok(())
+    }
+
+    fn update_build(&mut self, id: BuildId) -> anyhow::Result<()> {
+        let hash = hash_build(self.graph, &mut self.file_state, id)?;
+        if self.last_hashes.changed(id, hash) {
+            self.run_one(id)?;
+        }
+        self.ready_dependents(id)?;
         Ok(())
     }
 
