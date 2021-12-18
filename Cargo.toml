@@ -7,6 +7,4 @@ edition = "2018"
 
 [dependencies]
 getopts = "0.2"
-hashbrown = { version = "0.11.2", features = ["raw"] }
-ahash = "0.7.4"
 anyhow = "1.0"

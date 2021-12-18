@@ -1,4 +1,5 @@
 //! String interning.
+//! Not currently used in n2.
 
 use hashbrown::raw::RawTable;
 use std::hash::Hasher;
