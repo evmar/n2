@@ -1,9 +1,9 @@
 //! The n2 database stores information about previous builds for determining
 //! which files are up to date.
 
+use crate::graph::Hashes;
 use crate::graph::BuildId;
 use crate::graph::FileId;
-use crate::graph::FileState;
 use crate::graph::Graph;
 use crate::graph::Hash;
 use anyhow::{anyhow, bail};
@@ -209,7 +209,7 @@ impl<'a> BReader<'a> {
     }
 }
 
-fn read(mut f: File, graph: &mut Graph, state: &mut FileState) -> anyhow::Result<Writer> {
+fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
     let mut r = BReader {
         r: std::io::BufReader::new(&mut f),
     };
@@ -252,7 +252,7 @@ fn read(mut f: File, graph: &mut Graph, state: &mut FileState) -> anyhow::Result
                 // Common case: only one associated build.
                 let &id = bids.iter().next().unwrap();
                 graph.build_mut(id).set_deps(deps);
-                state.set_hash(id, hash);
+                hashes.set(id, hash);
             } else {
                 // The graph layout has changed since this build was recorded.
                 // The hashes won't line up anyway so it will be treated as dirty.
@@ -264,13 +264,13 @@ fn read(mut f: File, graph: &mut Graph, state: &mut FileState) -> anyhow::Result
 }
 
 /// Opens an on-disk database, loading its state into the provided Graph.
-pub fn open(path: &str, graph: &mut Graph, state: &mut FileState) -> anyhow::Result<Writer> {
+pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
     match std::fs::OpenOptions::new()
         .read(true)
         .append(true)
         .open(path)
     {
-        Ok(f) => read(f, graph, state),
+        Ok(f) => read(f, graph, hashes),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let f = std::fs::File::create(path)?;
             Ok(Writer::new(IdMap::new(), f))

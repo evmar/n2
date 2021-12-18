@@ -37,7 +37,7 @@ fn main() {
         mut graph,
         mut db,
         default,
-        filestate: last_state,
+        hashes: last_hashes,
     } = match load::read() {
         Err(err) => {
             println!("ERROR: {}", err);
@@ -52,11 +52,9 @@ fn main() {
         _ => panic!("unimpl: multiple args"),
     };
     println!("target {:?}", graph.file(target).name);
-    let mut state = graph::FileState::new(&graph);
-    //graph::stat_recursive(&graph, &mut state, target).unwrap();
-    let mut work = work::Work::new(&mut graph, &last_state, &mut db);
-    work.want_file(&mut state, target).unwrap();
-    match work.run(&mut state) {
+    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db);
+    work.want_file(target).unwrap();
+    match work.run() {
         Ok(_) => {}
         Err(err) => {
             println!("error: {}", err);

@@ -61,7 +61,7 @@ struct Loader {
 pub struct State {
     pub graph: graph::Graph,
     pub db: db::Writer,
-    pub filestate: graph::FileState,
+    pub hashes: graph::Hashes,
     pub default: Option<FileId>,
 }
 
@@ -168,12 +168,12 @@ impl Loader {
 pub fn read() -> anyhow::Result<State> {
     let mut loader = Loader::new();
     loader.read_file("build.ninja")?;
-    let mut filestate = graph::FileState::new(&loader.graph);
-    let db = db::open(".n2_db", &mut loader.graph, &mut filestate)
+    let mut hashes = graph::Hashes::new(&loader.graph);
+    let db = db::open(".n2_db", &mut loader.graph, &mut hashes)
         .map_err(|err| anyhow!("load .n2_db: {}", err))?;
     Ok(State {
         graph: loader.graph,
-        filestate: filestate,
+        hashes: hashes,
         db: db,
         default: loader.default,
     })
