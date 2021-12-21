@@ -47,11 +47,19 @@ pub struct Build {
     pub location: FileLoc,
     pub cmdline: Option<String>,
     pub depfile: Option<String>,
+
+    /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
+    /// This is mostly to simplify some of the iteration and is a little more
+    /// memory efficient than three separate Vecs, but it is kept internal to
+    /// Build and only exposed via different methods like .dirtying_ins() below.
     ins: Vec<FileId>,
     explicit_ins: usize,
     implicit_ins: usize,
     order_only_ins: usize,
+
     deps_ins: Vec<FileId>,
+
+    /// Similar to ins, we keep both explicit and implicit outs in one Vec.
     outs: Vec<FileId>,
     explicit_outs: usize,
 }
