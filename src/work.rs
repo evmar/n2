@@ -108,7 +108,7 @@ impl<'a> Work<'a> {
     /// has been updated.
     fn recheck_ready(&self, id: BuildId) -> bool {
         let build = self.graph.build(id);
-        println!("  recheck {:?} {}", id, build.location);
+        // println!("  recheck {:?} {}", id, build.location);
         for id in build.depend_ins() {
             let file = self.graph.file(id);
             if file.input.is_none() {
@@ -116,11 +116,11 @@ impl<'a> Work<'a> {
                 continue;
             }
             if self.file_state.get(id).is_none() {
-                println!("    {:?} {} not ready", id, file.name);
+                // println!("    {:?} {} not ready", id, file.name);
                 return false;
             }
         }
-        println!("    now ready");
+        // println!("    now ready");
         true
     }
 
