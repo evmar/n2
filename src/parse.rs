@@ -287,7 +287,9 @@ impl<'a> Parser<'a> {
             }
             ' ' | '$' => {
                 self.scanner.next();
-                return Ok(EvalPart::Literal(self.scanner.slice(self.scanner.ofs-1, self.scanner.ofs)));
+                return Ok(EvalPart::Literal(
+                    self.scanner.slice(self.scanner.ofs - 1, self.scanner.ofs),
+                ));
             }
             '{' => {
                 self.scanner.next();

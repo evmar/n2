@@ -152,12 +152,12 @@ impl Graph {
     pub fn file(&self, id: FileId) -> &File {
         &self.files[id.index()]
     }
-    pub fn file_id(&mut self, f: &str) -> FileId {
-        // TODO: so many string copies :<
+    pub fn file_id<F: Into<String>>(&mut self, f: F) -> FileId {
         let canon = canon_path(f);
         match self.file_to_id.get(&canon) {
             Some(id) => *id,
             None => {
+                // TODO: so many string copies :<
                 let id = self.add_file(canon.clone());
                 self.file_to_id.insert(canon, id.clone());
                 id

@@ -138,7 +138,7 @@ impl<'a> Work<'a> {
         let deps: Vec<FileId> = parsed_deps
             .deps
             .iter()
-            .map(|dep| self.graph.file_id(dep))
+            .map(|&dep| self.graph.file_id(dep))
             .collect();
 
         let changed = if self.graph.build_mut(id).update_deps(deps) {

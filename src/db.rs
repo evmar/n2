@@ -224,7 +224,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
         let mask = 0b1000_0000_0000_0000;
         if len & mask == 0 {
             let name = r.read_str(len as usize)?;
-            let fileid = graph.file_id(&name);
+            let fileid = graph.file_id(name);
             ids.db_ids.insert(fileid, Id(ids.fileids.len()));
             ids.fileids.push(fileid);
         } else {

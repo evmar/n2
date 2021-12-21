@@ -1,58 +1,128 @@
 //! Path canonicalization.
 
-/*fn canon_path(path: &mut String) {
-    let bytes = &mut path.0;
-    let mut src = 0;
-    let mut dst = 0;
-    let mut components = Vec::new();
-    while src < bytes.len() {
-        match bytes[src] as char {
-            '.' => {
+/// Lexically canonicalize a path, removing redundant components.
+/// Does not access the disk, but only simplifies things like
+/// "foo/./bar" => "foo/bar".
+/// These paths can show up due to variable expansion in particular.
+pub fn canon_path<T: Into<String>>(inpath: T) -> String {
+    let mut path = inpath.into();
 
+    // Safety: this traverses the path buffer to move data around.
+    // We maintain the invariant that *dst always points to a point within
+    // the buffer, and that src is always checked against end before reading.
+    unsafe {
+        let mut components: Vec<*mut u8> = Vec::new();
+        let mut dst = path.as_mut_ptr();
+        let mut src = path.as_ptr();
+        let end = src.add(path.len());
+
+        if src == end {
+            return path;
+        }
+        if *src == b'/' {
+            src = src.add(1);
+            dst = dst.add(1);
+        }
+
+        // Outer loop: one iteration per path component.
+        while src < end {
+            // Peek ahead for special path components: "/", ".", and "..".
+            match *src {
+                b'/' => {
+                    src = src.add(1);
+                    continue;
+                }
+                b'.' => {
+                    let mut peek = src.add(1);
+                    if peek == end {
+                        break; // Trailing '.', trim.
+                    }
+                    match *peek {
+                        b'/' => {
+                            // "./", skip.
+                            src = src.add(2);
+                            continue;
+                        }
+                        b'.' => {
+                            // ".."
+                            peek = peek.add(1);
+                            if !(peek == end || *peek == b'/') {
+                                // Componet that happens to start with "..".
+                                // Handle as an ordinary component.
+                                break;
+                            }
+                            // ".." component, try to back up.
+                            if let Some(ofs) = components.pop() {
+                                dst = ofs;
+                            } else {
+                                *dst = b'.';
+                                dst = dst.add(1);
+                                *dst = b'.';
+                                dst = dst.add(1);
+                                if peek != end {
+                                    *dst = b'/';
+                                    dst = dst.add(1);
+                                }
+                            }
+                            src = src.add(3);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
-            c => {
-                bytes[dst] = c as u8;
-                dst += 1;
+
+            // Mark this point as a possible target to pop to.
+            components.push(dst);
+
+            // Inner loop: copy one path component, including trailing '/'.
+            while src < end {
+                *dst = *src;
+                src = src.add(1);
+                dst = dst.add(1);
+                if *src.offset(-1) == b'/' {
+                    break;
+                }
             }
         }
-        src += 1;
-    }
-    bytes.resize(dst, 0);
-}*/
 
-pub fn canon_path(pathstr: &str) -> String {
-    let path = std::path::Path::new(pathstr);
-    let mut out = std::path::PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            std::path::Component::Prefix(_) => panic!("unhandled"),
-            std::path::Component::RootDir => {
-                out.clear();
-                out.push("/");
-            }
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::Normal(p) => {
-                out.push(p);
-            }
-        }
+        path.truncate(dst.offset_from(path.as_ptr()) as usize);
+        path
     }
-    String::from(out.to_str().unwrap())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn canon() {
+    fn noop() {
         assert_eq!(canon_path("foo"), "foo");
 
         assert_eq!(canon_path("foo/bar"), "foo/bar");
+    }
 
+    #[test]
+    fn dot() {
+        assert_eq!(canon_path("./foo"), "foo");
+        assert_eq!(canon_path("foo/."), "foo/");
+        assert_eq!(canon_path("foo/./bar"), "foo/bar");
+    }
+
+    #[test]
+    fn slash() {
+        assert_eq!(canon_path("/foo"), "/foo");
+        assert_eq!(canon_path("foo//bar"), "foo/bar");
+    }
+
+    #[test]
+    fn parent() {
         assert_eq!(canon_path("foo/../bar"), "bar");
 
         assert_eq!(canon_path("/foo/../bar"), "/bar");
+        assert_eq!(canon_path("../foo"), "../foo");
+        assert_eq!(canon_path("../foo/../bar"), "../bar");
+        assert_eq!(canon_path("../../bar"), "../../bar");
     }
 }
