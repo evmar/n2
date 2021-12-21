@@ -204,7 +204,7 @@ impl<'a> BReader<'a> {
         // TODO: use uninit memory here
         let mut buf = Vec::new();
         buf.resize(len as usize, 0);
-        self.r.read(buf.as_mut_slice())?;
+        self.r.read_exact(buf.as_mut_slice())?;
         Ok(unsafe { String::from_utf8_unchecked(buf) })
     }
 }
@@ -225,7 +225,8 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
         if len & mask == 0 {
             let name = r.read_str(len as usize)?;
             let fileid = graph.file_id(name);
-            ids.db_ids.insert(fileid, Id(ids.fileids.len()));
+            let dbid = Id(ids.fileids.len());
+            ids.db_ids.insert(fileid, dbid);
             ids.fileids.push(fileid);
         } else {
             len = len & !mask;
