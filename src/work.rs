@@ -8,10 +8,18 @@ use anyhow::{anyhow, bail};
 use std::collections::HashSet;
 use std::io::Write;
 
+// We maintain a frontier of builds that are "ready", which means that any
+// builds they depend upon have already been brought up to date.
+
+// A ready build still may not have yet stat()ed its (non-generated) inputs, so
+// doing those stat()s is part of the work of doing that build.  But it's
+// guaranteed that all generated inputs have already been stat()ed as outputs by
+// the build that generated those inputs.
+
 struct Plan {
     /// Builds we want to ensure are up to date.
     want: HashSet<BuildId>,
-    /// Builds whose inputs are up to date and are ready to be hashed/run.
+    /// Builds whose generated inputs are up to date and are ready to be checked/hashed/run.
     ready: HashSet<BuildId>,
 }
 
@@ -96,18 +104,24 @@ impl<'a> Work<'a> {
         self.plan.add_file(self.graph, id)
     }
 
-    fn recheck_ready(&mut self, id: BuildId) -> anyhow::Result<bool> {
+    /// Check whether a given build is ready, generally after one of its inputs
+    /// has been updated.
+    fn recheck_ready(&self, id: BuildId) -> bool {
         let build = self.graph.build(id);
         println!("  recheck {:?} {}", id, build.location);
         for id in build.depend_ins() {
             let file = self.graph.file(id);
-            if self.graph.file(id).input.is_some() && self.file_state.get(id).is_none() {
+            if file.input.is_none() {
+                // Only generated inputs contribute to readiness.
+                continue;
+            }
+            if self.file_state.get(id).is_none() {
                 println!("    {:?} {} not ready", id, file.name);
-                return Ok(false);
+                return false;
             }
         }
         println!("    now ready");
-        Ok(true)
+        true
     }
 
     fn read_depfile(&mut self, id: BuildId, path: &str) -> anyhow::Result<bool> {
@@ -196,7 +210,7 @@ impl<'a> Work<'a> {
             }
         }
         for id in dependents {
-            if !self.recheck_ready(id)? {
+            if !self.recheck_ready(id) {
                 continue;
             }
             self.plan.ready.insert(id);
