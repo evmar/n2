@@ -1,11 +1,11 @@
 //! The n2 database stores information about previous builds for determining
 //! which files are up to date.
 
-use crate::graph::Hashes;
 use crate::graph::BuildId;
 use crate::graph::FileId;
 use crate::graph::Graph;
 use crate::graph::Hash;
+use crate::graph::Hashes;
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 use std::collections::HashSet;

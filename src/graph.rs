@@ -222,7 +222,7 @@ impl FileState {
         self.0[id.index()]
     }
 
-    pub fn set_mtime(&mut self, id: FileId, mtime: MTime) {
+    fn set_mtime(&mut self, id: FileId, mtime: MTime) {
         // The set of files may grow after initialization time due to discovering deps after builds.
         if id.index() >= self.0.len() {
             self.0.resize(id.index() + 1, None);
@@ -230,9 +230,10 @@ impl FileState {
         self.0[id.index()] = Some(mtime)
     }
 
-    pub fn restat(&mut self, id: FileId, path: &str) -> std::io::Result<()> {
-        self.set_mtime(id, stat(path)?);
-        Ok(())
+    pub fn restat(&mut self, id: FileId, path: &str) -> std::io::Result<MTime> {
+        let mtime = stat(path)?;
+        self.set_mtime(id, mtime);
+        Ok(mtime)
     }
 }
 
@@ -241,7 +242,9 @@ pub fn hash_build(graph: &Graph, file_state: &mut FileState, id: BuildId) -> std
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for id in build.dirtying_ins() {
         hasher.write(graph.file(id).name.as_bytes());
-        let mtime = file_state.get(id).unwrap();
+        let mtime = file_state
+            .get(id)
+            .unwrap_or_else(|| panic!("no state for {:?}", graph.file(id).name));
         let mtime_int = match mtime {
             MTime::Missing => 0,
             MTime::Stamp(t) => t + 1,
@@ -254,8 +257,7 @@ pub fn hash_build(graph: &Graph, file_state: &mut FileState, id: BuildId) -> std
 
     for &id in build.outs() {
         let file = graph.file(id);
-        let mtime = stat(&file.name)?;
-        file_state.set_mtime(id, mtime);
+        let mtime = file_state.restat(id, &file.name)?;
         let mtime_int = match mtime {
             MTime::Missing => 0,
             MTime::Stamp(t) => t + 1,

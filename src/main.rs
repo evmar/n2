@@ -2,9 +2,9 @@ extern crate getopts;
 
 mod canon;
 mod db;
-mod graph;
 mod depfile;
 mod eval;
+mod graph;
 mod load;
 mod parse;
 mod scanner;
