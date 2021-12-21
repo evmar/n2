@@ -69,6 +69,9 @@ impl WriteBuf {
     }
 
     fn write_u64(&mut self, n: u64) {
+        // Perf note: I tinkered with this in godbolt and using this form of
+        // copy_from_slice generated much better code (generating a bswap
+        // instruction!) than alternatives that did different kinds of indexing.
         self.buf[self.len..(self.len + 8)].copy_from_slice(&[
             ((n >> (8 * 7)) & 0xFF) as u8,
             ((n >> (8 * 6)) & 0xFF) as u8,
