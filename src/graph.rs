@@ -19,7 +19,7 @@ impl FileId {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BuildId(usize);
 impl BuildId {
-    fn index(&self) -> usize {
+    pub fn index(&self) -> usize {
         self.0
     }
 }
