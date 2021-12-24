@@ -25,6 +25,9 @@ struct Plan {
     ready: HashSet<BuildId>,
 
     // TODO: running?
+
+    /// Builds that have been brought up to date.
+    done: HashSet<BuildId>,
 }
 
 impl Plan {
@@ -32,6 +35,7 @@ impl Plan {
         Plan {
             want: HashSet::new(),
             ready: HashSet::new(),
+            done: HashSet::new(),
         }
     }
 
@@ -115,16 +119,20 @@ impl<'a> Work<'a> {
         // println!("  recheck {:?} {}", id, build.location);
         for id in build.depend_ins() {
             let file = self.graph.file(id);
-            if file.input.is_none() {
-                // Only generated inputs contribute to readiness.
-                continue;
-            }
-            if self.file_state.get(id).is_none() {
-                // println!("    {:?} {} not ready", id, file.name);
-                return false;
+            match file.input {
+                None => {
+                    // Only generated inputs contribute to readiness.
+                    continue;
+                }
+                Some(id) => {
+                    if !self.plan.done.contains(&id) {
+                        // println!("    {:?} {} not done", id, file.name);
+                        return false;
+                    }
+                }
             }
         }
-        // println!("    now ready");
+        // println!("{:?} now ready", id);
         true
     }
 
@@ -133,10 +141,7 @@ impl<'a> Work<'a> {
         let id = fin.id;
         let deps = match fin.deps {
             None => Vec::new(),
-            Some(names) => names
-                .iter()
-                .map(|name| self.graph.file_id(name))
-                .collect(),
+            Some(names) => names.iter().map(|name| self.graph.file_id(name)).collect(),
         };
         let deps_changed = self.graph.build_mut(id).update_deps(deps);
 
@@ -163,6 +168,8 @@ impl<'a> Work<'a> {
 
     /// Given a build that just finished, check whether its dependent builds are now ready.
     fn ready_dependents(&mut self, id: BuildId) {
+        self.plan.done.insert(id);
+
         let build = self.graph.build(id);
         let mut dependents = HashSet::new();
         for &id in build.outs() {
@@ -182,40 +189,75 @@ impl<'a> Work<'a> {
         }
     }
 
-    /// Check and potentially run a ready build.
+    /// Check a ready build for whether it needs to run, returning true if so.
     /// Prereq: any generated input is already generated.
     /// Non-generated inputs may not have been stat()ed yet.
-    fn check_build(&mut self, id: BuildId) -> anyhow::Result<bool> {
+    fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = self.graph.build(id);
-        // stat all non-generated inputs.
+
+        // Ensure all dependencies are in place.
         for id in build.depend_ins() {
             let file = self.graph.file(id);
-            if file.input.is_none() && self.file_state.get(id).is_none() {
-                self.file_state.restat(id, &file.name)?;
-            }
+            // stat any non-generated inputs if needed.
+            // Generated inputs should already have their state gathered by
+            // running them.
+            let mtime = match self.file_state.get(id) {
+                Some(mtime) => mtime,
+                None => {
+                    if file.input.is_none() {
+                        self.file_state.restat(id, &file.name)?
+                    } else {
+                        panic!("expected file state for {} to be ready", file.name);
+                    }
+                }
+            };
+            // All inputs must be present.
+            match mtime {
+                MTime::Stamp(_) => {},
+                MTime::Missing => {
+                    // XXX no panic, this is a user error
+                    panic!("input {} missing", file.name);
+                }
+            };
+        }
+
+        if build.cmdline.is_none() {
+            return Ok(false);
         }
 
         let hash = hash_build(self.graph, &mut self.file_state, id)?;
-        Ok(!self.last_hashes.changed(id, hash))
+        Ok(self.last_hashes.changed(id, hash))
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
-        while self.plan.want.len() > 0 {
-            while !self.runner.can_start_more() {
-                let fin = self.runner.wait(self.graph)?.unwrap();
+        while !self.plan.want.is_empty() || !self.plan.ready.is_empty() || self.runner.is_running() {
+            // Kick off any any possible work to run.
+            if self.runner.can_start_more() && !self.plan.ready.is_empty() {
+                let id = self.plan.pop_ready().unwrap();
+                if !self.check_build_dirty(id)? {
+                    println!("cached {:?} {}", id, self.graph.build(id).location);
+                    self.ready_dependents(id);
+                } else {
+                    let build = self.graph.build(id);
+                    self.runner.start(
+                        id,
+                        build.cmdline.as_ref().unwrap(),
+                        build.depfile.as_ref().map(|s| s.as_str()),
+                    );
+                }
+                continue;
+            }
+
+            if self.runner.is_running() {
+                let fin = self.runner.wait()?;
                 let id = fin.id;
                 println!("finished {:?} {}", id, self.graph.build(id).location);
                 self.record_finished(fin)?;
                 self.ready_dependents(id);
+                continue;
             }
 
-            let id = self.plan.pop_ready().unwrap();
-            if self.check_build(id)? {
-                println!("cached {:?} {}", id, self.graph.build(id).location);
-                self.ready_dependents(id);
-            } else {
-                self.runner.start(id);
-            };
+            panic!("no work to do and runner not running?");
         }
         Ok(())
     }

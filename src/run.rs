@@ -1,11 +1,15 @@
 //! Runs build tasks, potentially in parallel.
+//!
+//! TODO: consider rewriting to use poll() etc. instead of threads.
+//! The threads might be relatively cheap(?) because they just block on
+//! the subprocesses though?
 
 use crate::depfile;
 use crate::graph::BuildId;
-use crate::graph::Graph;
 use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
 use std::io::Write;
+use std::sync::mpsc;
 
 pub struct FinishedBuild {
     pub id: BuildId,
@@ -58,41 +62,46 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
 }
 
 pub struct Runner {
-    ready: Vec<BuildId>,
+    finished_send: mpsc::Sender<anyhow::Result<FinishedBuild>>,
+    finished_recv: mpsc::Receiver<anyhow::Result<FinishedBuild>>,
+    pub running: usize,
 }
 
 impl Runner {
     pub fn new() -> Self {
-        Runner { ready: Vec::new() }
+        let (tx, rx) = mpsc::channel();
+        Runner {
+            finished_send: tx,
+            finished_recv: rx,
+            running: 0,
+        }
     }
 
     pub fn can_start_more(&self) -> bool {
-        self.ready.len() == 0
+        self.running < 10
     }
 
-    pub fn start(&mut self, id: BuildId) {
-        self.ready.push(id);
+    pub fn is_running(&self) -> bool {
+        self.running > 0
     }
 
-    fn run_one(&self, graph: &Graph, id: BuildId) -> anyhow::Result<FinishedBuild> {
-        let build = graph.build(id);
-        let cmdline = match &build.cmdline {
-            None => return Ok(FinishedBuild { id: id, deps: None }),
-            Some(c) => c,
-        };
-        let fin = run_build(
-            id,
-            cmdline,
-            build.depfile.as_ref().map(|path| path.as_str()),
-        )?;
-        Ok(fin)
+    pub fn start(&mut self, id: BuildId, cmdline: &str, depfile: Option<&str>) {
+        println!("start {:?}", id);
+        let cmdline = cmdline.to_string();
+        let depfile = depfile.map(|path| path.to_string());
+        let tx = self.finished_send.clone();
+        std::thread::spawn(move || {
+            let fin = run_build(id, &cmdline, depfile.as_ref().map(|s| s.as_str()));
+            println!("fin {:?}", id);
+            tx.send(fin).unwrap();
+        });
+        self.running += 1;
     }
 
-    pub fn wait(&mut self, graph: &Graph) -> anyhow::Result<Option<FinishedBuild>> {
-        let id = match self.ready.pop() {
-            None => return Ok(None),
-            Some(id) => id,
-        };
-        Ok(Some(self.run_one(graph, id)?))
+    pub fn wait(&mut self) -> anyhow::Result<FinishedBuild> {
+        // The unwrap() checks the recv() call (panics on mpsc error).
+        let r = self.finished_recv.recv().unwrap();
+        self.running -= 1;
+        r
     }
 }
