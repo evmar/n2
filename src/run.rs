@@ -39,7 +39,6 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
 
 /// Executes a build step as a subprocess.
 fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Result<FinishedBuild> {
-    println!("$ {}", cmdline);
     let output = std::process::Command::new("sh")
         .arg("-c")
         .arg(cmdline)

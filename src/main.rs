@@ -7,6 +7,7 @@ mod eval;
 mod graph;
 mod load;
 mod parse;
+mod progress;
 mod run;
 mod scanner;
 mod work;
