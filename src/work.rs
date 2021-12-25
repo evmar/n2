@@ -35,7 +35,7 @@ struct BuildStates {
     /// Maps BuildId to BuildState.
     states: Vec<BuildState>,
     /// Counts of number of builds in each state.
-    counts: [isize; 4],
+    counts: [usize; 4],
     /// Builds in the ready state, stored redundantly for quick access.
     ready: HashSet<BuildId>,
 }
@@ -75,7 +75,7 @@ impl BuildStates {
         if state == BuildState::Unknown {
             return;
         }
-        self.counts[state as usize] += delta;
+        self.counts[state as usize] = (self.counts[state as usize] as isize + delta) as usize;
     }
 
     fn unfinished(&self) -> bool {
@@ -129,6 +129,25 @@ impl BuildStates {
         };
         self.set(id, BuildState::Running);
         Some(id)
+    }
+
+    fn render(&self) -> String {
+        // Order is: want, ready, running, done.
+        let total = self.counts[0] + self.counts[1] + self.counts[2] + self.counts[3];
+        let chars = [' ', '-', '*', '='];
+
+        let mut out = String::new();
+        let mut count: usize = 0;
+        for s in (0..=3).rev() {
+            count += self.counts[s];
+            while out.len() <= (count*40/total) {
+                out.push(chars[s]);
+            }
+        }
+        out.insert(0, '[');
+        out.push(']');
+        out.push_str(&format!(" {:?}", self.counts));
+        out
     }
 }
 
@@ -277,7 +296,7 @@ impl<'a> Work<'a> {
 
     pub fn run(&mut self) -> anyhow::Result<()> {
         while self.build_states.unfinished() {
-            println!("build states: {:?}", self.build_states.counts);
+            println!("{}", self.build_states.render());
             // Kick off any any possible work to run.
             if self.runner.can_start_more() {
                 if let Some(id) = self.build_states.pop_ready() {
@@ -299,7 +318,7 @@ impl<'a> Work<'a> {
             if self.runner.is_running() {
                 let fin = self.runner.wait()?;
                 let id = fin.id;
-                println!("finished {:?} {}", id, self.graph.build(id).location);
+                // println!("finished {:?} {}", id, self.graph.build(id).location);
                 self.record_finished(fin)?;
                 self.ready_dependents(id);
                 continue;
@@ -307,6 +326,7 @@ impl<'a> Work<'a> {
 
             panic!("no work to do and runner not running?");
         }
+        println!("{}", self.build_states.render());
         Ok(())
     }
 }

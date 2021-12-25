@@ -78,7 +78,7 @@ impl Runner {
     }
 
     pub fn can_start_more(&self) -> bool {
-        self.running < 10
+        self.running < 8
     }
 
     pub fn is_running(&self) -> bool {
@@ -86,13 +86,11 @@ impl Runner {
     }
 
     pub fn start(&mut self, id: BuildId, cmdline: &str, depfile: Option<&str>) {
-        println!("start {:?}", id);
         let cmdline = cmdline.to_string();
         let depfile = depfile.map(|path| path.to_string());
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
             let fin = run_build(id, &cmdline, depfile.as_ref().map(|s| s.as_str()));
-            println!("fin {:?}", id);
             tx.send(fin).unwrap();
         });
         self.running += 1;
