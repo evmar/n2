@@ -1,7 +1,8 @@
 ## Path handling and Unicode safety
 
-Currently we use Rust `String` for all paths, but internally treat paths as
-bytes, including using "unsafe" sometimes to treat paths as bytes.
+Currently we use Rust `String` for all paths and file contents, but
+internally interpret them as as bytes (not UTF8) including using "unsafe"
+sometimes to convert.
 
 Based on my superficial understanding of how safety relates to UTF8 in Rust
 strings, it's probably harmless given that we never treat strings as Unicode,
