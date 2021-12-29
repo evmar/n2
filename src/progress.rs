@@ -31,13 +31,13 @@ impl Progress {
         self.maybe_print();
     }
     pub fn start(&mut self, _id: BuildId, build: &Build) {
-      if let Some(cmdline) = &build.cmdline {
-        println!("$ {}", cmdline);
-      }
+        if let Some(cmdline) = &build.cmdline {
+            println!("$ {}", cmdline);
+        }
 
-      self.ready -= 1;
-      self.running += 1;
-      self.maybe_print();
+        self.ready -= 1;
+        self.running += 1;
+        self.maybe_print();
     }
     pub fn finish(&mut self, _id: BuildId, _build: &Build) {
         self.running -= 1;
