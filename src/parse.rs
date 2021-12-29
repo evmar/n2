@@ -43,8 +43,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn format_parse_error(&self, err: ParseError) -> String {
-        self.scanner.format_parse_error(err)
+    pub fn format_parse_error(&self, filename: &str, err: ParseError) -> String {
+        self.scanner.format_parse_error(filename, err)
     }
 
     pub fn read(&mut self) -> ParseResult<Option<Statement<'a>>> {

@@ -145,7 +145,7 @@ impl Loader {
         loop {
             let stmt = match parser
                 .read()
-                .map_err(|err| anyhow!(parser.format_parse_error(err)))?
+                .map_err(|err| anyhow!(parser.format_parse_error(path, err)))?
             {
                 None => break,
                 Some(s) => s,

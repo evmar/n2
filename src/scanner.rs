@@ -74,16 +74,21 @@ impl<'a> Scanner<'a> {
         })
     }
 
-    pub fn format_parse_error(&self, err: ParseError) -> String {
+    pub fn format_parse_error(&self, filename: &str, err: ParseError) -> String {
         let mut ofs = 0;
         let lines = self.buf.split('\n');
-        for line in lines {
+        for (line_number, line) in lines.enumerate() {
             if ofs + line.len() >= err.ofs {
-                let mut msg = err.msg.clone();
+                let mut msg = "parse error: ".to_string();
+                msg.push_str(&err.msg);
                 msg.push('\n');
+
+                let prefix = format!("{}:{}: ", filename, line_number);
+                msg.push_str(&prefix);
                 msg.push_str(line);
                 msg.push('\n');
-                msg.push_str(&" ".repeat(err.ofs - ofs));
+
+                msg.push_str(&" ".repeat(prefix.len() + (err.ofs - ofs)));
                 msg.push_str("^\n");
                 return msg;
             }

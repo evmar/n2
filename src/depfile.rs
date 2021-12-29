@@ -81,7 +81,7 @@ mod tests {
             Scanner::new("build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n\0");
         let deps = match parse(&mut scanner) {
             Err(err) => {
-                println!("{}", scanner.format_parse_error(err));
+                println!("{}", scanner.format_parse_error("test", err));
                 panic!("failed parse");
             }
             Ok(d) => d,

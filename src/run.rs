@@ -27,7 +27,7 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
 
     let mut scanner = Scanner::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
     let parsed_deps = depfile::parse(&mut scanner)
-        .map_err(|err| anyhow!("in {}: {}", path, scanner.format_parse_error(err)))?;
+        .map_err(|err| anyhow!(scanner.format_parse_error(path, err)))?;
     // TODO verify deps refers to correct output
     let deps: Vec<String> = parsed_deps
         .deps
