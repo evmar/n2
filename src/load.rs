@@ -120,11 +120,16 @@ impl Loader {
             Some(var) => Some(var.evaluate(&envs)),
             None => None,
         };
+        let desc = match b.vars.get("description").or_else(|| rule.vars.get("description")) {
+            Some(var) => Some(var.evaluate(&envs)),
+            None => None,
+        };
         let depfile = match b.vars.get("depfile").or_else(|| rule.vars.get("depfile")) {
             Some(var) => Some(var.evaluate(&envs)),
             None => None,
         };
         build.cmdline = cmdline;
+        build.desc = desc;
         build.depfile = depfile;
 
         self.graph.add_build(build);

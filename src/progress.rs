@@ -31,7 +31,9 @@ impl Progress {
         self.maybe_print();
     }
     pub fn start(&mut self, _id: BuildId, build: &Build) {
-        if let Some(cmdline) = &build.cmdline {
+        if let Some(desc) = &build.desc {
+            println!("{}", desc);
+        } else if let Some(cmdline) = &build.cmdline {
             println!("$ {}", cmdline);
         }
 

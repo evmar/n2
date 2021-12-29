@@ -45,6 +45,7 @@ impl std::fmt::Display for FileLoc {
 #[derive(Debug)]
 pub struct Build {
     pub location: FileLoc,
+    pub desc: Option<String>,
     pub cmdline: Option<String>,
     pub depfile: Option<String>,
 
@@ -67,6 +68,7 @@ impl Build {
     pub fn new(loc: FileLoc) -> Self {
         Build {
             location: loc,
+            desc: None,
             cmdline: None,
             depfile: None,
             ins: Vec::new(),
