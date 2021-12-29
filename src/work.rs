@@ -278,6 +278,13 @@ impl<'a> Work<'a> {
         }
 
         if build.cmdline.is_none() {
+            // TODO: require the rule name 'phony'.
+            // Phony build; mark the output "files" as present.
+            for &id in build.outs() {
+                if self.file_state.get(id).is_none() {
+                    self.file_state.mark_present(id);
+                }
+            }
             return Ok(false);
         }
 

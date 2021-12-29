@@ -243,6 +243,11 @@ impl FileState {
         self.set_mtime(id, mtime);
         Ok(mtime)
     }
+
+    /// Mark a given id as "present"; used in phony deps.
+    pub fn mark_present(&mut self, id: FileId) {
+        self.set_mtime(id, MTime::Stamp(0));
+    }
 }
 
 pub fn hash_build(graph: &Graph, file_state: &mut FileState, id: BuildId) -> std::io::Result<Hash> {
