@@ -10,3 +10,10 @@ but it's also possible some code outside of our control relies on this.
 
 The proper fix is to switch to a bag of bytes type.  I attempted this initially
 but ran into trouble making my custom string type compatible with hash tables.
+
+## Profiling
+
+It appears profiling Rust under WSL2 is not a thing(?).
+
+On Mac, the best options seemed to be `cargo flamegraph` and
+`cargo instruments`.
