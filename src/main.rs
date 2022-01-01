@@ -1,17 +1,8 @@
 extern crate getopts;
 
-mod canon;
-mod db;
-mod depfile;
-mod eval;
-mod graph;
-mod load;
-mod parse;
-mod progress;
-mod run;
-mod scanner;
-mod trace;
-mod work;
+use n2::load;
+use n2::trace;
+use n2::work;
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
