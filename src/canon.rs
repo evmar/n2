@@ -1,17 +1,52 @@
 //! Path canonicalization.
 
+/// An on-stack stack of values.
+/// Used for tracking locations of parent components within a path.
+struct StackStack<T> {
+    n: usize,
+    vals: [T; 60],
+}
+
+impl<T: Copy> StackStack<T> {
+    #[allow(deprecated)]
+    fn new() -> Self {
+        StackStack {
+            n: 0,
+            // Safety: we only access vals[i] after setting it.
+            vals: unsafe { std::mem::uninitialized() },
+        }
+    }
+
+    fn push(&mut self, ptr: T) {
+        if self.n == self.vals.len() {
+            panic!("too many path components");
+        }
+        self.vals[self.n] = ptr;
+        self.n += 1;
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        if self.n > 0 {
+            self.n -= 1;
+            Some(self.vals[self.n])
+        } else {
+            None
+        }
+    }
+}
+
 /// Lexically canonicalize a path, removing redundant components.
 /// Does not access the disk, but only simplifies things like
 /// "foo/./bar" => "foo/bar".
 /// These paths can show up due to variable expansion in particular.
 pub fn canon_path<T: Into<String>>(inpath: T) -> String {
-    let mut path = inpath.into();
+    let mut path: String = inpath.into();
 
     // Safety: this traverses the path buffer to move data around.
     // We maintain the invariant that *dst always points to a point within
     // the buffer, and that src is always checked against end before reading.
     unsafe {
-        let mut components: Vec<*mut u8> = Vec::new();
+        let mut components = StackStack::<*mut u8>::new();
         let mut dst = path.as_mut_ptr();
         let mut src = path.as_ptr();
         let end = src.add(path.len());
