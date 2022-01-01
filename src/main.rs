@@ -10,6 +10,7 @@ mod parse;
 mod progress;
 mod run;
 mod scanner;
+mod trace;
 mod work;
 
 fn main() {
@@ -29,16 +30,19 @@ fn main() {
         return;
     }
 
+    trace::open("trace.json").unwrap();
+
     if let Some(dir) = matches.opt_str("C") {
         std::env::set_current_dir(dir).unwrap();
     }
 
+    let state = trace::scope("load::read", || load::read());
     let load::State {
         mut graph,
         mut db,
         default,
         hashes: last_hashes,
-    } = match load::read() {
+    } = match state {
         Err(err) => {
             println!("ERROR: {}", err);
             return;
@@ -53,11 +57,13 @@ fn main() {
     };
     println!("target {:?}", graph.file(target).name);
     let mut work = work::Work::new(&mut graph, &last_hashes, &mut db);
-    work.want_file(target).unwrap();
-    match work.run() {
+    trace::scope("want_file", || work.want_file(target)).unwrap();
+    match trace::scope("work.run", || work.run()) {
         Ok(_) => {}
         Err(err) => {
             println!("error: {}", err);
         }
     }
+
+    trace::close().unwrap();
 }

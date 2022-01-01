@@ -3,7 +3,7 @@
 use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::scanner::Scanner;
-use crate::{db, eval, graph, parse};
+use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 
@@ -120,7 +120,11 @@ impl Loader {
             Some(var) => Some(var.evaluate(&envs)),
             None => None,
         };
-        let desc = match b.vars.get("description").or_else(|| rule.vars.get("description")) {
+        let desc = match b
+            .vars
+            .get("description")
+            .or_else(|| rule.vars.get("description"))
+        {
             Some(var) => Some(var.evaluate(&envs)),
             None => None,
         };
@@ -148,8 +152,7 @@ impl Loader {
             std::str::from_utf8_unchecked(&bytes)
         }));
         loop {
-            let stmt = match parser
-                .read()
+            let stmt = match trace::scope("parser.read", || parser.read())
                 .map_err(|err| anyhow!(parser.format_parse_error(path, err)))?
             {
                 None => break,
@@ -172,10 +175,12 @@ impl Loader {
 
 pub fn read() -> anyhow::Result<State> {
     let mut loader = Loader::new();
-    loader.read_file("build.ninja")?;
+    trace::scope("loader.read_file", || loader.read_file("build.ninja"))?;
     let mut hashes = graph::Hashes::new(&loader.graph);
-    let db = db::open(".n2_db", &mut loader.graph, &mut hashes)
-        .map_err(|err| anyhow!("load .n2_db: {}", err))?;
+    let db = trace::scope("db::open", || {
+        db::open(".n2_db", &mut loader.graph, &mut hashes)
+    })
+    .map_err(|err| anyhow!("load .n2_db: {}", err))?;
     Ok(State {
         graph: loader.graph,
         hashes: hashes,
