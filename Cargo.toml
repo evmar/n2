@@ -8,6 +8,7 @@ edition = "2018"
 [dependencies]
 getopts = "0.2"
 anyhow = "1.0"
+jemallocator = "0.3.2"
 
 [profile.release]
 debug = true

@@ -10,3 +10,8 @@ mod run;
 mod scanner;
 pub mod trace;
 pub mod work;
+
+use jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
