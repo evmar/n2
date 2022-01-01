@@ -5,9 +5,12 @@ use std::collections::HashMap;
 use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
 
+/// Hash value used to identify a given instance of a Build's execution;
+/// compared to verify whether a Build is up to date.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Hash(pub u64);
 
+/// Id for File nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FileId(usize);
 impl FileId {
@@ -16,6 +19,7 @@ impl FileId {
     }
 }
 
+/// Id for Build nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BuildId(usize);
 impl BuildId {
@@ -24,13 +28,18 @@ impl BuildId {
     }
 }
 
+/// A single file referenced as part of a build.
 #[derive(Debug)]
 pub struct File {
+    /// Canonical path to the file.
     pub name: String,
+    /// The Build that generates this file, if any.
     pub input: Option<BuildId>,
+    /// The Builds that depend on this file as an input.
     pub dependents: Vec<BuildId>,
 }
 
+/// A textual location within a build.ninja file, used in error messages.
 #[derive(Debug)]
 pub struct FileLoc {
     pub filename: std::rc::Rc<String>,
@@ -42,13 +51,22 @@ impl std::fmt::Display for FileLoc {
     }
 }
 
+/// A single build action, generating File outputs from File inputs with a command.
 #[derive(Debug)]
 pub struct Build {
+    /// Source location this Build was declared.
     pub location: FileLoc,
+
+    /// User-provided description of the build step.
     pub desc: Option<String>,
+
+    /// Command line to run.  Absent for phony builds.
     pub cmdline: Option<String>,
+
+    /// Path to generated `.d` file, if any.
     pub depfile: Option<String>,
 
+    /// Input files.
     /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
     /// This is mostly to simplify some of the iteration and is a little more
     /// memory efficient than three separate Vecs, but it is kept internal to
@@ -58,8 +76,10 @@ pub struct Build {
     implicit_ins: usize,
     order_only_ins: usize,
 
+    /// Additional inputs discovered from a previous build.
     deps_ins: Vec<FileId>,
 
+    /// Output files.
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
     outs: Vec<FileId>,
     explicit_outs: usize,
@@ -80,20 +100,24 @@ impl Build {
             explicit_outs: 0,
         }
     }
+
     pub fn set_ins(&mut self, ins: Vec<FileId>, exp: usize, imp: usize, ord: usize) {
         self.ins = ins;
         self.explicit_ins = exp;
         self.implicit_ins = imp;
         self.order_only_ins = ord;
     }
+
     pub fn set_outs(&mut self, outs: Vec<FileId>, exp: usize) {
         self.outs = outs;
         self.explicit_outs = exp;
     }
+
     /// Input paths that appear in `$in`.
     pub fn explicit_ins(&self) -> &[FileId] {
         &self.ins[0..self.explicit_ins]
     }
+
     /// Input paths that, if changed, invalidate the output.
     pub fn dirtying_ins(&self) -> impl Iterator<Item = FileId> + '_ {
         self.ins[0..(self.explicit_ins + self.implicit_ins)]
@@ -101,11 +125,13 @@ impl Build {
             .chain(self.deps_ins.iter())
             .copied()
     }
+
     /// Inputs that are needed before building.
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
     pub fn depend_ins(&self) -> impl Iterator<Item = FileId> + '_ {
         self.ins.iter().chain(self.deps_ins.iter()).copied()
     }
+
     /// Potentially update deps with a new set of deps, returning true if they changed.
     pub fn update_deps(&mut self, mut deps: Vec<FileId>) -> bool {
         // Filter out any deps that were already listed in the build file.
@@ -117,17 +143,21 @@ impl Build {
             true
         }
     }
+
     pub fn set_deps(&mut self, deps: Vec<FileId>) {
         self.deps_ins = deps;
     }
+
     /// Input paths that were discovered after building, for use in the next build.
     pub fn deps_ins(&self) -> &[FileId] {
         &self.deps_ins
     }
+
     /// Output paths that appear in `$out`.
     pub fn explicit_outs(&self) -> &[FileId] {
         &self.outs[0..self.explicit_outs]
     }
+
     /// Output paths that are updated when the build runs.
     pub fn outs(&self) -> &[FileId] {
         &self.outs
@@ -136,6 +166,8 @@ impl Build {
 
 const UNIT_SEPARATOR: u8 = 0x1F;
 
+/// The build graph: owns Files/Builds and maps FileIds/BuildIds to them,
+/// as well as mapping string filenames to the underlying Files.
 pub struct Graph {
     files: Vec<File>,
     builds: Vec<Build>,
@@ -152,6 +184,7 @@ impl Graph {
         }
     }
 
+    /// Add a new file, generating a new FileId for it.
     fn add_file(&mut self, name: String) -> FileId {
         let id = self.files.len();
         self.files.push(File {
@@ -161,9 +194,13 @@ impl Graph {
         });
         FileId(id)
     }
+
+    /// Look up a file by its FileId.
     pub fn file(&self, id: FileId) -> &File {
         &self.files[id.index()]
     }
+
+    /// Canonicalize a path and get/generate its FileId.
     pub fn file_id(&mut self, f: impl Into<String>) -> FileId {
         let canon = canon_path(f);
         match self.file_to_id.get(&canon) {
@@ -176,11 +213,14 @@ impl Graph {
             }
         }
     }
+
+    /// Canonicalize a path and look up its FileId.
     pub fn get_file_id(&self, f: &str) -> Option<FileId> {
         let canon = canon_path(f);
         self.file_to_id.get(&canon).copied()
     }
 
+    /// Add a new Build, generating a BuildId for it.
     pub fn add_build(&mut self, build: Build) {
         let id = BuildId(self.builds.len());
         for inf in &build.ins {
@@ -195,20 +235,27 @@ impl Graph {
         }
         self.builds.push(build);
     }
+
+    /// Look up a Build by BuildId.
     pub fn build(&self, id: BuildId) -> &Build {
         &self.builds[id.index()]
     }
+    /// Look up a Build by BuildId.
     pub fn build_mut(&mut self, id: BuildId) -> &mut Build {
         &mut self.builds[id.index()]
     }
 }
 
+/// MTime info gathered for a file.  This also models "file is absent".
+/// It's not using an Option<> just because it makes the code using it easier
+/// to follow.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum MTime {
     Missing,
     Stamp(u32),
 }
 
+/// stat() an on-disk path, producing its MTime.
 pub fn stat(path: &str) -> std::io::Result<MTime> {
     Ok(match std::fs::metadata(path) {
         Ok(meta) => MTime::Stamp(meta.mtime() as u32),
@@ -222,6 +269,7 @@ pub fn stat(path: &str) -> std::io::Result<MTime> {
     })
 }
 
+/// Gathered state of on-disk files, indexed by FileId.
 pub struct FileState(Vec<Option<MTime>>);
 
 impl FileState {

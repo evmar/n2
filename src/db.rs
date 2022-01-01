@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 
-/// Files are represented as integers that are stable across n2 executions.
+/// Files are identified by integers that are stable across n2 executions.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Id(usize);
 
@@ -179,6 +179,7 @@ impl<'a> BReader<'a> {
         }
         Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
     }
+
     fn read_u24(&mut self) -> std::io::Result<u32> {
         let mut buf: [u8; 3];
         unsafe {
@@ -205,9 +206,11 @@ impl<'a> BReader<'a> {
             | ((buf[6] as u64) << (8 * 1))
             | ((buf[7] as u64) << (8 * 0)))
     }
+
     fn read_id(&mut self) -> std::io::Result<Id> {
         self.read_u24().map(|n| Id(n as usize))
     }
+
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {
         // TODO: use uninit memory here
         let mut buf = Vec::new();
@@ -217,6 +220,7 @@ impl<'a> BReader<'a> {
     }
 }
 
+/// Reads an on-disk database, loading its state into the provided Graph/Hashes.
 fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
     let mut r = BReader {
         r: std::io::BufReader::new(&mut f),
@@ -272,7 +276,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
     Ok(Writer::new(ids, f))
 }
 
-/// Opens an on-disk database, loading its state into the provided Graph.
+/// Opens or creates an on-disk database, loading its state into the provided Graph.
 pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
     match std::fs::OpenOptions::new()
         .read(true)
