@@ -8,6 +8,7 @@ fn main() {
     let args: Vec<_> = std::env::args().collect();
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir", "DIR");
+    opts.optopt("d", "debug", "debug", "TOOL");
     opts.optflag("h", "help", "help");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -21,7 +22,15 @@ fn main() {
         return;
     }
 
-    trace::open("trace.json").unwrap();
+    if let Some(debug) = matches.opt_str("d") {
+        match debug.as_str() {
+            "trace" => trace::open("trace.json").unwrap(),
+            _ => {
+                println!("unknown -d {:?}", debug);
+                return;
+            }
+        }
+    }
 
     if let Some(dir) = matches.opt_str("C") {
         std::env::set_current_dir(dir).unwrap();

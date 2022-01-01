@@ -152,7 +152,8 @@ impl Loader {
             std::str::from_utf8_unchecked(&bytes)
         }));
         loop {
-            let stmt = match trace::scope("parser.read", || parser.read())
+            let stmt = match parser
+                .read()
                 .map_err(|err| anyhow!(parser.format_parse_error(path, err)))?
             {
                 None => break,
