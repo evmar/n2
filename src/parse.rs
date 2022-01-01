@@ -220,7 +220,8 @@ impl<'a> Parser<'a> {
     }
 
     fn read_eval(&mut self) -> ParseResult<EvalString<&'a str>> {
-        let mut parts = Vec::new();
+        // Guaranteed at least one part.
+        let mut parts = Vec::with_capacity(1);
         let mut ofs = self.scanner.ofs;
         loop {
             match self.scanner.read() {
@@ -245,8 +246,7 @@ impl<'a> Parser<'a> {
     }
 
     fn read_path(&mut self) -> ParseResult<Option<String>> {
-        let mut path = String::new();
-        path.reserve(64);
+        let mut path = String::with_capacity(64);
         loop {
             match self.scanner.read() {
                 '\0' => {
