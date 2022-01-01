@@ -162,7 +162,7 @@ impl Graph {
     pub fn file(&self, id: FileId) -> &File {
         &self.files[id.index()]
     }
-    pub fn file_id<F: Into<String>>(&mut self, f: F) -> FileId {
+    pub fn file_id(&mut self, f: impl Into<String>) -> FileId {
         let canon = canon_path(f);
         match self.file_to_id.get(&canon) {
             Some(id) => *id,
@@ -173,6 +173,10 @@ impl Graph {
                 id
             }
         }
+    }
+    pub fn get_file_id(&self, f: &str) -> Option<FileId> {
+        let canon = canon_path(f);
+        self.file_to_id.get(&canon).copied()
     }
 
     pub fn add_build(&mut self, build: Build) {

@@ -4,31 +4,21 @@ use n2::load;
 use n2::trace;
 use n2::work;
 
-fn main() {
+fn run() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().collect();
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir", "DIR");
     opts.optopt("d", "debug", "debug", "TOOL");
     opts.optflag("h", "help", "help");
-    let matches = match opts.parse(&args[1..]) {
-        Ok(m) => m,
-        Err(f) => {
-            println!("{}", f);
-            return;
-        }
-    };
+    let matches = opts.parse(&args[1..])?;
     if matches.opt_present("h") {
-        println!("TODO: help");
-        return;
+        anyhow::bail!("TODO: help");
     }
 
     if let Some(debug) = matches.opt_str("d") {
         match debug.as_str() {
-            "trace" => trace::open("trace.json").unwrap(),
-            _ => {
-                println!("unknown -d {:?}", debug);
-                return;
-            }
+            "trace" => trace::open("trace.json")?,
+            _ => anyhow::bail!("unknown -d {:?}", debug),
         }
     }
 
@@ -36,34 +26,42 @@ fn main() {
         std::env::set_current_dir(dir).unwrap();
     }
 
-    let state = trace::scope("load::read", || load::read());
     let load::State {
         mut graph,
         mut db,
         default,
         hashes: last_hashes,
-    } = match state {
-        Err(err) => {
-            println!("ERROR: {}", err);
-            return;
-        }
-        Ok(ok) => ok,
-    };
+    } = trace::scope("load::read", || load::read())?;
 
-    let target = match matches.free.len() {
-        0 => default.expect("TODO"),
-        1 => graph.file_id(&matches.free[0]),
-        _ => panic!("unimpl: multiple args"),
-    };
-    println!("target {:?}", graph.file(target).name);
-    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db);
-    trace::scope("want_file", || work.want_file(target)).unwrap();
-    match trace::scope("work.run", || work.run()) {
-        Ok(_) => {}
-        Err(err) => {
-            println!("error: {}", err);
+    let mut targets = Vec::new();
+    for free in matches.free {
+        let id = match graph.get_file_id(&free) {
+            None => anyhow::bail!("unknown path requested: {:?}", free),
+            Some(id) => id,
+        };
+        targets.push(id);
+    }
+    if targets.len() == 0 {
+        match default {
+            // TODO: build all?
+            None => anyhow::bail!("no path specified and no default"),
+            Some(id) => targets.push(id),
         }
     }
 
+    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db);
+    for target in targets {
+        work.want_file(target)?;
+    }
+    trace::scope("work.run", || work.run())
+}
+
+fn main() {
+    match run() {
+        Ok(_) => {}
+        Err(err) => {
+            println!("n2: error: {}", err);
+        }
+    }
     trace::close().unwrap();
 }
