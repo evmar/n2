@@ -1,0 +1,9 @@
+#!/bin/bash
+
+diff=$(cargo fmt -- --check)
+result=$?
+
+if [[ ${result} -ne 0 ]] ; then
+    echo 'run `cargo fmt`'
+    exit 1
+fi

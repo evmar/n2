@@ -26,7 +26,7 @@ impl<'a> Scanner<'a> {
         unsafe { self.buf.get_unchecked(start..end) }
     }
     pub fn peek(&self) -> char {
-        unsafe { *self.buf.as_bytes().get_unchecked(self.ofs) as char } 
+        unsafe { *self.buf.as_bytes().get_unchecked(self.ofs) as char }
     }
     pub fn next(&mut self) {
         if self.peek() == '\n' {
