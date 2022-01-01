@@ -246,6 +246,7 @@ impl<'a> Parser<'a> {
 
     fn read_path(&mut self) -> ParseResult<Option<String>> {
         let mut path = String::new();
+        path.reserve(64);
         loop {
             match self.scanner.read() {
                 '\0' => {
