@@ -8,3 +8,6 @@ edition = "2018"
 [dependencies]
 getopts = "0.2"
 anyhow = "1.0"
+
+[profile.release]
+debug = true
