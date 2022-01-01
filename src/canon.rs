@@ -18,7 +18,7 @@ impl<T: Copy> StackStack<T> {
     }
 
     fn push(&mut self, ptr: T) {
-        if self.n == self.vals.len() {
+        if self.n >= self.vals.len() {
             panic!("too many path components");
         }
         self.vals[self.n] = ptr;
