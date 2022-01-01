@@ -117,7 +117,7 @@ impl Writer {
     }
 
     fn write_file(&mut self, name: &str) -> std::io::Result<()> {
-        if name.len() >= 0b1000_0000 {
+        if name.len() >= 0b1000_0000_0000_0000 {
             panic!("filename too long");
         }
         let mut buf = WriteBuf::new();
