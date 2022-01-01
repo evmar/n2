@@ -96,7 +96,7 @@ impl BuildStates {
         let mut ready = true;
         for id in graph.build(id).depend_ins() {
             self.want_file(progress, graph, id);
-            ready = ready && !graph.file(id).input.is_some();
+            ready = ready && graph.file(id).input.is_none();
         }
 
         if ready {
@@ -139,10 +139,10 @@ impl<'a> Work<'a> {
     pub fn new(graph: &'a mut Graph, last_hashes: &'a Hashes, db: &'a mut db::Writer) -> Self {
         let file_state = FileState::new(graph);
         Work {
-            graph: graph,
-            db: db,
-            file_state: file_state,
-            last_hashes: last_hashes,
+            graph,
+            db,
+            file_state,
+            last_hashes,
             build_states: BuildStates::new(),
             progress: Progress::new(),
             runner: Runner::new(),
@@ -293,8 +293,8 @@ impl<'a> Work<'a> {
                         let build = self.graph.build(id);
                         self.runner.start(
                             id,
-                            build.cmdline.as_ref().unwrap(),
-                            build.depfile.as_ref().map(|s| s.as_str()),
+                            build.cmdline.clone().unwrap(),
+                            build.depfile.clone(),
                         );
                     }
                     continue;

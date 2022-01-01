@@ -99,22 +99,23 @@ impl Build {
         self.ins[0..(self.explicit_ins + self.implicit_ins)]
             .iter()
             .chain(self.deps_ins.iter())
-            .map(|id| *id)
+            .copied()
     }
     /// Inputs that are needed before building.
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
     pub fn depend_ins(&self) -> impl Iterator<Item = FileId> + '_ {
-        self.ins.iter().chain(self.deps_ins.iter()).map(|id| *id)
+        self.ins.iter().chain(self.deps_ins.iter()).copied()
     }
     /// Potentially update deps with a new set of deps, returning true if they changed.
     pub fn update_deps(&mut self, mut deps: Vec<FileId>) -> bool {
         // Filter out any deps that were already listed in the build file.
         deps.retain(|id| !self.ins.contains(id));
         if deps == self.deps_ins {
-            return false;
+            false
+        } else {
+            self.set_deps(deps);
+            true
         }
-        self.set_deps(deps);
-        return true;
     }
     pub fn set_deps(&mut self, deps: Vec<FileId>) {
         self.deps_ins = deps;
@@ -142,7 +143,8 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn new() -> Graph {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         Graph {
             files: Vec::new(),
             builds: Vec::new(),
@@ -153,7 +155,7 @@ impl Graph {
     fn add_file(&mut self, name: String) -> FileId {
         let id = self.files.len();
         self.files.push(File {
-            name: name,
+            name,
             input: None,
             dependents: Vec::new(),
         });
@@ -169,7 +171,7 @@ impl Graph {
             None => {
                 // TODO: so many string copies :<
                 let id = self.add_file(canon.clone());
-                self.file_to_id.insert(canon, id.clone());
+                self.file_to_id.insert(canon, id);
                 id
             }
         }
@@ -306,6 +308,6 @@ impl Hashes {
             None => return true,
             Some(h) => h,
         };
-        return hash != last_hash;
+        hash != last_hash
     }
 }

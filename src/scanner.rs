@@ -16,7 +16,7 @@ pub struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     pub fn new(buf: &'a str) -> Self {
         Scanner {
-            buf: buf,
+            buf,
             ofs: 0,
             line: 1,
         }

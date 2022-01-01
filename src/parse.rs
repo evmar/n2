@@ -38,7 +38,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(scanner: Scanner<'a>) -> Parser<'a> {
         Parser {
-            scanner: scanner,
+            scanner,
             vars: Vars::new(),
         }
     }
@@ -82,7 +82,7 @@ impl<'a> Parser<'a> {
         self.scanner.skip_spaces();
         self.scanner.expect('=')?;
         self.scanner.skip_spaces();
-        return self.read_eval();
+        self.read_eval()
     }
 
     fn read_scoped_vars(&mut self) -> ParseResult<LazyVars> {
@@ -92,7 +92,7 @@ impl<'a> Parser<'a> {
             let name = self.read_ident()?;
             self.scanner.skip_spaces();
             let val = self.read_vardef()?;
-            vars.insert(name.to_owned(), val.to_owned());
+            vars.insert(name.to_owned(), val.into_owned());
         }
         Ok(vars)
     }
@@ -103,7 +103,7 @@ impl<'a> Parser<'a> {
         let vars = self.read_scoped_vars()?;
         Ok(Rule {
             name: name.to_owned(),
-            vars: vars,
+            vars,
         })
     }
 
@@ -176,15 +176,15 @@ impl<'a> Parser<'a> {
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Build {
-            line: line,
-            rule: rule,
-            outs: outs,
-            explicit_outs: explicit_outs,
-            ins: ins,
-            explicit_ins: explicit_ins,
-            implicit_ins: implicit_ins,
-            order_only_ins: order_only_ins,
-            vars: vars,
+            line,
+            rule,
+            outs,
+            explicit_outs,
+            ins,
+            explicit_ins,
+            implicit_ins,
+            order_only_ins,
+            vars,
         })
     }
 
@@ -273,24 +273,22 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        if path.len() == 0 {
+        if path.is_empty() {
             return Ok(None);
         }
         Ok(Some(path))
     }
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'a str>> {
-        match self.scanner.peek() {
+        Ok(match self.scanner.peek() {
             '\n' => {
                 self.scanner.next();
                 self.scanner.skip_spaces();
-                return Ok(EvalPart::Literal(self.scanner.slice(0, 0)));
+                EvalPart::Literal(self.scanner.slice(0, 0))
             }
             ' ' | '$' => {
                 self.scanner.next();
-                return Ok(EvalPart::Literal(
-                    self.scanner.slice(self.scanner.ofs - 1, self.scanner.ofs),
-                ));
+                EvalPart::Literal(self.scanner.slice(self.scanner.ofs - 1, self.scanner.ofs))
             }
             '{' => {
                 self.scanner.next();
@@ -303,12 +301,12 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let end = self.scanner.ofs - 1;
-                return Ok(EvalPart::VarRef(self.scanner.slice(start, end)));
+                EvalPart::VarRef(self.scanner.slice(start, end))
             }
             _ => {
                 let ident = self.read_ident()?;
-                return Ok(EvalPart::VarRef(ident));
+                EvalPart::VarRef(ident)
             }
-        }
+        })
     }
 }

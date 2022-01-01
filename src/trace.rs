@@ -24,7 +24,7 @@ struct Trace {
 impl Trace {
     fn new(path: &str) -> std::io::Result<Self> {
         let mut w = BufWriter::new(File::create(path)?);
-        write!(w, "[\n")?;
+        writeln!(w, "[")?;
         Ok(Trace {
             start: Instant::now(),
             w,
@@ -51,7 +51,7 @@ impl Trace {
 
     fn write(&mut self, event: Event) -> std::io::Result<()> {
         self.write_event(event)?;
-        write!(self.w, ",\n")
+        writeln!(self.w)
     }
 
     fn scope<T>(&mut self, name: &'static str, f: impl FnOnce() -> T) -> T {
@@ -72,7 +72,7 @@ impl Trace {
             timestamp: self.start,
             event_type: EventType::Complete(Instant::now()),
         })?;
-        write!(self.w, "]\n")?;
+        writeln!(self.w, "]")?;
         self.w.flush()
     }
 }

@@ -31,7 +31,7 @@ fn run() -> anyhow::Result<()> {
         mut db,
         default,
         hashes: last_hashes,
-    } = trace::scope("load::read", || load::read())?;
+    } = trace::scope("load::read", load::read)?;
 
     let mut targets = Vec::new();
     for free in matches.free {
@@ -41,7 +41,7 @@ fn run() -> anyhow::Result<()> {
         };
         targets.push(id);
     }
-    if targets.len() == 0 {
+    if targets.is_empty() {
         match default {
             // TODO: build all?
             None => anyhow::bail!("no path specified and no default"),

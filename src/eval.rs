@@ -43,7 +43,7 @@ impl<T: AsRef<str>> EvalString<T> {
     }
 }
 impl EvalString<&str> {
-    pub fn to_owned(self) -> EvalString<String> {
+    pub fn into_owned(self) -> EvalString<String> {
         EvalString(
             self.0
                 .into_iter()
@@ -72,7 +72,7 @@ impl<'a> Vars<'a> {
 }
 impl<'a> Env for Vars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
-        self.0.get(var).map(|val| val.clone())
+        self.0.get(var).cloned()
     }
 }
 

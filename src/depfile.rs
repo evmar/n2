@@ -66,10 +66,7 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
     scanner.expect('\n')?;
     scanner.expect('\0')?;
 
-    Ok(Deps {
-        target: target,
-        deps: deps,
-    })
+    Ok(Deps { target, deps })
 }
 
 #[cfg(test)]

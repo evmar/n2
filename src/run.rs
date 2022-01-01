@@ -57,7 +57,7 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
         Some(deps) => Some(read_depfile(deps)?),
     };
 
-    Ok(FinishedBuild { id: id, deps: deps })
+    Ok(FinishedBuild { id, deps })
 }
 
 pub struct Runner {
@@ -84,12 +84,10 @@ impl Runner {
         self.running > 0
     }
 
-    pub fn start(&mut self, id: BuildId, cmdline: &str, depfile: Option<&str>) {
-        let cmdline = cmdline.to_string();
-        let depfile = depfile.map(|path| path.to_string());
+    pub fn start(&mut self, id: BuildId, cmdline: String, depfile: Option<String>) {
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
-            let fin = run_build(id, &cmdline, depfile.as_ref().map(|s| s.as_str()));
+            let fin = run_build(id, &cmdline, depfile.as_deref());
             tx.send(fin).unwrap();
         });
         self.running += 1;

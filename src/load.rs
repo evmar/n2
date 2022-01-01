@@ -15,7 +15,7 @@ impl<'a> BuildImplicitVars<'a> {
     fn file_list(&self, ids: &[FileId]) -> String {
         let mut out = String::new();
         for &id in ids {
-            if out.len() > 0 {
+            if !out.is_empty() {
                 out.push(' ');
             }
             out.push_str(&self.graph.file(id).name);
@@ -26,8 +26,8 @@ impl<'a> BuildImplicitVars<'a> {
 impl<'a> eval::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<String> {
         match var {
-            "in" => Some(self.file_list(&self.build.explicit_ins())),
-            "out" => Some(self.file_list(&self.build.explicit_outs())),
+            "in" => Some(self.file_list(self.build.explicit_ins())),
+            "out" => Some(self.file_list(self.build.explicit_outs())),
             _ => None,
         }
     }
@@ -91,7 +91,7 @@ impl Loader {
         b: parse::Build,
     ) -> anyhow::Result<()> {
         let mut build = graph::Build::new(graph::FileLoc {
-            filename: filename,
+            filename,
             line: b.line,
         });
         build.set_ins(
@@ -116,22 +116,21 @@ impl Loader {
         };
         let envs: [&dyn eval::Env; 4] = [&implicit_vars, &b.vars, &rule.vars, env];
 
-        let cmdline = match b.vars.get("command").or_else(|| rule.vars.get("command")) {
-            Some(var) => Some(var.evaluate(&envs)),
-            None => None,
-        };
-        let desc = match b
+        let cmdline = b
+            .vars
+            .get("command")
+            .or_else(|| rule.vars.get("command"))
+            .map(|var| var.evaluate(&envs));
+        let desc = b
             .vars
             .get("description")
             .or_else(|| rule.vars.get("description"))
-        {
-            Some(var) => Some(var.evaluate(&envs)),
-            None => None,
-        };
-        let depfile = match b.vars.get("depfile").or_else(|| rule.vars.get("depfile")) {
-            Some(var) => Some(var.evaluate(&envs)),
-            None => None,
-        };
+            .map(|var| var.evaluate(&envs));
+        let depfile = b
+            .vars
+            .get("depfile")
+            .or_else(|| rule.vars.get("depfile"))
+            .map(|var| var.evaluate(&envs));
         build.cmdline = cmdline;
         build.desc = desc;
         build.depfile = depfile;
@@ -184,8 +183,8 @@ pub fn read() -> anyhow::Result<State> {
     .map_err(|err| anyhow!("load .n2_db: {}", err))?;
     Ok(State {
         graph: loader.graph,
-        hashes: hashes,
-        db: db,
+        db,
+        hashes,
         default: loader.default,
     })
 }

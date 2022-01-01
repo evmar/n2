@@ -42,6 +42,8 @@ struct WriteBuf {
     len: usize,
 }
 
+#[allow(clippy::erasing_op)]
+#[allow(clippy::identity_op)]
 impl WriteBuf {
     #[allow(deprecated)]
     fn new() -> Self {
@@ -113,7 +115,7 @@ pub struct Writer {
 
 impl Writer {
     fn new(ids: IdMap, w: File) -> Self {
-        Writer { ids: ids, w: w }
+        Writer { ids, w }
     }
 
     fn write_file(&mut self, name: &str) -> std::io::Result<()> {
@@ -185,6 +187,9 @@ impl<'a> BReader<'a> {
         }
         Ok(((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32))
     }
+
+    #[allow(clippy::erasing_op)]
+    #[allow(clippy::identity_op)]
     fn read_u64(&mut self) -> std::io::Result<u64> {
         let mut buf: [u8; 8];
         unsafe {
@@ -232,7 +237,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
             ids.db_ids.insert(fileid, dbid);
             ids.fileids.push(fileid);
         } else {
-            len = len & !mask;
+            len &= !mask;
 
             // Map each output to the associated build.
             // In the common case, there is only one.
