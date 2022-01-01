@@ -51,7 +51,7 @@ fn run() -> anyhow::Result<()> {
 
     let mut work = work::Work::new(&mut graph, &last_hashes, &mut db);
     for target in targets {
-        work.want_file(target)?;
+        work.want_file(target);
     }
     trace::scope("work.run", || work.run())
 }

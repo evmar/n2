@@ -84,14 +84,9 @@ impl BuildStates {
 
     /// Visits a BuildId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    fn want_build(
-        &mut self,
-        progress: &mut Progress,
-        graph: &Graph,
-        id: BuildId,
-    ) -> anyhow::Result<()> {
+    fn want_build(&mut self, progress: &mut Progress, graph: &Graph, id: BuildId) {
         if self.get(id) != BuildState::Unknown {
-            return Ok(()); // Already visited.
+            return; // Already visited.
         }
 
         self.set(id, BuildState::Want);
@@ -100,7 +95,7 @@ impl BuildStates {
         // Any Build that doesn't depend on an output of another Build is ready.
         let mut ready = true;
         for id in graph.build(id).depend_ins() {
-            self.want_file(progress, graph, id)?;
+            self.want_file(progress, graph, id);
             ready = ready && !graph.file(id).input.is_some();
         }
 
@@ -108,22 +103,14 @@ impl BuildStates {
             progress.ready(id, graph.build(id));
             self.set(id, BuildState::Ready);
         }
-
-        Ok(())
     }
 
     /// Visits a FileId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    pub fn want_file(
-        &mut self,
-        progress: &mut Progress,
-        graph: &Graph,
-        id: FileId,
-    ) -> anyhow::Result<()> {
+    pub fn want_file(&mut self, progress: &mut Progress, graph: &Graph, id: FileId) {
         if let Some(bid) = graph.file(id).input {
-            self.want_build(progress, graph, bid)?;
+            self.want_build(progress, graph, bid);
         }
-        Ok(())
     }
 
     pub fn pop_ready(&mut self) -> Option<BuildId> {
@@ -162,7 +149,7 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
+    pub fn want_file(&mut self, id: FileId) {
         self.build_states
             .want_file(&mut self.progress, self.graph, id)
     }
