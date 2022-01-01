@@ -271,8 +271,7 @@ impl<'a> Work<'a> {
             match mtime {
                 MTime::Stamp(_) => {}
                 MTime::Missing => {
-                    // XXX no panic, this is a user error
-                    panic!("input {} missing", file.name);
+                    anyhow::bail!("{}: input {} missing", build.location, file.name);
                 }
             };
         }
