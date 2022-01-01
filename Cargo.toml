@@ -11,3 +11,10 @@ anyhow = "1.0"
 
 [profile.release]
 debug = true
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "canon"
+harness = false
