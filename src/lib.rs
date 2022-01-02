@@ -5,7 +5,7 @@ mod eval;
 mod graph;
 pub mod load;
 mod parse;
-mod progress;
+pub mod progress;
 mod run;
 mod scanner;
 pub mod trace;

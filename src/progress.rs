@@ -1,53 +1,92 @@
 //! Build progress tracking and reporting, for the purpose of display to the
 //! user.
 
+use std::ops::Sub;
+use std::time::Duration;
+use std::time::Instant;
+
 use crate::graph::Build;
 use crate::graph::BuildId;
+use crate::work::BuildState;
 
-pub struct Progress {
+pub trait Progress {
+    fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState);
+    fn tick(&mut self);
+}
+
+pub struct RcProgress<P: Progress> {
+    inner: std::rc::Rc<std::cell::RefCell<P>>,
+}
+
+impl<P: Progress> RcProgress<P> {
+    pub fn new(p: P) -> Self {
+        RcProgress {
+            inner: std::rc::Rc::new(std::cell::RefCell::new(p)),
+        }
+    }
+}
+
+impl<P: Progress> Progress for RcProgress<P> {
+    fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState) {
+        self.inner.borrow_mut().build_state(id, build, prev, state);
+    }
+    fn tick(&mut self) {
+        self.inner.borrow_mut().tick();
+    }
+}
+
+pub struct ConsoleProgress {
+    last_update: Instant,
     want: usize,
     ready: usize,
     running: usize,
     done: usize,
 }
 
-impl Progress {
+impl ConsoleProgress {
     pub fn new() -> Self {
-        Progress {
+        ConsoleProgress {
+            last_update: Instant::now().sub(Duration::from_secs(1)),
             want: 0,
             ready: 0,
             running: 0,
             done: 0,
         }
     }
+}
 
-    pub fn want(&mut self, _id: BuildId, _build: &Build) {
-        self.want += 1;
-        self.maybe_print();
-    }
-    pub fn ready(&mut self, _id: BuildId, _build: &Build) {
-        self.want -= 1;
-        self.ready += 1;
-        self.maybe_print();
-    }
-    pub fn start(&mut self, _id: BuildId, build: &Build) {
-        if let Some(desc) = &build.desc {
-            println!("{}", desc);
-        } else if let Some(cmdline) = &build.cmdline {
-            println!("$ {}", cmdline);
+impl Progress for ConsoleProgress {
+    fn build_state(&mut self, _id: BuildId, build: &Build, prev: BuildState, state: BuildState) {
+        match prev {
+            BuildState::Want => self.want -= 1,
+            BuildState::Ready => self.ready -= 1,
+            BuildState::Running => self.running -= 1,
+            _ => {}
         }
-
-        self.ready -= 1;
-        self.running += 1;
+        match state {
+            BuildState::Want => self.want += 1,
+            BuildState::Ready => self.ready += 1,
+            BuildState::Running => {
+                if let Some(desc) = &build.desc {
+                    println!("{}", desc);
+                } else if let Some(cmdline) = &build.cmdline {
+                    println!("$ {}", cmdline);
+                }
+                self.running += 1;
+            }
+            BuildState::Done => self.done += 1,
+            _ => {}
+        }
         self.maybe_print();
     }
-    pub fn finish(&mut self, _id: BuildId, _build: &Build) {
-        self.running -= 1;
-        self.done += 1;
+
+    fn tick(&mut self) {
         self.maybe_print();
     }
+}
 
-    pub fn render(&self) -> String {
+impl ConsoleProgress {
+    fn render(&self) -> String {
         let total = self.done + self.running + self.ready + self.want;
 
         let mut out = String::new();
@@ -72,7 +111,13 @@ impl Progress {
         out
     }
 
-    fn maybe_print(&self) {
-        //println!("{}", self.render());
+    fn maybe_print(&mut self) {
+        let now = Instant::now();
+        let delta = now.duration_since(self.last_update);
+        if delta < Duration::from_millis(200) {
+            return;
+        }
+        println!("{}", self.render());
+        self.last_update = now;
     }
 }

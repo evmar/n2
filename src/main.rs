@@ -1,6 +1,7 @@
 extern crate getopts;
 
 use n2::load;
+use n2::progress;
 use n2::trace;
 use n2::work;
 
@@ -49,7 +50,9 @@ fn run() -> anyhow::Result<()> {
         }
     }
 
-    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db);
+    let mut progress = progress::RcProgress::new(progress::ConsoleProgress::new());
+
+    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress);
     for target in targets {
         work.want_file(target);
     }

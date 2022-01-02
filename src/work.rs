@@ -6,10 +6,11 @@ use crate::progress::Progress;
 use crate::run::FinishedBuild;
 use crate::run::Runner;
 use std::collections::HashSet;
+use std::time::Duration;
 
 /// Build steps go through this sequence of states.
 #[derive(Clone, Copy, PartialEq)]
-enum BuildState {
+pub enum BuildState {
     /// Default initial state, for Builds unneeded by the current build.
     Unknown,
     /// Builds we want to ensure are up to date, but which aren't ready yet.
@@ -32,7 +33,7 @@ enum BuildState {
 }
 
 /// BuildStates tracks progress of each Build step through the build.
-struct BuildStates {
+struct BuildStates<'a> {
     /// Maps BuildId to BuildState.
     states: Vec<BuildState>,
 
@@ -41,14 +42,17 @@ struct BuildStates {
 
     /// Builds in the ready state, stored redundantly for quick access.
     ready: HashSet<BuildId>,
+
+    progress: &'a mut dyn Progress,
 }
 
-impl BuildStates {
-    fn new() -> Self {
+impl<'a> BuildStates<'a> {
+    fn new(progress: &'a mut dyn Progress) -> Self {
         BuildStates {
             states: Vec::new(),
             pending: 0,
             ready: HashSet::new(),
+            progress,
         }
     }
 
@@ -58,24 +62,27 @@ impl BuildStates {
             .map_or(BuildState::Unknown, |&s| s)
     }
 
-    fn set(&mut self, id: BuildId, state: BuildState) {
+    fn set(&mut self, id: BuildId, build: &Build, state: BuildState) {
         if id.index() >= self.states.len() {
             self.states.resize(id.index() + 1, BuildState::Unknown);
         }
+        let prev = self.states[id.index()];
         self.states[id.index()] = state;
-        match state {
-            BuildState::Unknown => panic!("set state to unknown"),
-            BuildState::Want => {
-                self.pending += 1;
+        match prev {
+            BuildState::Ready => {
+                self.ready.remove(&id);
             }
+            _ => {}
+        };
+        match state {
+            BuildState::Want => self.pending += 1,
             BuildState::Ready => {
                 self.ready.insert(id);
             }
-            BuildState::Running => {
-                self.ready.remove(&id);
-            }
             BuildState::Done => self.pending -= 1,
+            _ => {}
         };
+        self.progress.build_state(id, build, prev, state);
     }
 
     fn unfinished(&self) -> bool {
@@ -84,32 +91,31 @@ impl BuildStates {
 
     /// Visits a BuildId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    fn want_build(&mut self, progress: &mut Progress, graph: &Graph, id: BuildId) {
+    fn want_build(&mut self, graph: &Graph, id: BuildId) {
         if self.get(id) != BuildState::Unknown {
             return; // Already visited.
         }
 
-        self.set(id, BuildState::Want);
-        progress.want(id, graph.build(id));
+        let build = graph.build(id);
+        self.set(id, build, BuildState::Want);
 
         // Any Build that doesn't depend on an output of another Build is ready.
         let mut ready = true;
-        for id in graph.build(id).depend_ins() {
-            self.want_file(progress, graph, id);
+        for id in build.depend_ins() {
+            self.want_file(graph, id);
             ready = ready && graph.file(id).input.is_none();
         }
 
         if ready {
-            progress.ready(id, graph.build(id));
-            self.set(id, BuildState::Ready);
+            self.set(id, build, BuildState::Ready);
         }
     }
 
     /// Visits a FileId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    pub fn want_file(&mut self, progress: &mut Progress, graph: &Graph, id: FileId) {
+    pub fn want_file(&mut self, graph: &Graph, id: FileId) {
         if let Some(bid) = graph.file(id).input {
-            self.want_build(progress, graph, bid);
+            self.want_build(graph, bid);
         }
     }
 
@@ -130,28 +136,30 @@ pub struct Work<'a> {
 
     file_state: FileState,
     last_hashes: &'a Hashes,
-    build_states: BuildStates,
-    progress: Progress,
+    build_states: BuildStates<'a>,
     runner: Runner,
 }
 
 impl<'a> Work<'a> {
-    pub fn new(graph: &'a mut Graph, last_hashes: &'a Hashes, db: &'a mut db::Writer) -> Self {
+    pub fn new(
+        graph: &'a mut Graph,
+        last_hashes: &'a Hashes,
+        db: &'a mut db::Writer,
+        progress: &'a mut dyn Progress,
+    ) -> Self {
         let file_state = FileState::new(graph);
         Work {
             graph,
             db,
             file_state,
             last_hashes,
-            build_states: BuildStates::new(),
-            progress: Progress::new(),
+            build_states: BuildStates::new(progress),
             runner: Runner::new(),
         }
     }
 
     pub fn want_file(&mut self, id: FileId) {
-        self.build_states
-            .want_file(&mut self.progress, self.graph, id)
+        self.build_states.want_file(self.graph, id)
     }
 
     /// Check whether a given build is ready, generally after one of its inputs
@@ -211,8 +219,7 @@ impl<'a> Work<'a> {
     /// Given a build that just finished, check whether its dependent builds are now ready.
     fn ready_dependents(&mut self, id: BuildId) {
         let build = self.graph.build(id);
-        self.build_states.set(id, BuildState::Done);
-        self.progress.finish(id, self.graph.build(id));
+        self.build_states.set(id, build, BuildState::Done);
 
         let mut dependents = HashSet::new();
         for &id in build.outs() {
@@ -227,8 +234,8 @@ impl<'a> Work<'a> {
             if !self.recheck_ready(id) {
                 continue;
             }
-            self.build_states.set(id, BuildState::Ready);
-            self.progress.ready(id, self.graph.build(id));
+            self.build_states
+                .set(id, self.graph.build(id), BuildState::Ready);
         }
     }
 
@@ -280,17 +287,16 @@ impl<'a> Work<'a> {
 
     pub fn run(&mut self) -> anyhow::Result<()> {
         while self.build_states.unfinished() {
-            println!("{}", self.progress.render());
+            self.build_states.progress.tick();
             // Kick off any any possible work to run.
             if self.runner.can_start_more() {
                 if let Some(id) = self.build_states.pop_ready() {
-                    self.build_states.set(id, BuildState::Running);
-                    self.progress.start(id, self.graph.build(id));
                     if !self.check_build_dirty(id)? {
-                        println!("cached {:?} {}", id, self.graph.build(id).location);
+                        // Not dirty; mark it done.
                         self.ready_dependents(id);
                     } else {
                         let build = self.graph.build(id);
+                        self.build_states.set(id, build, BuildState::Running);
                         self.runner.start(
                             id,
                             build.cmdline.clone().unwrap(),
@@ -302,7 +308,10 @@ impl<'a> Work<'a> {
             }
 
             if self.runner.is_running() {
-                let fin = self.runner.wait()?;
+                let fin = match self.runner.wait(Duration::from_millis(500))? {
+                    None => continue, // timeout
+                    Some(fin) => fin,
+                };
                 let id = fin.id;
                 // println!("finished {:?} {}", id, self.graph.build(id).location);
                 self.record_finished(fin)?;
@@ -312,7 +321,7 @@ impl<'a> Work<'a> {
 
             panic!("no work to do and runner not running?");
         }
-        println!("{}", self.progress.render());
+        self.build_states.progress.tick();
         Ok(())
     }
 }

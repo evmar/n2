@@ -10,6 +10,7 @@ use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
 use std::io::Write;
 use std::sync::mpsc;
+use std::time::Duration;
 
 pub struct FinishedBuild {
     pub id: BuildId,
@@ -93,10 +94,13 @@ impl Runner {
         self.running += 1;
     }
 
-    pub fn wait(&mut self) -> anyhow::Result<FinishedBuild> {
-        // The unwrap() checks the recv() call (panics on mpsc error).
-        let r = self.finished_recv.recv().unwrap();
+    pub fn wait(&mut self, dur: Duration) -> anyhow::Result<Option<FinishedBuild>> {
+        // The unwrap() checks the recv() call, to panic on mpsc errors.
+        let r = match self.finished_recv.recv_timeout(dur) {
+            Err(mpsc::RecvTimeoutError::Timeout) => return Ok(None),
+            r => r.unwrap(),
+        };
         self.running -= 1;
-        r
+        r.map(|f| Some(f))
     }
 }
