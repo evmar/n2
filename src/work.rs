@@ -287,7 +287,7 @@ impl<'a> Work<'a> {
 
     pub fn run(&mut self) -> anyhow::Result<()> {
         while self.build_states.unfinished() {
-            self.build_states.progress.tick();
+            self.build_states.progress.tick(BuildState::Running);
             // Kick off any any possible work to run.
             if self.runner.can_start_more() {
                 if let Some(id) = self.build_states.pop_ready() {
@@ -321,7 +321,7 @@ impl<'a> Work<'a> {
 
             panic!("no work to do and runner not running?");
         }
-        self.build_states.progress.tick();
+        self.build_states.progress.tick(BuildState::Done);
         Ok(())
     }
 }
