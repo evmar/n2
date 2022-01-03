@@ -114,23 +114,19 @@ impl Loader {
             graph: &self.graph,
             build: &build,
         };
-        let envs: [&dyn eval::Env; 4] = [&implicit_vars, &b.vars, &rule.vars, env];
+        let build_vars = b.vars;
+        let envs: [&dyn eval::Env; 4] = [&implicit_vars, &build_vars, &rule.vars, env];
 
-        let cmdline = b
-            .vars
-            .get("command")
-            .or_else(|| rule.vars.get("command"))
-            .map(|var| var.evaluate(&envs));
-        let desc = b
-            .vars
-            .get("description")
-            .or_else(|| rule.vars.get("description"))
-            .map(|var| var.evaluate(&envs));
-        let depfile = b
-            .vars
-            .get("depfile")
-            .or_else(|| rule.vars.get("depfile"))
-            .map(|var| var.evaluate(&envs));
+        let lookup = |key: &str| {
+            build_vars
+                .get(key)
+                .or_else(|| rule.vars.get(key))
+                .map(|var| var.evaluate(&envs))
+        };
+
+        let cmdline = lookup("command");
+        let desc = lookup("description");
+        let depfile = lookup("depfile");
         build.cmdline = cmdline;
         build.desc = desc;
         build.depfile = depfile;
