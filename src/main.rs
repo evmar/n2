@@ -43,11 +43,11 @@ fn run() -> anyhow::Result<()> {
         targets.push(id);
     }
     if targets.is_empty() {
-        match default {
-            // TODO: build all?
-            None => anyhow::bail!("no path specified and no default"),
-            Some(id) => targets.push(id),
-        }
+        targets = default;
+    }
+    if targets.is_empty() {
+        // TODO: build all?
+        anyhow::bail!("no path specified and no default");
     }
 
     let mut progress = progress::RcProgress::new(progress::ConsoleProgress::new());

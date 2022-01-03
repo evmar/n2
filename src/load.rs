@@ -37,7 +37,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 /// Internal state used while loading.
 struct Loader {
     graph: graph::Graph,
-    default: Option<FileId>,
+    default: Vec<FileId>,
     rules: HashMap<String, parse::Rule>,
 }
 
@@ -45,7 +45,7 @@ impl Loader {
     fn new() -> Self {
         let mut loader = Loader {
             graph: graph::Graph::new(),
-            default: None,
+            default: Vec::new(),
             rules: HashMap::new(),
         };
 
@@ -132,16 +132,11 @@ impl Loader {
             };
             match stmt {
                 Statement::Include(f) => self.read_file(&f)?,
-                Statement::Default(f) => {
-                    // TODO: default should be an array.
-                    self.default = Some(self.graph.file_id(f));
-                }
+                Statement::Default(f) => self.default.push(self.graph.file_id(f)),
                 Statement::Rule(r) => {
                     self.rules.insert(r.name.clone(), r);
                 }
-                Statement::Build(b) => {
-                    self.add_build(filename.clone(), &parser.vars, b)?;
-                }
+                Statement::Build(b) => self.add_build(filename.clone(), &parser.vars, b)?,
             };
         }
         Ok(())
@@ -153,7 +148,7 @@ pub struct State {
     pub graph: graph::Graph,
     pub db: db::Writer,
     pub hashes: graph::Hashes,
-    pub default: Option<FileId>,
+    pub default: Vec<FileId>,
 }
 
 /// Load build.ninja/.n2_db and return the loaded build graph and state.
