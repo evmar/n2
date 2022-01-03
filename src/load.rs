@@ -7,6 +7,7 @@ use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 
+/// A variable lookup environment for magic $in/$out variables.
 struct BuildImplicitVars<'a> {
     graph: &'a graph::Graph,
     build: &'a graph::Build,
@@ -33,36 +34,11 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
     }
 }
 
-struct SavedRule(parse::Rule);
-
-impl PartialEq for SavedRule {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.name == other.0.name
-    }
-}
-impl Eq for SavedRule {}
-impl std::hash::Hash for SavedRule {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.name.hash(state)
-    }
-}
-impl std::borrow::Borrow<str> for SavedRule {
-    fn borrow(&self) -> &str {
-        &self.0.name
-    }
-}
-
+/// Internal state used while loading.
 struct Loader {
     graph: graph::Graph,
     default: Option<FileId>,
     rules: HashMap<String, parse::Rule>,
-}
-
-pub struct State {
-    pub graph: graph::Graph,
-    pub db: db::Writer,
-    pub hashes: graph::Hashes,
-    pub default: Option<FileId>,
 }
 
 impl Loader {
@@ -156,7 +132,10 @@ impl Loader {
             };
             match stmt {
                 Statement::Include(f) => self.read_file(&f)?,
-                Statement::Default(f) => self.default = Some(self.graph.file_id(f)),
+                Statement::Default(f) => {
+                    // TODO: default should be an array.
+                    self.default = Some(self.graph.file_id(f));
+                }
                 Statement::Rule(r) => {
                     self.rules.insert(r.name.clone(), r);
                 }
@@ -169,6 +148,15 @@ impl Loader {
     }
 }
 
+/// State loaded by read().
+pub struct State {
+    pub graph: graph::Graph,
+    pub db: db::Writer,
+    pub hashes: graph::Hashes,
+    pub default: Option<FileId>,
+}
+
+/// Load build.ninja/.n2_db and return the loaded build graph and state.
 pub fn read() -> anyhow::Result<State> {
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || loader.read_file("build.ninja"))?;
