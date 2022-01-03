@@ -1,6 +1,7 @@
 //! Build progress tracking and reporting, for the purpose of display to the
 //! user.
 
+use std::collections::VecDeque;
 use std::ops::Sub;
 use std::time::Duration;
 use std::time::Instant;
@@ -59,8 +60,9 @@ pub struct ConsoleProgress {
     total: usize,
     /// Count of build tasks that would execute if we had CPUs for them.
     ready: usize,
-    /// Count of build tasks that are currently executing.
-    tasks: Vec<Task>,
+    /// Build tasks that are currently executing.
+    /// Pushed to as tasks are started, so it's always in order of age.
+    tasks: VecDeque<Task>,
     /// Count of build tasks that have finished.
     done: usize,
 }
@@ -71,7 +73,7 @@ impl ConsoleProgress {
             last_update: Instant::now().sub(Duration::from_secs(1)),
             total: 0,
             ready: 0,
-            tasks: Vec::new(),
+            tasks: VecDeque::new(),
             done: 0,
         }
     }
@@ -95,12 +97,11 @@ impl Progress for ConsoleProgress {
                     .desc
                     .as_ref()
                     .unwrap_or_else(|| build.cmdline.as_ref().unwrap());
-                self.tasks.push(Task {
+                self.tasks.push_back(Task {
                     start: Instant::now(),
                     id,
                     message: message.to_string(),
                 });
-                self.tasks.sort_by(|a, b| a.start.cmp(&b.start));
             }
             BuildState::Done => self.done += 1,
             _ => {}
