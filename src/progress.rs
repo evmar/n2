@@ -58,8 +58,10 @@ pub struct ConsoleProgress {
     last_update: Instant,
     /// Total count of build tasks.
     total: usize,
-    /// Count of build tasks that would execute if we had CPUs for them.
+    /// Count of build tasks that are ready to be checked for status.
     ready: usize,
+    /// Count of build tasks that would execute if we had CPUs for them.
+    queued: usize,
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
@@ -73,6 +75,7 @@ impl ConsoleProgress {
             last_update: Instant::now().sub(Duration::from_secs(1)),
             total: 0,
             ready: 0,
+            queued: 0,
             tasks: VecDeque::new(),
             done: 0,
         }
@@ -83,6 +86,7 @@ impl Progress for ConsoleProgress {
     fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState) {
         match prev {
             BuildState::Ready => self.ready -= 1,
+            BuildState::Queued => self.queued -= 1,
             BuildState::Running => {
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
@@ -92,6 +96,7 @@ impl Progress for ConsoleProgress {
         match state {
             BuildState::Want => self.total += 1,
             BuildState::Ready => self.ready += 1,
+            BuildState::Queued => self.queued += 1,
             BuildState::Running => {
                 let message = build
                     .desc
@@ -126,7 +131,7 @@ impl ConsoleProgress {
         let mut sum: usize = 0;
         for &(count, ch) in &[
             (self.done, '='),
-            (self.tasks.len() + self.ready, '-'),
+            (self.ready + self.tasks.len() + self.queued, '-'),
             (self.total, ' '),
         ] {
             sum += count;
@@ -140,27 +145,33 @@ impl ConsoleProgress {
         bar
     }
 
-    fn print(&self) {
-        // println!(
-        //     "\x1b[J[{}] [{} {} {} {}]",
-        //     bar, self.done, self.ready, self.running, self.want
-        // );
+    #[allow(dead_code)]
+    fn dump(&self) {
         println!(
-            "\x1b[J[{}] [{}/{}]",
+            "[{} {} {} {}]",
+            self.done,
+            self.ready,
+            self.tasks.len(),
+            self.total
+        );
+    }
+
+    fn print(&self) {
+        println!(
+            "\x1b[J[{}] {}/{} done, {}/{} running",
             self.progress_bar(),
             self.done,
-            self.total
+            self.total,
+            self.tasks.len(),
+            self.queued + self.tasks.len(),
         );
 
         let mut lines = 1;
         let now = Instant::now();
-        for task in self.tasks.iter() {
+        for task in self.tasks.iter().take(8) {
             let delta = now.duration_since(task.start).as_secs();
             println!("{}s {}", delta, task.message);
             lines += 1;
-            if lines > 8 {
-                break;
-            }
         }
 
         // Move cursor up to the first printed line, for overprinting.

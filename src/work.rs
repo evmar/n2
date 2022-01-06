@@ -6,6 +6,7 @@ use crate::progress::Progress;
 use crate::run::FinishedBuild;
 use crate::run::Runner;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::time::Duration;
 
 /// Build steps go through this sequence of states.
@@ -16,7 +17,7 @@ pub enum BuildState {
     /// Builds we want to ensure are up to date, but which aren't ready yet.
     Want,
     /// Builds whose generated inputs are up to date and are ready to be
-    /// checked/hashed/run.
+    /// checked/hashed.
     ///
     /// Preconditions:
     /// - generated inputs: have already been stat()ed as part of completing
@@ -26,6 +27,9 @@ pub enum BuildState {
     /// Note per these definitions, a build with missing non-generated inputs
     /// is still considered ready (but will then fail to run).
     Ready,
+    /// Builds who have been determined not up to date and which are ready
+    /// to be executed.
+    Queued,
     /// Currently executing.
     Running,
     /// Finished executing.
@@ -43,6 +47,9 @@ struct BuildStates<'a> {
     /// Builds in the ready state, stored redundantly for quick access.
     ready: HashSet<BuildId>,
 
+    /// Builds in the queued state, stored redundantly for quick access.
+    queued: VecDeque<BuildId>,
+
     progress: &'a mut dyn Progress,
 }
 
@@ -52,6 +59,7 @@ impl<'a> BuildStates<'a> {
             states: Vec::new(),
             pending: 0,
             ready: HashSet::new(),
+            queued: VecDeque::new(),
             progress,
         }
     }
@@ -127,6 +135,15 @@ impl<'a> BuildStates<'a> {
             None => return None,
         };
         Some(id)
+    }
+
+    pub fn enqueue(&mut self, id: BuildId, build: &Build) {
+        self.set(id, build, BuildState::Queued);
+        self.queued.push_back(id);
+    }
+
+    pub fn pop_queued(&mut self) -> Option<BuildId> {
+        self.queued.pop_front()
     }
 }
 
@@ -288,39 +305,57 @@ impl<'a> Work<'a> {
     pub fn run(&mut self) -> anyhow::Result<()> {
         while self.build_states.unfinished() {
             self.build_states.progress.tick(BuildState::Running);
-            // Kick off any any possible work to run.
-            if self.runner.can_start_more() {
-                if let Some(id) = self.build_states.pop_ready() {
-                    if !self.check_build_dirty(id)? {
-                        // Not dirty; mark it done.
-                        self.ready_dependents(id);
-                    } else {
-                        let build = self.graph.build(id);
-                        self.build_states.set(id, build, BuildState::Running);
-                        self.runner.start(
-                            id,
-                            build.cmdline.clone().unwrap(),
-                            build.depfile.clone(),
-                        );
-                    }
-                    continue;
-                }
+
+            // Approach:
+            // - First make sure we're running as many queued tasks as the runner
+            //   allows.
+            // - Next make sure we've finished or enqueued any tasks that are
+            //   ready.
+            // - If either one of those made progress, loop, to ensure the other
+            //   one gets to work from the result.
+            // - If neither made progress, wait for a task to complete and
+            //   loop.
+
+            let mut made_progress = false;
+            while self.runner.can_start_more() {
+                let id = match self.build_states.pop_queued() {
+                    Some(id) => id,
+                    None => break,
+                };
+                let build = self.graph.build(id);
+                self.build_states.set(id, build, BuildState::Running);
+                self.runner
+                    .start(id, build.cmdline.clone().unwrap(), build.depfile.clone());
+                made_progress = true;
             }
 
-            if self.runner.is_running() {
-                let fin = match self.runner.wait(Duration::from_millis(500))? {
-                    None => continue, // timeout
-                    Some(fin) => fin,
-                };
-                let id = fin.id;
-                // println!("finished {:?} {}", id, self.graph.build(id).location);
-                self.record_finished(fin)?;
-                self.ready_dependents(id);
+            while let Some(id) = self.build_states.pop_ready() {
+                if !self.check_build_dirty(id)? {
+                    // Not dirty; go directly to the Done state.
+                    self.ready_dependents(id);
+                } else {
+                    self.build_states.enqueue(id, self.graph.build(id));
+                }
+                made_progress = true;
+            }
+
+            if made_progress {
                 continue;
             }
 
-            panic!("no work to do and runner not running?");
+            if !self.runner.is_running() {
+                panic!("no work to do and runner not running?");
+            }
+
+            let fin = match self.runner.wait(Duration::from_millis(500))? {
+                None => continue, // timeout
+                Some(fin) => fin,
+            };
+            let id = fin.id;
+            self.record_finished(fin)?;
+            self.ready_dependents(id);
         }
+
         self.build_states.progress.tick(BuildState::Done);
         Ok(())
     }
