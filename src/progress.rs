@@ -156,12 +156,9 @@ impl ConsoleProgress {
         let now = Instant::now();
         for task in self.tasks.iter() {
             let delta = now.duration_since(task.start).as_secs();
-            if delta < 1 {
-                continue;
-            }
             println!("{}s {}", delta, task.message);
             lines += 1;
-            if lines > 6 {
+            if lines > 8 {
                 break;
             }
         }
