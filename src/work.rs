@@ -347,7 +347,7 @@ impl<'a> Work<'a> {
                 panic!("no work to do and runner not running?");
             }
 
-            let fin = match self.runner.wait(Duration::from_millis(500))? {
+            let fin = match self.runner.wait(Duration::from_millis(500)) {
                 None => continue, // timeout
                 Some(fin) => fin,
             };

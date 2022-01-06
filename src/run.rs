@@ -8,13 +8,13 @@ use crate::depfile;
 use crate::graph::BuildId;
 use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
-use std::io::Write;
 use std::sync::mpsc;
 use std::time::Duration;
 
 pub struct FinishedBuild {
     pub id: BuildId,
-    // TODO: console output
+    pub success: bool,
+    pub output: Vec<u8>,
     pub deps: Option<Vec<String>>,
 }
 
@@ -39,31 +39,36 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
 }
 
 /// Executes a build step as a subprocess.
+/// Returns an Err() if we failed outside of the process itself.
 fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Result<FinishedBuild> {
-    let output = std::process::Command::new("sh")
+    let mut cmd = std::process::Command::new("sh")
         .arg("-c")
         .arg(cmdline)
         .output()?;
-    if !output.stdout.is_empty() {
-        std::io::stdout().write_all(&output.stdout)?;
-    }
-    if !output.stderr.is_empty() {
-        std::io::stdout().write_all(&output.stderr)?;
-    }
-    if !output.status.success() {
-        bail!("subcommand failed");
-    }
-    let deps = match depfile {
-        None => None,
-        Some(deps) => Some(read_depfile(deps)?),
-    };
+    let mut output = Vec::new();
+    output.append(&mut cmd.stdout);
+    output.append(&mut cmd.stderr);
+    let success = cmd.status.success();
 
-    Ok(FinishedBuild { id, deps })
+    let mut deps: Option<Vec<String>> = None;
+    if success {
+        deps = match depfile {
+            None => None,
+            Some(deps) => Some(read_depfile(deps)?),
+        };
+    }
+
+    Ok(FinishedBuild {
+        id,
+        success,
+        output,
+        deps,
+    })
 }
 
 pub struct Runner {
-    finished_send: mpsc::Sender<anyhow::Result<FinishedBuild>>,
-    finished_recv: mpsc::Receiver<anyhow::Result<FinishedBuild>>,
+    finished_send: mpsc::Sender<FinishedBuild>,
+    finished_recv: mpsc::Receiver<FinishedBuild>,
     pub running: usize,
 }
 
@@ -88,19 +93,27 @@ impl Runner {
     pub fn start(&mut self, id: BuildId, cmdline: String, depfile: Option<String>) {
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
-            let fin = run_build(id, &cmdline, depfile.as_deref());
+            let fin =
+                run_build(id, &cmdline, depfile.as_deref()).unwrap_or_else(|err| FinishedBuild {
+                    id,
+                    success: false,
+                    output: err.to_string().into_bytes(),
+                    deps: None,
+                });
             tx.send(fin).unwrap();
         });
         self.running += 1;
     }
 
-    pub fn wait(&mut self, dur: Duration) -> anyhow::Result<Option<FinishedBuild>> {
-        // The unwrap() checks the recv() call, to panic on mpsc errors.
+    /// Wait for a build to complete, with a timeout.
+    /// If the timeout elapses return None.
+    pub fn wait(&mut self, dur: Duration) -> Option<FinishedBuild> {
         let r = match self.finished_recv.recv_timeout(dur) {
-            Err(mpsc::RecvTimeoutError::Timeout) => return Ok(None),
+            Err(mpsc::RecvTimeoutError::Timeout) => return None,
+            // The unwrap() checks the recv() call, to panic on mpsc errors.
             r => r.unwrap(),
         };
         self.running -= 1;
-        r.map(|f| Some(f))
+        Some(r)
     }
 }
