@@ -268,11 +268,14 @@ impl<'a> Parser<'a> {
                     self.scanner.back();
                     break;
                 }
-                c @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/') => {
+                c @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+') => {
                     path.push(c);
                 }
                 c => {
-                    panic!("unhandled character {:?}", c);
+                    self.scanner.back();
+                    return self
+                        .scanner
+                        .parse_error(format!("unexpected character {:?}", c));
                 }
             }
         }
