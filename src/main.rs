@@ -1,9 +1,11 @@
 extern crate getopts;
 
+use anyhow::anyhow;
 use n2::load;
 use n2::progress;
 use n2::trace;
 use n2::work;
+use std::path::Path;
 
 fn run() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -24,7 +26,8 @@ fn run() -> anyhow::Result<()> {
     }
 
     if let Some(dir) = matches.opt_str("C") {
-        std::env::set_current_dir(dir).unwrap();
+        let dir = Path::new(&dir);
+        std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
     let load::State {
