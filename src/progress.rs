@@ -10,6 +10,19 @@ use crate::graph::Build;
 use crate::graph::BuildId;
 use crate::work::BuildState;
 
+/// Compute the message to display on the console for a given build.
+fn build_message(build: &Build) -> &str {
+    let message = build
+        .desc
+        .as_ref()
+        .unwrap_or_else(|| build.cmdline.as_ref().unwrap());
+    // TODO: don't hardcode to 70, but instead obey console size.
+    if message.len() < 70 {
+        return message;
+    }
+    return &message[0..70];
+}
+
 /// Trait for build progress notifications.
 pub trait Progress {
     /// Called as individual build tasks progress through build states.
@@ -19,6 +32,12 @@ pub trait Progress {
     /// Called periodically on a timer, and on build finish.
     /// state represents the overall completion state of the build.
     fn tick(&mut self, state: BuildState);
+
+    /// Called when a build has failed.
+    /// TODO: maybe this should just be part of build_state?
+    /// In particular, consider the case where builds output progress as they run,
+    /// as well as the case where multiple build steps are allowed to fail.
+    fn failed(&mut self, build: &Build, output: &Vec<u8>);
 }
 
 /// Rc<RefCell<>> wrapper around Progress.
@@ -40,6 +59,9 @@ impl<P: Progress> Progress for RcProgress<P> {
     }
     fn tick(&mut self, state: BuildState) {
         self.inner.borrow_mut().tick(state);
+    }
+    fn failed(&mut self, build: &Build, output: &Vec<u8>) {
+        self.inner.borrow_mut().failed(build, output);
     }
 }
 
@@ -98,10 +120,7 @@ impl Progress for ConsoleProgress {
             BuildState::Ready => self.ready += 1,
             BuildState::Queued => self.queued += 1,
             BuildState::Running => {
-                let message = build
-                    .desc
-                    .as_ref()
-                    .unwrap_or_else(|| build.cmdline.as_ref().unwrap());
+                let message = build_message(build);
                 self.tasks.push_back(Task {
                     start: Instant::now(),
                     id,
@@ -122,6 +141,12 @@ impl Progress for ConsoleProgress {
             }
             _ => self.maybe_print(),
         }
+    }
+
+    fn failed(&mut self, build: &Build, output: &Vec<u8>) {
+        let message = build_message(build);
+        println!("\x1b[Jfailed: {}", message);
+        println!("{}", String::from_utf8_lossy(output));
     }
 }
 

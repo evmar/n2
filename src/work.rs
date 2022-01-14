@@ -352,6 +352,14 @@ impl<'a> Work<'a> {
                 Some(fin) => fin,
             };
             let id = fin.id;
+
+            if !fin.success {
+                self.build_states
+                    .progress
+                    .failed(self.graph.build(id), &fin.output);
+                anyhow::bail!("build failed");
+            }
+
             self.record_finished(fin)?;
             self.ready_dependents(id);
         }
