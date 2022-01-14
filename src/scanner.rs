@@ -85,10 +85,25 @@ impl<'a> Scanner<'a> {
 
                 let prefix = format!("{}:{}: ", filename, line_number);
                 msg.push_str(&prefix);
-                msg.push_str(line);
+
+                let mut context = line;
+                let mut col = err.ofs - ofs;
+                if col > 40 {
+                    // Trim beginning of line to fit it on screen.
+                    msg.push_str("...");
+                    context = &line[col - 20..];
+                    col = 3 + 20;
+                }
+                if context.len() > 40 {
+                    context = &context[0..40];
+                    msg.push_str(context);
+                    msg.push_str("...");
+                } else {
+                    msg.push_str(context);
+                }
                 msg.push('\n');
 
-                msg.push_str(&" ".repeat(prefix.len() + (err.ofs - ofs)));
+                msg.push_str(&" ".repeat(prefix.len() + col));
                 msg.push_str("^\n");
                 return msg;
             }
