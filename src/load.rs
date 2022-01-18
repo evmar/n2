@@ -90,8 +90,8 @@ impl Loader {
             graph: &self.graph,
             build: &build,
         };
-        let build_vars = b.vars;
-        let envs: [&dyn eval::Env; 4] = [&implicit_vars, &build_vars, &rule.vars, env];
+        let build_vars = &b.vars;
+        let envs: [&dyn eval::Env; 4] = [&implicit_vars, build_vars, &rule.vars, env];
 
         let lookup = |key: &str| {
             build_vars
