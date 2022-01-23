@@ -103,9 +103,11 @@ impl Loader {
         let cmdline = lookup("command");
         let desc = lookup("description");
         let depfile = lookup("depfile");
+        let pool = lookup("pool");
         build.cmdline = cmdline;
         build.desc = desc;
         build.depfile = depfile;
+        build.pool = pool;
 
         self.graph.add_build(build);
         Ok(())

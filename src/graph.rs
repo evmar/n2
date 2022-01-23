@@ -66,6 +66,9 @@ pub struct Build {
     /// Path to generated `.d` file, if any.
     pub depfile: Option<String>,
 
+    /// Pool to execute this build in, if any.
+    pub pool: Option<String>,
+
     /// Input files.
     /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
     /// This is mostly to simplify some of the iteration and is a little more
@@ -91,6 +94,7 @@ impl Build {
             desc: None,
             cmdline: None,
             depfile: None,
+            pool: None,
             ins: Vec::new(),
             explicit_ins: 0,
             implicit_ins: 0,
