@@ -83,7 +83,7 @@ impl<'a> Scanner<'a> {
                 msg.push_str(&err.msg);
                 msg.push('\n');
 
-                let prefix = format!("{}:{}: ", filename, line_number);
+                let prefix = format!("{}:{}: ", filename, line_number + 1);
                 msg.push_str(&prefix);
 
                 let mut context = line;
