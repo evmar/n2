@@ -310,8 +310,11 @@ impl FileState {
     }
 }
 
-pub fn hash_build(graph: &Graph, file_state: &mut FileState, id: BuildId) -> std::io::Result<Hash> {
-    let build = graph.build(id);
+pub fn hash_build(
+    graph: &Graph,
+    file_state: &mut FileState,
+    build: &Build,
+) -> std::io::Result<Hash> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for id in build.dirtying_ins() {
         hasher.write(graph.file(id).name.as_bytes());

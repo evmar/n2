@@ -211,10 +211,11 @@ impl<'a> Work<'a> {
             Some(names) => names.iter().map(|name| self.graph.file_id(name)).collect(),
         };
         let deps_changed = self.graph.build_mut(id).update_deps(deps);
+        let build = self.graph.build(id);
 
         // We may have discovered new deps, so ensure we have mtimes for those.
         if deps_changed {
-            for &id in self.graph.build(id).deps_ins() {
+            for &id in build.deps_ins() {
                 if self.file_state.get(id).is_some() {
                     // Already have state for this file.
                     continue;
@@ -227,7 +228,7 @@ impl<'a> Work<'a> {
             }
         }
 
-        let hash = hash_build(self.graph, &mut self.file_state, id)?;
+        let hash = hash_build(self.graph, &mut self.file_state, build)?;
         self.db.write_build(self.graph, id, hash)?;
 
         Ok(())
@@ -251,8 +252,7 @@ impl<'a> Work<'a> {
             if !self.recheck_ready(id) {
                 continue;
             }
-            self.build_states
-                .set(id, self.graph.build(id), BuildState::Ready);
+            self.build_states.set(id, build, BuildState::Ready);
         }
     }
 
@@ -298,7 +298,7 @@ impl<'a> Work<'a> {
             return Ok(false);
         }
 
-        let hash = hash_build(self.graph, &mut self.file_state, id)?;
+        let hash = hash_build(self.graph, &mut self.file_state, build)?;
         Ok(self.last_hashes.changed(id, hash))
     }
 
