@@ -36,6 +36,28 @@ pub enum BuildState {
     Done,
 }
 
+/// Pools gather collections of running builds.
+/// Each running build is running "in" a pool; there's a default unbounded
+/// pool for builds that don't specify one.
+struct PoolState {
+    /// A queue of builds that are ready to be executed in this pool.
+    queued: VecDeque<BuildId>,
+    /// The number of builds currently running in this pool.
+    running: usize,
+    /// The total depth of the pool.  0 means unbounded.
+    depth: usize,
+}
+
+impl PoolState {
+    fn new(depth: usize) -> Self {
+        PoolState {
+            queued: VecDeque::new(),
+            running: 0,
+            depth,
+        }
+    }
+}
+
 /// BuildStates tracks progress of each Build step through the build.
 struct BuildStates<'a> {
     /// Maps BuildId to BuildState.
@@ -47,20 +69,32 @@ struct BuildStates<'a> {
     /// Builds in the ready state, stored redundantly for quick access.
     ready: HashSet<BuildId>,
 
-    /// Builds in the queued state, stored redundantly for quick access.
-    queued: VecDeque<BuildId>,
+    /// Named pools of queued and running builds.
+    /// Builds otherwise default to using an unnamed infinite pool.
+    /// We expect a relatively small number of pools, such that a Vec is more
+    /// efficient than a HashMap.
+    pools: Vec<(String, PoolState)>,
 
     progress: &'a mut dyn Progress,
 }
 
 impl<'a> BuildStates<'a> {
-    fn new(progress: &'a mut dyn Progress) -> Self {
+    fn new(progress: &'a mut dyn Progress, depths: Vec<(String, usize)>) -> Self {
+        let mut pools: Vec<(String, PoolState)> = vec![
+            // The implied default pool.
+            (String::from(""), PoolState::new(0)),
+        ];
+        pools.extend(
+            depths
+                .into_iter()
+                .map(|(name, depth)| (name, PoolState::new(depth))),
+        );
         BuildStates {
             states: Vec::new(),
             pending: 0,
             ready: HashSet::new(),
-            queued: VecDeque::new(),
             progress,
+            pools,
         }
     }
 
@@ -80,12 +114,18 @@ impl<'a> BuildStates<'a> {
             BuildState::Ready => {
                 self.ready.remove(&id);
             }
+            BuildState::Running => {
+                self.get_pool(build).unwrap().running -= 1;
+            }
             _ => {}
         };
         match state {
             BuildState::Want => self.pending += 1,
             BuildState::Ready => {
                 self.ready.insert(id);
+            }
+            BuildState::Running => {
+                self.get_pool(build).unwrap().running += 1;
             }
             BuildState::Done => self.pending -= 1,
             _ => {}
@@ -137,13 +177,44 @@ impl<'a> BuildStates<'a> {
         Some(id)
     }
 
-    pub fn enqueue(&mut self, id: BuildId, build: &Build) {
-        self.set(id, build, BuildState::Queued);
-        self.queued.push_back(id);
+    /// Look up a PoolState by name.
+    fn get_pool(&mut self, build: &Build) -> Option<&mut PoolState> {
+        let name = build.pool.as_deref().unwrap_or("");
+        for (key, pool) in self.pools.iter_mut() {
+            if key == name {
+                return Some(pool);
+            }
+        }
+        None
     }
 
+    /// Mark a build as ready to run.
+    /// May fail if the build references an unknown pool.
+    pub fn enqueue(&mut self, id: BuildId, build: &Build) -> anyhow::Result<()> {
+        self.set(id, build, BuildState::Queued);
+        let pool = self.get_pool(build).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}: unknown pool {:?}",
+                build.location,
+                // Unnamed pool lookups always succeed, this error is about
+                // named pools.
+                build.pool.as_ref().unwrap()
+            )
+        })?;
+        pool.queued.push_back(id);
+        Ok(())
+    }
+
+    /// Pop a ready to run queued build.
     pub fn pop_queued(&mut self) -> Option<BuildId> {
-        self.queued.pop_front()
+        for (_, pool) in self.pools.iter_mut() {
+            if pool.depth == 0 || pool.running < pool.depth {
+                if let Some(id) = pool.queued.pop_front() {
+                    return Some(id);
+                }
+            }
+        }
+        None
     }
 }
 
@@ -163,6 +234,7 @@ impl<'a> Work<'a> {
         last_hashes: &'a Hashes,
         db: &'a mut db::Writer,
         progress: &'a mut dyn Progress,
+        pools: Vec<(String, usize)>,
     ) -> Self {
         let file_state = FileState::new(graph);
         Work {
@@ -170,7 +242,7 @@ impl<'a> Work<'a> {
             db,
             file_state,
             last_hashes,
-            build_states: BuildStates::new(progress),
+            build_states: BuildStates::new(progress, pools),
             runner: Runner::new(),
         }
     }
@@ -334,7 +406,7 @@ impl<'a> Work<'a> {
                     // Not dirty; go directly to the Done state.
                     self.ready_dependents(id);
                 } else {
-                    self.build_states.enqueue(id, self.graph.build(id));
+                    self.build_states.enqueue(id, self.graph.build(id))?;
                 }
                 made_progress = true;
             }

@@ -56,7 +56,7 @@ fn run() -> anyhow::Result<()> {
 
     let mut progress = progress::RcProgress::new(progress::ConsoleProgress::new());
 
-    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress);
+    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress, pools);
     for target in targets {
         work.want_file(target);
     }
