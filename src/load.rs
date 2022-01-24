@@ -39,6 +39,7 @@ struct Loader {
     graph: graph::Graph,
     default: Vec<FileId>,
     rules: HashMap<String, parse::Rule>,
+    pools: Vec<(String, usize)>,
 }
 
 impl Loader {
@@ -47,6 +48,7 @@ impl Loader {
             graph: graph::Graph::new(),
             default: Vec::new(),
             rules: HashMap::new(),
+            pools: Vec::new(),
         };
 
         loader.rules.insert(
@@ -139,6 +141,9 @@ impl Loader {
                     self.rules.insert(r.name.clone(), r);
                 }
                 Statement::Build(b) => self.add_build(filename.clone(), &parser.vars, b)?,
+                Statement::Pool(p) => {
+                    self.pools.push((p.name.to_string(), p.depth));
+                }
             };
         }
         Ok(())
@@ -151,6 +156,7 @@ pub struct State {
     pub db: db::Writer,
     pub hashes: graph::Hashes,
     pub default: Vec<FileId>,
+    pub pools: Vec<(String, usize)>,
 }
 
 /// Load build.ninja/.n2_db and return the loaded build graph and state.
@@ -167,5 +173,6 @@ pub fn read() -> anyhow::Result<State> {
         db,
         hashes,
         default: loader.default,
+        pools: loader.pools,
     })
 }

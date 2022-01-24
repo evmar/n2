@@ -97,6 +97,9 @@ impl LazyVars {
         }
         None
     }
+    pub fn keyvals(&self) -> &Vec<(String, EvalString<String>)> {
+        &self.0
+    }
 }
 impl Env for LazyVars {
     fn get_var(&self, var: &str) -> Option<String> {

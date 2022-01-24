@@ -35,6 +35,7 @@ fn run() -> anyhow::Result<()> {
         mut db,
         default,
         hashes: last_hashes,
+        pools,
     } = trace::scope("load::read", load::read)?;
 
     let mut targets = Vec::new();

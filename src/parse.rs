@@ -3,13 +3,11 @@
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
-#[derive(Debug)]
 pub struct Rule {
     pub name: String,
     pub vars: LazyVars,
 }
 
-#[derive(Debug)]
 pub struct Build<'a> {
     pub rule: &'a str,
     pub line: usize,
@@ -22,12 +20,17 @@ pub struct Build<'a> {
     pub vars: LazyVars,
 }
 
-#[derive(Debug)]
+pub struct Pool<'a> {
+    pub name: &'a str,
+    pub depth: usize,
+}
+
 pub enum Statement<'a> {
     Rule(Rule),
     Build(Build<'a>),
     Default(&'a str),
     Include(String),
+    Pool(Pool<'a>),
 }
 
 pub struct Parser<'a> {
@@ -68,6 +71,7 @@ impl<'a> Parser<'a> {
                             };
                             return Ok(Some(Statement::Include(path)));
                         }
+                        "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
                             let val = self.read_vardef()?.evaluate(&[&self.vars]);
                             self.vars.insert(ident, val);
@@ -105,6 +109,32 @@ impl<'a> Parser<'a> {
             name: name.to_owned(),
             vars,
         })
+    }
+
+    fn read_pool(&mut self) -> ParseResult<Pool<'a>> {
+        let name = self.read_ident()?;
+        self.scanner.expect('\n')?;
+        let vars = self.read_scoped_vars()?;
+        let mut depth = 0;
+        for (key, val) in vars.keyvals() {
+            match key.as_str() {
+                "depth" => {
+                    let val = val.evaluate(&[]);
+                    depth = match val.parse::<usize>() {
+                        Ok(d) => d,
+                        Err(err) => {
+                            return self.scanner.parse_error(format!("pool depth: {}", err))
+                        }
+                    }
+                }
+                _ => {
+                    return self
+                        .scanner
+                        .parse_error(format!("unexpected pool attribute {:?}", key));
+                }
+            }
+        }
+        Ok(Pool { name, depth })
     }
 
     fn read_build(&mut self) -> ParseResult<Build<'a>> {
