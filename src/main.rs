@@ -67,7 +67,10 @@ fn main() {
     match run() {
         Ok(_) => {}
         Err(err) => {
-            println!("n2: error: {}", err);
+            // The escape code here clears any leftover progress state,
+            // see progress.rs.
+            // TODO: clearing here should be handled by progress.rs (?)
+            println!("\x1b[Jn2: error: {}", err);
         }
     }
     trace::close().unwrap();

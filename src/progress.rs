@@ -75,6 +75,10 @@ struct Task {
 }
 
 /// Console progress pretty-printer.
+/// Each time it prints, it clears from the cursor to the end of the console,
+/// prints the status text, and then moves moves the cursor back up to the
+/// start position.  This means on errors etc. we can clear any status by
+/// clearing the console too.
 pub struct ConsoleProgress {
     /// Last time we updated the console, used to throttle updates.
     last_update: Instant,
