@@ -314,6 +314,7 @@ dependencies = [
  "criterion",
  "getopts",
  "jemallocator",
+ "libc",
 ]
 
 [[package]]

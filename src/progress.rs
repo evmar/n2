@@ -10,17 +10,22 @@ use crate::graph::Build;
 use crate::graph::BuildId;
 use crate::work::BuildState;
 
+pub fn get_terminal_cols() -> Option<usize> {
+    unsafe {
+        let mut winsize: libc::winsize = std::mem::MaybeUninit::uninit().assume_init();
+        if libc::ioctl(0, libc::TIOCGWINSZ, &mut winsize) < 0 {
+            return None;
+        }
+        Some(winsize.ws_col as usize)
+    }
+}
+
 /// Compute the message to display on the console for a given build.
 fn build_message(build: &Build) -> &str {
-    let message = build
+    build
         .desc
         .as_ref()
-        .unwrap_or_else(|| build.cmdline.as_ref().unwrap());
-    // TODO: don't hardcode to 70, but instead obey console size.
-    if message.len() < 70 {
-        return message;
-    }
-    return &message[0..70];
+        .unwrap_or_else(|| build.cmdline.as_ref().unwrap())
 }
 
 /// Trait for build progress notifications.
@@ -195,11 +200,17 @@ impl ConsoleProgress {
             self.queued + self.tasks.len(),
         );
 
+        let max_cols = get_terminal_cols().unwrap_or(80);
         let mut lines = 1;
         let now = Instant::now();
         for task in self.tasks.iter().take(8) {
             let delta = now.duration_since(task.start).as_secs();
-            println!("{}s {}", delta, task.message);
+            let line = format!("{}s {}", delta, task.message);
+            if line.len() >= max_cols {
+                println!("{}...", &line[0..max_cols-4]);
+            } else {
+                println!("{}", line);
+            }
             lines += 1;
         }
 
