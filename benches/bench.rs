@@ -2,6 +2,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use n2::canon::canon_path;
 use n2::parse::Parser;
 use n2::scanner::Scanner;
+use std::fmt::Write;
 
 pub fn bench_canon(c: &mut Criterion) {
     c.bench_function("canon plain", |b| {
@@ -23,13 +24,17 @@ pub fn bench_canon(c: &mut Criterion) {
 }
 
 pub fn bench_parse(c: &mut Criterion) {
-    let input = "build $out/foo/bar.o: cc $src/long/file/name.cc
-depfile = $out/foo/bar.o.d
-\0";
+    let mut input = String::new();
+    for i in 0..50 {
+        write!(input, "build $out/foo/bar{}.o: cc $src/long/file/name{}.cc
+        depfile = $out/foo/bar{}.o.d
+", i, i, i).unwrap();
+    }
+    input.push(0 as char);
 
     c.bench_function("parse", |b| {
         b.iter(|| {
-            let scanner = Scanner::new(input);
+            let scanner = Scanner::new(&input);
             let mut parser = Parser::new(scanner);
             parser.read().unwrap();
         })
