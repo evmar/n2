@@ -207,7 +207,7 @@ impl ConsoleProgress {
             let delta = now.duration_since(task.start).as_secs();
             let line = format!("{}s {}", delta, task.message);
             if line.len() >= max_cols {
-                println!("{}...", &line[0..max_cols-4]);
+                println!("{}...", &line[0..max_cols - 4]);
             } else {
                 println!("{}", line);
             }
