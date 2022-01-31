@@ -154,7 +154,9 @@ impl Progress for ConsoleProgress {
 
     fn failed(&mut self, build: &Build, output: &Vec<u8>) {
         let message = build_message(build);
-        println!("\x1b[Jfailed: {}", message);
+        // If the user hit ctl-c, it may have printed something on the line.
+        // So \r to go to first column first, then the same clear we use elsewhere.
+        println!("\r\x1b[Jfailed: {}", message);
         println!("{}", String::from_utf8_lossy(output));
     }
 }
