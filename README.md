@@ -11,7 +11,6 @@ a build system.
 Known missing pieces of real Ninja include:
 
 - Windows support, including MVSC-related features;
-- [Pools](https://ninja-build.org/manual.html#ref_pool);
 - RSP files;
 - Dynamic dependencies;
 - Other [rule variables](https://ninja-build.org/manual.html#ref_rule) such as
