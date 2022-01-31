@@ -1,4 +1,4 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use n2::canon::canon_path;
 use n2::parse::Parser;
 use n2::scanner::Scanner;
@@ -26,9 +26,14 @@ pub fn bench_canon(c: &mut Criterion) {
 pub fn bench_parse(c: &mut Criterion) {
     let mut input = String::new();
     for i in 0..50 {
-        write!(input, "build $out/foo/bar{}.o: cc $src/long/file/name{}.cc
+        write!(
+            input,
+            "build $out/foo/bar{}.o: cc $src/long/file/name{}.cc
         depfile = $out/foo/bar{}.o.d
-", i, i, i).unwrap();
+",
+            i, i, i
+        )
+        .unwrap();
     }
     input.push(0 as char);
 

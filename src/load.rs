@@ -116,7 +116,7 @@ impl Loader {
     }
 
     fn read_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let mut bytes = match std::fs::read(path) {
+        let mut bytes = match trace::scope("fs::read", || std::fs::read(path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path, e),
         };
@@ -135,7 +135,7 @@ impl Loader {
                 Some(s) => s,
             };
             match stmt {
-                Statement::Include(f) => self.read_file(&f)?,
+                Statement::Include(f) => trace::scope("include", || self.read_file(&f))?,
                 Statement::Default(f) => self.default.push(self.graph.file_id(f)),
                 Statement::Rule(r) => {
                     self.rules.insert(r.name.clone(), r);

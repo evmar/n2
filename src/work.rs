@@ -5,6 +5,7 @@ use crate::graph::*;
 use crate::progress::Progress;
 use crate::run::FinishedBuild;
 use crate::run::Runner;
+use crate::trace;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -34,6 +35,31 @@ pub enum BuildState {
     Running,
     /// Finished executing.
     Done,
+}
+
+// Counters tracking number of builds in each state
+struct StateCounts([usize; 5]);
+impl StateCounts {
+    fn new() -> Self {
+        StateCounts([0; 5])
+    }
+    fn idx(state: BuildState) -> usize {
+        match state {
+            BuildState::Unknown => panic!("unexpected state"),
+            BuildState::Want => 0,
+            BuildState::Ready => 1,
+            BuildState::Queued => 2,
+            BuildState::Running => 3,
+            BuildState::Done => 4,
+        }
+    }
+    fn add(&mut self, state: BuildState, delta: isize) {
+        self.0[StateCounts::idx(state)] =
+            (self.0[StateCounts::idx(state)] as isize + delta) as usize;
+    }
+    fn get(&self, state: BuildState) -> usize {
+        self.0[StateCounts::idx(state)]
+    }
 }
 
 /// Pools gather collections of running builds.
@@ -66,6 +92,9 @@ struct BuildStates<'a> {
     /// Number of builds that are desired but not complete yet.
     pending: usize,
 
+    // Counts of builds in each state.
+    counts: StateCounts,
+
     /// Builds in the ready state, stored redundantly for quick access.
     ready: HashSet<BuildId>,
 
@@ -92,6 +121,7 @@ impl<'a> BuildStates<'a> {
         BuildStates {
             states: Vec::new(),
             pending: 0,
+            counts: StateCounts::new(),
             ready: HashSet::new(),
             progress,
             pools,
@@ -119,17 +149,39 @@ impl<'a> BuildStates<'a> {
             }
             _ => {}
         };
+        if prev != BuildState::Unknown {
+            self.counts.add(prev, -1);
+        }
         match state {
             BuildState::Want => self.pending += 1,
             BuildState::Ready => {
                 self.ready.insert(id);
             }
             BuildState::Running => {
+                if self.counts.get(BuildState::Running) == 0 {
+                    trace::if_enabled(|t| t.write_instant("first build"));
+                }
                 self.get_pool(build).unwrap().running += 1;
             }
             BuildState::Done => self.pending -= 1,
             _ => {}
         };
+        self.counts.add(state, 1);
+        /*
+        This is too expensive to log on every individual state change...
+        trace::if_enabled(|t| {
+            t.write_counts(
+                "builds",
+                [
+                    ("want", self.counts.get(BuildState::Want)),
+                    ("ready", self.counts.get(BuildState::Ready)),
+                    ("queued", self.counts.get(BuildState::Queued)),
+                    ("running", self.counts.get(BuildState::Running)),
+                    ("done", self.counts.get(BuildState::Done)),
+                ]
+                .iter(),
+            )
+        });*/
         self.progress.build_state(id, build, prev, state);
     }
 

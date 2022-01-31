@@ -6,19 +6,10 @@ use std::time::Instant;
 
 static mut TRACE: Option<Trace> = None;
 
-enum EventType {
-    Complete(Instant),
-}
-
-struct Event {
-    name: &'static str,
-    timestamp: Instant,
-    event_type: EventType,
-}
-
-struct Trace {
+pub struct Trace {
     start: Instant,
     w: BufWriter<File>,
+    count: usize,
 }
 
 impl Trace {
@@ -28,52 +19,67 @@ impl Trace {
         Ok(Trace {
             start: Instant::now(),
             w,
+            count: 0,
         })
     }
 
-    fn write_event(&mut self, event: Event) -> std::io::Result<()> {
+    fn write_event_prefix(&mut self, name: &str, ts: Instant) {
+        if self.count > 0 {
+            write!(self.w, ",").unwrap();
+        }
+        self.count += 1;
         write!(
             self.w,
-            "{{ \"pid\": 0, \"name\": {:?}, \"ts\": {},",
-            event.name,
-            event.timestamp.duration_since(self.start).as_micros(),
-        )?;
-        match event.event_type {
-            EventType::Complete(end) => {
-                write!(
-                    self.w,
-                    "\"ph\": \"X\", \"dur\": {} }}",
-                    end.duration_since(event.timestamp).as_micros()
-                )
-            }
-        }
+            "{{\"pid\":0, \"name\":{:?}, \"ts\":{}, ",
+            name,
+            ts.duration_since(self.start).as_micros(),
+        )
+        .unwrap();
     }
 
-    fn write(&mut self, event: Event) -> std::io::Result<()> {
-        self.write_event(event)?;
-        writeln!(self.w)
+    pub fn write_complete(&mut self, name: &str, start: Instant, end: Instant) {
+        self.write_event_prefix(name, start);
+        writeln!(
+            self.w,
+            "\"ph\":\"X\", \"dur\":{}}}",
+            end.duration_since(start).as_micros()
+        )
+        .unwrap();
     }
 
-    fn scope<T>(&mut self, name: &'static str, f: impl FnOnce() -> T) -> T {
+    fn scope<T>(&mut self, name: &str, f: impl FnOnce() -> T) -> T {
         let start = Instant::now();
         let result = f();
-        self.write(Event {
-            name,
-            timestamp: start,
-            event_type: EventType::Complete(Instant::now()),
-        })
-        .unwrap();
+        let end = Instant::now();
+        self.write_complete(name, start, end);
         result
     }
 
-    fn close(&mut self) -> std::io::Result<()> {
-        self.write_event(Event {
-            name: "main",
-            timestamp: self.start,
-            event_type: EventType::Complete(Instant::now()),
-        })?;
-        writeln!(self.w, "]")?;
-        self.w.flush()
+    pub fn write_instant(&mut self, name: &str) {
+        self.write_event_prefix(name, Instant::now());
+        writeln!(self.w, "\"ph\":\"i\"}}").unwrap();
+    }
+
+    pub fn write_counts<'a>(
+        &mut self,
+        name: &str,
+        counts: impl Iterator<Item = &'a (&'a str, usize)>,
+    ) {
+        self.write_event_prefix(name, Instant::now());
+        write!(self.w, "\"ph\":\"C\", \"args\":{{").unwrap();
+        for (i, (name, count)) in counts.enumerate() {
+            if i > 0 {
+                write!(self.w, ",").unwrap();
+            }
+            write!(self.w, "\"{}\":{}", name, count).unwrap();
+        }
+        writeln!(self.w, "}}}}").unwrap();
+    }
+
+    fn close(&mut self) {
+        self.write_complete("main", self.start, Instant::now());
+        writeln!(self.w, "]").unwrap();
+        self.w.flush().unwrap();
     }
 }
 
@@ -87,6 +93,17 @@ pub fn open(path: &str) -> std::io::Result<()> {
 }
 
 #[inline]
+pub fn if_enabled(f: impl FnOnce(&mut Trace)) {
+    // Safety: accessing global mut, not threadsafe.
+    unsafe {
+        match &mut TRACE {
+            None => {}
+            Some(t) => f(t),
+        }
+    }
+}
+
+#[inline]
 pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     // Safety: accessing global mut, not threadsafe.
     unsafe {
@@ -97,12 +114,6 @@ pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     }
 }
 
-pub fn close() -> std::io::Result<()> {
-    // Safety: accessing global mut, not threadsafe.
-    unsafe {
-        if let Some(t) = &mut TRACE {
-            return t.close();
-        }
-    }
-    Ok(())
+pub fn close() {
+    if_enabled(|t| t.close());
 }
