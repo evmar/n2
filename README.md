@@ -6,6 +6,14 @@ to at least successfully build a couple of projects that build with ninja.
 I wrote it to explore some alternative ideas I had around how to structure
 a build system.
 
+## Differences from Ninja
+
+- Builds start tasks as soon as an out of date one is found, rather than
+  gathering all the out of date tasks before executing.
+- Fancier status output, modeled after Bazel.
+- `-d trace` generates a performance trace as used by Chrome's `about:tracing`
+  or alternatives (speedscope, perfetto).
+
 ## Missing features
 
 Known missing pieces of real Ninja include:
