@@ -5,7 +5,6 @@ use crate::graph::*;
 use crate::progress::Progress;
 use crate::run::FinishedBuild;
 use crate::run::Runner;
-use crate::trace;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -158,9 +157,11 @@ impl<'a> BuildStates<'a> {
                 self.ready.insert(id);
             }
             BuildState::Running => {
-                if self.counts.get(BuildState::Running) == 0 {
-                    trace::if_enabled(|t| t.write_instant("first build"));
-                }
+                // Trace instants render poorly in the old Chrome UI, and
+                // not at all in speedscope or Perfetto.
+                // if self.counts.get(BuildState::Running) == 0 {
+                //     trace::if_enabled(|t| t.write_instant("first build"));
+                // }
                 self.get_pool(build).unwrap().running += 1;
             }
             BuildState::Done => self.pending -= 1,
