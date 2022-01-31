@@ -8,6 +8,7 @@ pub mod parse;
 pub mod progress;
 mod run;
 pub mod scanner;
+mod signal;
 pub mod trace;
 pub mod work;
 

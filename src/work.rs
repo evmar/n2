@@ -5,6 +5,7 @@ use crate::graph::*;
 use crate::progress::Progress;
 use crate::run::FinishedBuild;
 use crate::run::Runner;
+use crate::signal;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -428,6 +429,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
+        signal::register_sigint();
         while self.build_states.unfinished() {
             self.build_states.progress.tick(BuildState::Running);
 

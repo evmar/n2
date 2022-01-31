@@ -8,6 +8,8 @@ use crate::depfile;
 use crate::graph::BuildId;
 use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
+use std::io::Write;
+use std::os::unix::process::ExitStatusExt;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -56,6 +58,11 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
             None => None,
             Some(deps) => Some(read_depfile(deps)?),
         };
+    } else {
+        if let Some(_sig) = cmd.status.signal() {
+            // TODO: pretty-print signal?
+            write!(output, "interrupted").unwrap();
+        }
     }
 
     Ok(FinishedBuild {
@@ -100,7 +107,8 @@ impl Runner {
                     output: err.to_string().into_bytes(),
                     deps: None,
                 });
-            tx.send(fin).unwrap();
+            // The send will only fail if the receiver disappeared, e.g. due to shutting down.
+            let _ = tx.send(fin);
         });
         self.running += 1;
     }
