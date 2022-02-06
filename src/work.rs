@@ -388,6 +388,9 @@ impl<'a> Work<'a> {
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = self.graph.build(id);
 
+        // TODO: require the rule name 'phony'.
+        let phony = build.cmdline.is_none();
+
         // Ensure all dependencies are in place.
         for id in build.depend_ins() {
             let file = self.graph.file(id);
@@ -408,13 +411,16 @@ impl<'a> Work<'a> {
             match mtime {
                 MTime::Stamp(_) => {}
                 MTime::Missing => {
-                    anyhow::bail!("{}: input {} missing", build.location, file.name);
+                    // Work around https://github.com/ninja-build/ninja/issues/1779
+                    let workaround_missing_phony_deps = phony;
+                    if !workaround_missing_phony_deps {
+                        anyhow::bail!("{}: input {} missing", build.location, file.name);
+                    }
                 }
             };
         }
 
-        if build.cmdline.is_none() {
-            // TODO: require the rule name 'phony'.
+        if phony {
             // Phony build; mark the output "files" as present.
             for &id in build.outs() {
                 if self.file_state.get(id).is_none() {
