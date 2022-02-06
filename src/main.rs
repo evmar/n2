@@ -66,14 +66,18 @@ fn run() -> anyhow::Result<()> {
 }
 
 fn main() {
-    match run() {
-        Ok(_) => {}
+    let exit_code = match run() {
+        Ok(_) => 0,
         Err(err) => {
             // The escape code here clears any leftover progress state,
             // see progress.rs.
             // TODO: clearing here should be handled by progress.rs (?)
             println!("\x1b[Jn2: error: {}", err);
+            1
         }
-    }
+    };
     trace::close();
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
 }
