@@ -1,5 +1,5 @@
 //! Unix signal handling (SIGINT).
-//! 
+//!
 //! We let the first SIGINT reach child processes, which ought to build-fail
 //! and let the parent properly print that progress.  This also lets us still
 //! write out pending debug traces, too.
