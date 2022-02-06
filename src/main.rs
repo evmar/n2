@@ -9,13 +9,29 @@ use std::path::Path;
 
 fn run() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    let fake_ninja_compat = Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
+
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir", "DIR");
     opts.optopt("d", "debug", "debug", "TOOL");
     opts.optflag("h", "help", "help");
+    if fake_ninja_compat {
+        opts.optopt("t", "", "tool", "TOOL");
+        opts.optflag("", "version", "print fake ninja version");
+    }
     let matches = opts.parse(&args[1..])?;
     if matches.opt_present("h") {
         anyhow::bail!("TODO: help");
+    }
+
+    if fake_ninja_compat {
+        if matches.opt_present("version") {
+            println!("1.10.2");
+            return Ok(());
+        }
+        if matches.opt_present("t") {
+            return Ok(());
+        }
     }
 
     if let Some(debug) = matches.opt_str("d") {
