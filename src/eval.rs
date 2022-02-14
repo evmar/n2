@@ -59,6 +59,7 @@ impl EvalString<&str> {
 /// A single scope's worth of variable definitions.
 #[derive(Debug)]
 pub struct Vars<'a>(HashMap<&'a str, String>);
+#[allow(clippy::new_without_default)]
 impl<'a> Vars<'a> {
     pub fn new() -> Vars<'a> {
         Vars(HashMap::new())
@@ -82,6 +83,7 @@ impl<'a> Env for Vars<'a> {
 /// them.
 #[derive(Debug)]
 pub struct LazyVars(Vec<(String, EvalString<String>)>);
+#[allow(clippy::new_without_default)]
 impl LazyVars {
     pub fn new() -> Self {
         LazyVars(Vec::new())

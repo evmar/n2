@@ -206,8 +206,8 @@ impl<'a> Parser<'a> {
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Build {
-            line,
             rule,
+            line,
             outs,
             explicit_outs,
             ins,

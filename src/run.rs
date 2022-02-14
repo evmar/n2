@@ -59,6 +59,7 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
             Some(deps) => Some(read_depfile(deps)?),
         };
     } else {
+        // Command failed.
         if let Some(_sig) = cmd.status.signal() {
             // TODO: pretty-print signal?
             write!(output, "interrupted").unwrap();

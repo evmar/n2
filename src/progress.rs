@@ -10,6 +10,7 @@ use crate::graph::Build;
 use crate::graph::BuildId;
 use crate::work::BuildState;
 
+#[allow(clippy::uninit_assumed_init)]
 pub fn get_terminal_cols() -> Option<usize> {
     unsafe {
         let mut winsize: libc::winsize = std::mem::MaybeUninit::uninit().assume_init();
@@ -42,7 +43,7 @@ pub trait Progress {
     /// TODO: maybe this should just be part of build_state?
     /// In particular, consider the case where builds output progress as they run,
     /// as well as the case where multiple build steps are allowed to fail.
-    fn failed(&mut self, build: &Build, output: &Vec<u8>);
+    fn failed(&mut self, build: &Build, output: &[u8]);
 }
 
 /// Rc<RefCell<>> wrapper around Progress.
@@ -65,7 +66,7 @@ impl<P: Progress> Progress for RcProgress<P> {
     fn tick(&mut self, state: BuildState) {
         self.inner.borrow_mut().tick(state);
     }
-    fn failed(&mut self, build: &Build, output: &Vec<u8>) {
+    fn failed(&mut self, build: &Build, output: &[u8]) {
         self.inner.borrow_mut().failed(build, output);
     }
 }
@@ -100,6 +101,7 @@ pub struct ConsoleProgress {
     done: usize,
 }
 
+#[allow(clippy::new_without_default)]
 impl ConsoleProgress {
     pub fn new() -> Self {
         ConsoleProgress {
@@ -152,7 +154,7 @@ impl Progress for ConsoleProgress {
         }
     }
 
-    fn failed(&mut self, build: &Build, output: &Vec<u8>) {
+    fn failed(&mut self, build: &Build, output: &[u8]) {
         let message = build_message(build);
         // If the user hit ctl-c, it may have printed something on the line.
         // So \r to go to first column first, then the same clear we use elsewhere.
