@@ -9,7 +9,8 @@ use std::path::Path;
 
 fn run() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().collect();
-    let fake_ninja_compat = Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
+    let fake_ninja_compat =
+        Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
 
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir", "DIR");

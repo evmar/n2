@@ -180,13 +180,17 @@ impl<'a> BReader<'a> {
         Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
     }
 
+    #[allow(clippy::erasing_op)]
+    #[allow(clippy::identity_op)]
     fn read_u24(&mut self) -> std::io::Result<u32> {
         let mut buf: [u8; 3];
         unsafe {
             buf = std::mem::uninitialized();
             self.r.read_exact(&mut buf)?;
         }
-        Ok(((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32))
+        Ok(((buf[0] as u32) << (8 * 2))
+            | ((buf[1] as u32) << (8 * 1))
+            | ((buf[2] as u32) << (8 * 0)))
     }
 
     #[allow(clippy::erasing_op)]
