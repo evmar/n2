@@ -123,17 +123,17 @@ impl Build {
     }
 
     /// Input paths that, if changed, invalidate the output.
-    pub fn dirtying_ins(&self) -> impl Iterator<Item = FileId> + '_ {
-        self.ins[0..(self.explicit_ins + self.implicit_ins)]
-            .iter()
-            .chain(self.deps_ins.iter())
-            .copied()
+    /// Note this omits deps_ins, which also invalidate the output.
+    pub fn dirtying_ins(&self) -> &[FileId] {
+        &self.ins[0..(self.explicit_ins + self.implicit_ins)]
     }
 
     /// Inputs that are needed before building.
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
-    pub fn depend_ins(&self) -> impl Iterator<Item = FileId> + '_ {
-        self.ins.iter().chain(self.deps_ins.iter()).copied()
+    /// Note that we don't order on deps_ins, because they're not allowed to
+    /// affect build order.
+    pub fn ordering_ins(&self) -> &[FileId] {
+        &self.ins
     }
 
     /// Potentially update deps with a new set of deps, returning true if they changed.
@@ -165,6 +165,14 @@ impl Build {
     /// Output paths that are updated when the build runs.
     pub fn outs(&self) -> &[FileId] {
         &self.outs
+    }
+
+    pub fn debug_name(&self, graph: &Graph) -> String {
+        format!(
+            "{} ({}, ...)",
+            self.location,
+            graph.file(self.outs()[0]).name
+        )
     }
 }
 
@@ -316,7 +324,7 @@ pub fn hash_build(
     build: &Build,
 ) -> std::io::Result<Hash> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for id in build.dirtying_ins() {
+    for &id in build.dirtying_ins().iter().chain(build.deps_ins()) {
         hasher.write(graph.file(id).name.as_bytes());
         let mtime = file_state
             .get(id)
