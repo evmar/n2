@@ -80,7 +80,7 @@ pub struct Build {
     order_only_ins: usize,
 
     /// Additional inputs discovered from a previous build.
-    deps_ins: Vec<FileId>,
+    discovered_ins: Vec<FileId>,
 
     /// Output files.
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
@@ -99,7 +99,7 @@ impl Build {
             explicit_ins: 0,
             implicit_ins: 0,
             order_only_ins: 0,
-            deps_ins: Vec::new(),
+            discovered_ins: Vec::new(),
             outs: Vec::new(),
             explicit_outs: 0,
         }
@@ -123,38 +123,38 @@ impl Build {
     }
 
     /// Input paths that, if changed, invalidate the output.
-    /// Note this omits deps_ins, which also invalidate the output.
+    /// Note this omits discovered_ins, which also invalidate the output.
     pub fn dirtying_ins(&self) -> &[FileId] {
         &self.ins[0..(self.explicit_ins + self.implicit_ins)]
     }
 
     /// Inputs that are needed before building.
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
-    /// Note that we don't order on deps_ins, because they're not allowed to
+    /// Note that we don't order on discovered_ins, because they're not allowed to
     /// affect build order.
     pub fn ordering_ins(&self) -> &[FileId] {
         &self.ins
     }
 
-    /// Potentially update deps with a new set of deps, returning true if they changed.
-    pub fn update_deps(&mut self, mut deps: Vec<FileId>) -> bool {
+    /// Potentially update discovered_ins with a new set of deps, returning true if they changed.
+    pub fn update_discovered(&mut self, mut deps: Vec<FileId>) -> bool {
         // Filter out any deps that were already listed in the build file.
         deps.retain(|id| !self.ins.contains(id));
-        if deps == self.deps_ins {
+        if deps == self.discovered_ins {
             false
         } else {
-            self.set_deps(deps);
+            self.set_discovered_ins(deps);
             true
         }
     }
 
-    pub fn set_deps(&mut self, deps: Vec<FileId>) {
-        self.deps_ins = deps;
+    pub fn set_discovered_ins(&mut self, deps: Vec<FileId>) {
+        self.discovered_ins = deps;
     }
 
     /// Input paths that were discovered after building, for use in the next build.
-    pub fn deps_ins(&self) -> &[FileId] {
-        &self.deps_ins
+    pub fn discovered_ins(&self) -> &[FileId] {
+        &self.discovered_ins
     }
 
     /// Output paths that appear in `$out`.
@@ -324,7 +324,7 @@ pub fn hash_build(
     build: &Build,
 ) -> std::io::Result<Hash> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for &id in build.dirtying_ins().iter().chain(build.deps_ins()) {
+    for &id in build.dirtying_ins().iter().chain(build.discovered_ins()) {
         hasher.write(graph.file(id).name.as_bytes());
         let mtime = file_state
             .get(id)

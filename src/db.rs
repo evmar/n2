@@ -152,7 +152,7 @@ impl Writer {
             buf.write_id(id);
         }
 
-        let deps = build.deps_ins();
+        let deps = build.discovered_ins();
         buf.write_u16(deps.len() as u16);
         for &dep in deps {
             let id = self.ensure_id(graph, dep)?;
@@ -268,7 +268,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
             if bids.len() == 1 {
                 // Common case: only one associated build.
                 let &id = bids.iter().next().unwrap();
-                graph.build_mut(id).set_deps(deps);
+                graph.build_mut(id).set_discovered_ins(deps);
                 hashes.set(id, hash);
             } else {
                 // The graph layout has changed since this build was recorded.

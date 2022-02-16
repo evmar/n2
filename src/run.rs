@@ -17,7 +17,7 @@ pub struct FinishedBuild {
     pub id: BuildId,
     pub success: bool,
     pub output: Vec<u8>,
-    pub deps: Option<Vec<String>>,
+    pub discovered_deps: Option<Vec<String>>,
 }
 
 /// Reads dependencies from a .d file path.
@@ -52,9 +52,9 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
     output.append(&mut cmd.stderr);
     let success = cmd.status.success();
 
-    let mut deps: Option<Vec<String>> = None;
+    let mut discovered_deps: Option<Vec<String>> = None;
     if success {
-        deps = match depfile {
+        discovered_deps = match depfile {
             None => None,
             Some(deps) => Some(read_depfile(deps)?),
         };
@@ -70,7 +70,7 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
         id,
         success,
         output,
-        deps,
+        discovered_deps,
     })
 }
 
@@ -106,7 +106,7 @@ impl Runner {
                     id,
                     success: false,
                     output: err.to_string().into_bytes(),
-                    deps: None,
+                    discovered_deps: None,
                 });
             // The send will only fail if the receiver disappeared, e.g. due to shutting down.
             let _ = tx.send(fin);
