@@ -46,31 +46,6 @@ pub trait Progress {
     fn failed(&mut self, build: &Build, output: &[u8]);
 }
 
-/// Rc<RefCell<>> wrapper around Progress.
-pub struct RcProgress<P: Progress> {
-    inner: std::rc::Rc<std::cell::RefCell<P>>,
-}
-
-impl<P: Progress> RcProgress<P> {
-    pub fn new(p: P) -> Self {
-        RcProgress {
-            inner: std::rc::Rc::new(std::cell::RefCell::new(p)),
-        }
-    }
-}
-
-impl<P: Progress> Progress for RcProgress<P> {
-    fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState) {
-        self.inner.borrow_mut().build_state(id, build, prev, state);
-    }
-    fn tick(&mut self, state: BuildState) {
-        self.inner.borrow_mut().tick(state);
-    }
-    fn failed(&mut self, build: &Build, output: &[u8]) {
-        self.inner.borrow_mut().failed(build, output);
-    }
-}
-
 /// Currently running build task, as tracked for progress updates.
 struct Task {
     /// When the task started running.

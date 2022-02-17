@@ -71,7 +71,7 @@ fn run() -> anyhow::Result<()> {
         anyhow::bail!("no path specified and no default");
     }
 
-    let mut progress = progress::RcProgress::new(progress::ConsoleProgress::new());
+    let mut progress = progress::ConsoleProgress::new();
 
     let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress, pools);
     trace::scope("want_file", || {
