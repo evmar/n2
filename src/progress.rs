@@ -35,9 +35,9 @@ pub trait Progress {
     /// Cached builds may jump from BuildState::Ready directly to BuildState::Done.
     fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState);
 
-    /// Called periodically on a timer, and on build finish.
-    /// state represents the overall completion state of the build.
-    fn tick(&mut self, state: BuildState);
+    /// Called when we expect to be waiting for a while before another build
+    /// state change.
+    fn flush(&mut self);
 
     /// Called when a build has failed.
     /// TODO: maybe this should just be part of build_state?
@@ -119,14 +119,8 @@ impl Progress for ConsoleProgress {
         self.maybe_print();
     }
 
-    fn tick(&mut self, state: BuildState) {
-        match state {
-            BuildState::Done => {
-                // Unconditionally update the console a final time.
-                self.print();
-            }
-            _ => self.maybe_print(),
-        }
+    fn flush(&mut self) {
+        self.print();
     }
 
     fn failed(&mut self, build: &Build, output: &[u8]) {

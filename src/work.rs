@@ -479,8 +479,6 @@ impl<'a> Work<'a> {
     pub fn run(&mut self) -> anyhow::Result<()> {
         signal::register_sigint();
         while self.build_states.unfinished() {
-            self.build_states.progress.tick(BuildState::Running);
-
             // Approach:
             // - First make sure we're running as many queued tasks as the runner
             //   allows.
@@ -522,6 +520,7 @@ impl<'a> Work<'a> {
                 panic!("no work to do and runner not running?");
             }
 
+            self.build_states.progress.flush();
             let fin = match self.runner.wait(Duration::from_millis(500)) {
                 None => continue, // timeout
                 Some(fin) => fin,
@@ -539,7 +538,7 @@ impl<'a> Work<'a> {
             self.ready_dependents(id);
         }
 
-        self.build_states.progress.tick(BuildState::Done);
+        self.build_states.progress.flush();
         Ok(())
     }
 }
