@@ -23,7 +23,7 @@ fn run() -> anyhow::Result<()> {
     let matches = opts.parse(&args[1..])?;
     if matches.opt_present("h") {
         println!("{}", opts.usage("usage: n2 [target]"));
-        return Ok(())
+        return Ok(());
     }
 
     if fake_ninja_compat {
@@ -92,10 +92,7 @@ fn main() {
     let exit_code = match run() {
         Ok(_) => 0,
         Err(err) => {
-            // The escape code here clears any leftover progress state,
-            // see progress.rs.
-            // TODO: clearing here should be handled by progress.rs (?)
-            println!("\x1b[Jn2: error: {}", err);
+            println!("n2: error: {}", err);
             1
         }
     };

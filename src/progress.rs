@@ -44,6 +44,10 @@ pub trait Progress {
     /// In particular, consider the case where builds output progress as they run,
     /// as well as the case where multiple build steps are allowed to fail.
     fn failed(&mut self, build: &Build, output: &[u8]);
+
+    /// Called when a build has completed (success or failure), to allow
+    /// cleaning up the display and printing a final state.
+    fn summary(&mut self);
 }
 
 /// Currently running build task, as tracked for progress updates.
@@ -72,8 +76,10 @@ pub struct ConsoleProgress {
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
-    /// Count of build tasks that have finished.
+    /// Count of build steps that have finished.
     done: usize,
+    /// Count of build tasks that have finished.
+    tasks_done: usize,
 }
 
 #[allow(clippy::new_without_default)]
@@ -86,6 +92,7 @@ impl ConsoleProgress {
             queued: 0,
             tasks: VecDeque::new(),
             done: 0,
+            tasks_done: 0,
         }
     }
 }
@@ -98,6 +105,7 @@ impl Progress for ConsoleProgress {
             BuildState::Running => {
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
+                self.tasks_done += 1;
             }
             _ => {}
         }
@@ -129,6 +137,13 @@ impl Progress for ConsoleProgress {
         // So \r to go to first column first, then the same clear we use elsewhere.
         println!("\r\x1b[Jfailed: {}", message);
         println!("{}", String::from_utf8_lossy(output));
+    }
+
+    fn summary(&mut self) {
+        println!(
+            "\x1b[J{}/{} done, ran {} tasks",
+            self.done, self.total, self.tasks_done
+        );
     }
 }
 

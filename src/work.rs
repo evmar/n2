@@ -476,7 +476,10 @@ impl<'a> Work<'a> {
         Ok(self.last_hashes.changed(id, hash))
     }
 
-    pub fn run(&mut self) -> anyhow::Result<()> {
+    // Runs the build.
+    // Returns a Result for failures, but we must clean up the progress before
+    // returning the result to the caller.
+    fn run_without_cleanup(&mut self) -> anyhow::Result<()> {
         signal::register_sigint();
         while self.build_states.unfinished() {
             // Approach:
@@ -531,6 +534,7 @@ impl<'a> Work<'a> {
                 self.build_states
                     .progress
                     .failed(self.graph.build(id), &fin.output);
+                // TODO: support multiple tasks failing if requested.
                 anyhow::bail!("build failed");
             }
 
@@ -538,7 +542,13 @@ impl<'a> Work<'a> {
             self.ready_dependents(id);
         }
 
-        self.build_states.progress.flush();
         Ok(())
+    }
+
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        let result = self.run_without_cleanup();
+        // Clean up progress before returning.
+        self.build_states.progress.summary();
+        result
     }
 }
