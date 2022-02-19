@@ -13,16 +13,17 @@ fn run() -> anyhow::Result<()> {
         Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
 
     let mut opts = getopts::Options::new();
-    opts.optopt("C", "", "chdir", "DIR");
-    opts.optopt("d", "debug", "debug", "TOOL");
-    opts.optflag("h", "help", "help");
+    opts.optopt("C", "", "chdir before running", "DIR");
+    opts.optopt("d", "debug", "debugging tools", "TOOL");
+    opts.optflag("h", "help", "");
     if fake_ninja_compat {
         opts.optopt("t", "", "tool", "TOOL");
         opts.optflag("", "version", "print fake ninja version");
     }
     let matches = opts.parse(&args[1..])?;
     if matches.opt_present("h") {
-        anyhow::bail!("TODO: help");
+        println!("{}", opts.usage("usage: n2 [target]"));
+        return Ok(())
     }
 
     if fake_ninja_compat {
@@ -37,8 +38,13 @@ fn run() -> anyhow::Result<()> {
 
     if let Some(debug) = matches.opt_str("d") {
         match debug.as_str() {
+            "list" => {
+                println!("debug tools:");
+                println!("  trace  generate json performance trace");
+                return Ok(());
+            }
             "trace" => trace::open("trace.json")?,
-            _ => anyhow::bail!("unknown -d {:?}", debug),
+            _ => anyhow::bail!("unknown -d {:?}, use -d list to list", debug),
         }
     }
 
