@@ -4,20 +4,16 @@
 //! and let the parent properly print that progress.  This also lets us still
 //! write out pending debug traces, too.
 
-fn sigint_action(handler: libc::sighandler_t) {
-    // Safety: registering a signal handler is libc unsafe code.
-    unsafe {
-        let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = handler as libc::sighandler_t;
-        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
-    }
-}
-
 extern "C" fn sigint_handler(_sig: libc::c_int) {
-    // TODO: is it safe to tweak the signal handler in a signal handler?
-    sigint_action(libc::SIG_DFL as libc::sighandler_t);
+    // Do nothing; SA_RESETHAND should clear the handler.
 }
 
 pub fn register_sigint() {
-    sigint_action(sigint_handler as libc::sighandler_t);
+    // Safety: registering a signal handler is libc unsafe code.
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = sigint_handler as libc::sighandler_t;
+        sa.sa_flags = libc::SA_RESETHAND;
+        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+    }
 }
