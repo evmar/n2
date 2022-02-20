@@ -216,9 +216,10 @@ impl<'a> BReader<'a> {
     }
 
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {
-        // TODO: use uninit memory here
-        let mut buf = Vec::new();
-        buf.resize(len as usize, 0);
+        let mut buf = Vec::with_capacity(len);
+        // Safety: buf contents are uninitialized here, but we never read them
+        // before initialization.
+        unsafe { buf.set_len(len) };
         self.r.read_exact(buf.as_mut_slice())?;
         Ok(unsafe { String::from_utf8_unchecked(buf) })
     }
