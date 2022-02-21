@@ -48,8 +48,8 @@ pub trait Progress {
     fn failed(&mut self, build: &Build, output: &[u8]);
 
     /// Called when the overall build has completed (success or failure), to allow
-    /// cleaning up the display and printing a final state.
-    fn summary(&mut self);
+    /// cleaning up the display.
+    fn finish(&mut self);
 }
 
 /// Currently running build task, as tracked for progress updates.
@@ -75,7 +75,7 @@ pub struct ConsoleProgress {
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
     /// Count of build tasks that have finished.
-    tasks_done: usize,
+    pub tasks_done: usize,
 }
 
 #[allow(clippy::new_without_default)]
@@ -131,13 +131,8 @@ impl Progress for ConsoleProgress {
         println!("{}", String::from_utf8_lossy(output));
     }
 
-    fn summary(&mut self) {
-        println!(
-            "\x1b[J{}/{} done, ran {} tasks",
-            self.counts.get(BuildState::Done),
-            self.counts.total(),
-            self.tasks_done,
-        );
+    fn finish(&mut self) {
+        print!("\x1b[J");
     }
 }
 

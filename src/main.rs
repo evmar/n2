@@ -7,7 +7,7 @@ use n2::trace;
 use n2::work;
 use std::path::Path;
 
-fn run() -> anyhow::Result<()> {
+fn run() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
     let fake_ninja_compat =
         Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
@@ -23,16 +23,16 @@ fn run() -> anyhow::Result<()> {
     let matches = opts.parse(&args[1..])?;
     if matches.opt_present("h") {
         println!("{}", opts.usage("usage: n2 [target]"));
-        return Ok(());
+        return Ok(1);
     }
 
     if fake_ninja_compat {
         if matches.opt_present("version") {
             println!("1.10.2");
-            return Ok(());
+            return Ok(0);
         }
         if matches.opt_present("t") {
-            return Ok(());
+            return Ok(0);
         }
     }
 
@@ -41,7 +41,7 @@ fn run() -> anyhow::Result<()> {
             "list" => {
                 println!("debug tools:");
                 println!("  trace  generate json performance trace");
-                return Ok(());
+                return Ok(1);
             }
             "trace" => trace::open("trace.json")?,
             _ => anyhow::bail!("unknown -d {:?}, use -d list to list", debug),
@@ -84,12 +84,23 @@ fn run() -> anyhow::Result<()> {
             work.want_file(target);
         }
     });
-    trace::scope("work.run", || work.run())
+    let success = trace::scope("work.run", || work.run())?;
+    if !success {
+        // Don't print any summary, the failing task is enough info.
+        return Ok(1);
+    }
+    if progress.tasks_done == 0 {
+        // Special case: don't print numbers when no work done.
+        println!("n2: no work to do");
+    } else {
+        println!("n2: ran {} tasks, now up to date", progress.tasks_done);
+    }
+    return Ok(0);
 }
 
 fn main() {
     let exit_code = match run() {
-        Ok(_) => 0,
+        Ok(code) => code,
         Err(err) => {
             println!("n2: error: {}", err);
             1
