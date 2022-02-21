@@ -37,10 +37,13 @@ pub enum BuildState {
     Done,
 }
 
-// Counters tracking number of builds in each state
-struct StateCounts([usize; 5]);
+// Counters that track number of builds in each state.
+// Only covers builds not in the "unknown" state, which means it's only builds
+// that are considered part of the current build.
+#[derive(Clone, Debug)]
+pub struct StateCounts([usize; 5]);
 impl StateCounts {
-    fn new() -> Self {
+    pub fn new() -> Self {
         StateCounts([0; 5])
     }
     fn idx(state: BuildState) -> usize {
@@ -57,8 +60,11 @@ impl StateCounts {
         self.0[StateCounts::idx(state)] =
             (self.0[StateCounts::idx(state)] as isize + delta) as usize;
     }
-    fn get(&self, state: BuildState) -> usize {
+    pub fn get(&self, state: BuildState) -> usize {
         self.0[StateCounts::idx(state)]
+    }
+    pub fn total(&self) -> usize {
+        self.0[0] + self.0[1] + self.0[2] + self.0[3] + self.0[4]
     }
 }
 
@@ -85,12 +91,9 @@ impl PoolState {
 }
 
 /// BuildStates tracks progress of each Build step through the build.
-struct BuildStates<'a> {
+struct BuildStates {
     /// Maps BuildId to BuildState.
     states: Vec<BuildState>,
-
-    /// Number of builds that are desired but not complete yet.
-    pending: usize,
 
     // Counts of builds in each state.
     counts: StateCounts,
@@ -103,12 +106,10 @@ struct BuildStates<'a> {
     /// We expect a relatively small number of pools, such that a Vec is more
     /// efficient than a HashMap.
     pools: Vec<(String, PoolState)>,
-
-    progress: &'a mut dyn Progress,
 }
 
-impl<'a> BuildStates<'a> {
-    fn new(progress: &'a mut dyn Progress, depths: Vec<(String, usize)>) -> Self {
+impl BuildStates {
+    fn new(depths: Vec<(String, usize)>) -> Self {
         let mut pools: Vec<(String, PoolState)> = vec![
             // The implied default pool.
             (String::from(""), PoolState::new(0)),
@@ -120,10 +121,8 @@ impl<'a> BuildStates<'a> {
         );
         BuildStates {
             states: Vec::new(),
-            pending: 0,
             counts: StateCounts::new(),
             ready: HashSet::new(),
-            progress,
             pools,
         }
     }
@@ -154,7 +153,6 @@ impl<'a> BuildStates<'a> {
             self.counts.add(prev, -1);
         }
         match state {
-            BuildState::Want => self.pending += 1,
             BuildState::Ready => {
                 self.ready.insert(id);
             }
@@ -166,7 +164,6 @@ impl<'a> BuildStates<'a> {
                 // }
                 self.get_pool(build).unwrap().running += 1;
             }
-            BuildState::Done => self.pending -= 1,
             _ => {}
         };
         self.counts.add(state, 1);
@@ -185,11 +182,13 @@ impl<'a> BuildStates<'a> {
                 .iter(),
             )
         });*/
-        self.progress.build_state(id, build, prev, state);
     }
 
     fn unfinished(&self) -> bool {
-        self.pending > 0
+        self.counts.get(BuildState::Want) > 0
+            || self.counts.get(BuildState::Ready) > 0
+            || self.counts.get(BuildState::Running) > 0
+            || self.counts.get(BuildState::Queued) > 0
     }
 
     /// Visits a BuildId that is an input to the desired output.
@@ -277,9 +276,10 @@ pub struct Work<'a> {
     graph: &'a mut Graph,
     db: &'a mut db::Writer,
 
+    progress: &'a mut dyn Progress,
     file_state: FileState,
     last_hashes: &'a Hashes,
-    build_states: BuildStates<'a>,
+    build_states: BuildStates,
     runner: Runner,
 }
 
@@ -295,9 +295,10 @@ impl<'a> Work<'a> {
         Work {
             graph,
             db,
+            progress,
             file_state,
             last_hashes,
-            build_states: BuildStates::new(progress, pools),
+            build_states: BuildStates::new(pools),
             runner: Runner::new(),
         }
     }
@@ -386,8 +387,8 @@ impl<'a> Work<'a> {
     }
 
     /// Check a ready build for whether it needs to run, returning true if so.
-    /// Prereq: any generated input is already generated.
-    /// Non-generated inputs may not have been stat()ed yet.
+    /// This is the place where we actually stat input files.
+    /// Prereq: any dependent input is already generated.
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = self.graph.build(id);
 
@@ -397,7 +398,6 @@ impl<'a> Work<'a> {
         let phony = build.cmdline.is_none();
 
         // stat any non-generated inputs if needed.
-        // This is the core place where we stat input files.
         // Note that generated inputs should already have been stat()ed when
         // they were visited as outputs.
 
@@ -484,6 +484,8 @@ impl<'a> Work<'a> {
     fn run_without_cleanup(&mut self) -> anyhow::Result<()> {
         signal::register_sigint();
         while self.build_states.unfinished() {
+            self.progress.update(&self.build_states.counts);
+
             // Approach:
             // - First make sure we're running as many queued tasks as the runner
             //   allows.
@@ -504,6 +506,7 @@ impl<'a> Work<'a> {
                 self.build_states.set(id, build, BuildState::Running);
                 self.runner
                     .start(id, build.cmdline.clone().unwrap(), build.depfile.clone());
+                self.progress.task_state(id, build, BuildState::Running);
                 made_progress = true;
             }
 
@@ -525,7 +528,10 @@ impl<'a> Work<'a> {
                 panic!("no work to do and runner not running?");
             }
 
-            self.build_states.progress.flush();
+            // Flush progress here, to ensure that the progress is the most up
+            // to date before we wait.  Otherwise the progress might seem like
+            // we're doing nothing while we wait.
+            self.progress.flush();
             let fin = match self.runner.wait(Duration::from_millis(500)) {
                 None => continue, // timeout
                 Some(fin) => fin,
@@ -533,14 +539,14 @@ impl<'a> Work<'a> {
             let id = fin.id;
 
             if !fin.success {
-                self.build_states
-                    .progress
-                    .failed(self.graph.build(id), &fin.output);
+                self.progress.failed(self.graph.build(id), &fin.output);
                 // TODO: support multiple tasks failing if requested.
                 anyhow::bail!("build failed");
             }
 
             self.record_finished(fin)?;
+            self.progress
+                .task_state(id, self.graph.build(id), BuildState::Done);
             self.ready_dependents(id);
         }
 
@@ -550,7 +556,8 @@ impl<'a> Work<'a> {
     pub fn run(&mut self) -> anyhow::Result<()> {
         let result = self.run_without_cleanup();
         // Clean up progress before returning.
-        self.build_states.progress.summary();
+        self.progress.update(&self.build_states.counts);
+        self.progress.summary();
         result
     }
 }

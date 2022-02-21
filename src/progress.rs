@@ -2,13 +2,13 @@
 //! user.
 
 use std::collections::VecDeque;
-use std::ops::Sub;
 use std::time::Duration;
 use std::time::Instant;
 
 use crate::graph::Build;
 use crate::graph::BuildId;
 use crate::work::BuildState;
+use crate::work::StateCounts;
 
 #[allow(clippy::uninit_assumed_init)]
 pub fn get_terminal_cols() -> Option<usize> {
@@ -32,29 +32,31 @@ fn build_message(build: &Build) -> &str {
 /// Trait for build progress notifications.
 pub trait Progress {
     /// Called as individual build tasks progress through build states.
-    /// Cached builds may jump from BuildState::Ready directly to BuildState::Done.
-    fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState);
+    fn update(&mut self, counts: &StateCounts);
 
-    /// Called when we expect to be waiting for a while before another build
-    /// state change.
+    /// Called when we expect to be waiting for a while before another update.
     fn flush(&mut self);
 
+    /// Called when a task starts.
+    /// Not called for every BuildId, just the ones that start and complete.
+    fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState);
+
     /// Called when a build has failed.
-    /// TODO: maybe this should just be part of build_state?
+    /// TODO: maybe this should just be part of task_state?
     /// In particular, consider the case where builds output progress as they run,
     /// as well as the case where multiple build steps are allowed to fail.
     fn failed(&mut self, build: &Build, output: &[u8]);
 
-    /// Called when a build has completed (success or failure), to allow
+    /// Called when the overall build has completed (success or failure), to allow
     /// cleaning up the display and printing a final state.
     fn summary(&mut self);
 }
 
 /// Currently running build task, as tracked for progress updates.
 struct Task {
+    id: BuildId,
     /// When the task started running.
     start: Instant,
-    id: BuildId,
     /// Build status message for the task.
     message: String,
 }
@@ -67,17 +69,11 @@ struct Task {
 pub struct ConsoleProgress {
     /// Last time we updated the console, used to throttle updates.
     last_update: Instant,
-    /// Total count of build tasks.
-    total: usize,
-    /// Count of build tasks that are ready to be checked for status.
-    ready: usize,
-    /// Count of build tasks that would execute if we had CPUs for them.
-    queued: usize,
+    /// Counts of tasks in each state.  TODO: pass this as function args?
+    counts: StateCounts,
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
-    /// Count of build steps that have finished.
-    done: usize,
     /// Count of build tasks that have finished.
     tasks_done: usize,
 }
@@ -86,42 +82,38 @@ pub struct ConsoleProgress {
 impl ConsoleProgress {
     pub fn new() -> Self {
         ConsoleProgress {
-            last_update: Instant::now().sub(Duration::from_secs(1)),
-            total: 0,
-            ready: 0,
-            queued: 0,
+            // Act like our last update was now, so that we delay slightly
+            // before our first print.  This reduces flicker in the case where
+            // the work immediately.
+            last_update: Instant::now(),
+            counts: StateCounts::new(),
             tasks: VecDeque::new(),
-            done: 0,
             tasks_done: 0,
         }
     }
 }
 
 impl Progress for ConsoleProgress {
-    fn build_state(&mut self, id: BuildId, build: &Build, prev: BuildState, state: BuildState) {
-        match prev {
-            BuildState::Ready => self.ready -= 1,
-            BuildState::Queued => self.queued -= 1,
+    fn update(&mut self, counts: &StateCounts) {
+        self.counts = counts.clone();
+        self.maybe_print();
+    }
+
+    fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState) {
+        match state {
             BuildState::Running => {
+                let message = build_message(build);
+                self.tasks.push_back(Task {
+                    id,
+                    start: Instant::now(),
+                    message: message.to_string(),
+                });
+            }
+            BuildState::Done => {
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
                 self.tasks_done += 1;
             }
-            _ => {}
-        }
-        match state {
-            BuildState::Want => self.total += 1,
-            BuildState::Ready => self.ready += 1,
-            BuildState::Queued => self.queued += 1,
-            BuildState::Running => {
-                let message = build_message(build);
-                self.tasks.push_back(Task {
-                    start: Instant::now(),
-                    id,
-                    message: message.to_string(),
-                });
-            }
-            BuildState::Done => self.done += 1,
             _ => {}
         }
         self.maybe_print();
@@ -142,50 +134,45 @@ impl Progress for ConsoleProgress {
     fn summary(&mut self) {
         println!(
             "\x1b[J{}/{} done, ran {} tasks",
-            self.done, self.total, self.tasks_done
+            self.counts.get(BuildState::Done),
+            self.counts.total(),
+            self.tasks_done,
         );
     }
 }
 
 impl ConsoleProgress {
     fn progress_bar(&self) -> String {
-        let mut bar = String::new();
+        let bar_size = 40;
+        let mut bar = String::with_capacity(bar_size);
         let mut sum: usize = 0;
-        for &(count, ch) in &[
-            (self.done, '='),
-            (self.ready + self.tasks.len() + self.queued, '-'),
-            (self.total, ' '),
+        let total = self.counts.total();
+        for (count, ch) in [
+            (self.counts.get(BuildState::Done), '='),
+            (
+                self.counts.get(BuildState::Queued)
+                    + self.counts.get(BuildState::Running)
+                    + self.counts.get(BuildState::Ready),
+                '-',
+            ),
+            (self.counts.get(BuildState::Want), ' '),
         ] {
             sum += count;
-            if sum >= self.total {
-                sum = self.total;
-            }
-            while bar.len() <= (sum * 40 / self.total) {
+            while bar.len() <= (sum * bar_size / total) {
                 bar.push(ch);
             }
         }
         bar
     }
 
-    #[allow(dead_code)]
-    fn dump(&self) {
-        println!(
-            "[{} {} {} {}]",
-            self.done,
-            self.ready,
-            self.tasks.len(),
-            self.total
-        );
-    }
-
     fn print(&self) {
         println!(
             "\x1b[J[{}] {}/{} done, {}/{} running",
             self.progress_bar(),
-            self.done,
-            self.total,
+            self.counts.get(BuildState::Done),
+            self.counts.total(),
             self.tasks.len(),
-            self.queued + self.tasks.len(),
+            self.counts.get(BuildState::Queued) + self.tasks.len(),
         );
 
         let max_cols = get_terminal_cols().unwrap_or(80);
