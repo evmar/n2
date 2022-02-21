@@ -169,25 +169,20 @@ impl Writer {
 struct BReader<'a> {
     r: BufReader<&'a mut File>,
 }
-#[allow(deprecated)] // don't care about your fancy uninit API
 impl<'a> BReader<'a> {
     fn read_u16(&mut self) -> std::io::Result<u16> {
-        let mut buf: [u8; 2];
-        unsafe {
-            buf = std::mem::uninitialized();
-            self.r.read_exact(&mut buf)?;
-        }
+        let mut arr: [u8; 2] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
+        self.r.read_exact(buf)?;
         Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
     }
 
     #[allow(clippy::erasing_op)]
     #[allow(clippy::identity_op)]
     fn read_u24(&mut self) -> std::io::Result<u32> {
-        let mut buf: [u8; 3];
-        unsafe {
-            buf = std::mem::uninitialized();
-            self.r.read_exact(&mut buf)?;
-        }
+        let mut arr: [u8; 3] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
+        self.r.read_exact(buf)?;
         Ok(((buf[0] as u32) << (8 * 2))
             | ((buf[1] as u32) << (8 * 1))
             | ((buf[2] as u32) << (8 * 0)))
@@ -196,11 +191,9 @@ impl<'a> BReader<'a> {
     #[allow(clippy::erasing_op)]
     #[allow(clippy::identity_op)]
     fn read_u64(&mut self) -> std::io::Result<u64> {
-        let mut buf: [u8; 8];
-        unsafe {
-            buf = std::mem::uninitialized();
-            self.r.read_exact(&mut buf)?;
-        }
+        let mut arr: [u8; 8] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
+        self.r.read_exact(buf)?;
         Ok(((buf[0] as u64) << (8 * 7))
             | ((buf[1] as u64) << (8 * 6))
             | ((buf[2] as u64) << (8 * 5))
