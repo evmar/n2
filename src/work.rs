@@ -391,7 +391,9 @@ impl<'a> Work<'a> {
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = self.graph.build(id);
 
-        // TODO: require the rule name 'phony'.
+        // Note: we ignore whether the rule is named 'phony', and instead
+        // treat all rules that lack a cmdline (incluing phony) the same.
+        // The actual semantics of ninja phony are pretty underspecified...
         let phony = build.cmdline.is_none();
 
         // stat any non-generated inputs if needed.
