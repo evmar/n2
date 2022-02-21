@@ -172,14 +172,19 @@ impl ConsoleProgress {
 
         let max_cols = get_terminal_cols().unwrap_or(80);
         let mut lines = 1;
+        let max_lines = 8;
         let now = Instant::now();
-        for task in self.tasks.iter().take(8) {
-            let delta = now.duration_since(task.start).as_secs();
-            let line = format!("{}s {}", delta, task.message);
-            if line.len() >= max_cols {
-                println!("{}...", &line[0..max_cols - 4]);
+        for task in self.tasks.iter().take(max_lines) {
+            if lines == max_lines && self.tasks.len() > max_lines {
+                println!("...and {} more", self.tasks.len() - max_lines + 1);
             } else {
-                println!("{}", line);
+                let delta = now.duration_since(task.start).as_secs();
+                let line = format!("{}s {}", delta, task.message);
+                if line.len() >= max_cols {
+                    println!("{}...", &line[0..max_cols - 4]);
+                } else {
+                    println!("{}", line);
+                }
             }
             lines += 1;
         }
