@@ -84,7 +84,7 @@ impl ConsoleProgress {
         ConsoleProgress {
             // Act like our last update was now, so that we delay slightly
             // before our first print.  This reduces flicker in the case where
-            // the work immediately.
+            // the work immediately completes.
             last_update: Instant::now(),
             counts: StateCounts::new(),
             tasks: VecDeque::new(),
