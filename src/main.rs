@@ -73,7 +73,6 @@ fn run() -> anyhow::Result<()> {
         targets = default;
     }
     if targets.is_empty() {
-        // TODO: build all?
         anyhow::bail!("no path specified and no default");
     }
 
