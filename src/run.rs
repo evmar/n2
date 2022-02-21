@@ -60,9 +60,11 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
         };
     } else {
         // Command failed.
-        if let Some(_sig) = cmd.status.signal() {
-            // TODO: pretty-print signal?
-            write!(output, "interrupted").unwrap();
+        if let Some(sig) = cmd.status.signal() {
+            match sig {
+                libc::SIGINT => write!(output, "interrupted").unwrap(),
+                _ => write!(output, "signal {}", sig).unwrap(),
+            }
         }
     }
 
