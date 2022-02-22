@@ -37,11 +37,12 @@ impl Trace {
         .unwrap();
     }
 
-    pub fn write_complete(&mut self, name: &str, start: Instant, end: Instant) {
+    pub fn write_complete(&mut self, name: &str, tid: usize, start: Instant, end: Instant) {
         self.write_event_prefix(name, start);
         writeln!(
             self.w,
-            "\"ph\":\"X\", \"dur\":{}}}",
+            "\"tid\": {}, \"ph\":\"X\", \"dur\":{}}}",
+            tid,
             end.duration_since(start).as_micros()
         )
         .unwrap();
@@ -51,7 +52,7 @@ impl Trace {
         let start = Instant::now();
         let result = f();
         let end = Instant::now();
-        self.write_complete(name, start, end);
+        self.write_complete(name, 0, start, end);
         result
     }
 
@@ -77,7 +78,7 @@ impl Trace {
     }
 
     fn close(&mut self) {
-        self.write_complete("main", self.start, Instant::now());
+        self.write_complete("main", 0, self.start, Instant::now());
         writeln!(self.w, "]").unwrap();
         self.w.flush().unwrap();
     }

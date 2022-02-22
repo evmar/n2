@@ -22,7 +22,7 @@ pub fn get_terminal_cols() -> Option<usize> {
 }
 
 /// Compute the message to display on the console for a given build.
-fn build_message(build: &Build) -> &str {
+pub fn build_message(build: &Build) -> &str {
     build
         .desc
         .as_ref()

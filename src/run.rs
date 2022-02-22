@@ -1,4 +1,5 @@
 //! Runs build tasks, potentially in parallel.
+//! Unaware of the build graph, pools, etc.; just command execution.
 //!
 //! TODO: consider rewriting to use poll() etc. instead of threads.
 //! The threads might be relatively cheap(?) because they just block on
@@ -11,11 +12,21 @@ use anyhow::{anyhow, bail};
 use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct FinishedBuild {
+    /// A (faked) "thread id", used to put different finished builds in different
+    /// tracks in a performance trace.
+    pub tid: usize,
     pub id: BuildId,
+    pub span: (Instant, Instant),
+    pub result: BuildResult,
+}
+
+/// The result of executing a build step.
+pub struct BuildResult {
     pub success: bool,
+    /// Console output.
     pub output: Vec<u8>,
     pub discovered_deps: Option<Vec<String>>,
 }
@@ -42,7 +53,7 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
 
 /// Executes a build step as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
-fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Result<FinishedBuild> {
+fn run_build(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<BuildResult> {
     let mut cmd = std::process::Command::new("sh")
         .arg("-c")
         .arg(cmdline)
@@ -68,18 +79,48 @@ fn run_build(id: BuildId, cmdline: &str, depfile: Option<&str>) -> anyhow::Resul
         }
     }
 
-    Ok(FinishedBuild {
-        id,
+    Ok(BuildResult {
         success,
         output,
         discovered_deps,
     })
 }
 
+/// Tracks faked "thread ids" -- integers assigned to build tasks to track
+/// paralllelism in perf trace output.
+struct ThreadIds {
+    /// An entry is true when claimed, false or nonexistent otherwise.
+    slots: Vec<bool>,
+}
+impl ThreadIds {
+    fn new() -> Self {
+        ThreadIds { slots: Vec::new() }
+    }
+
+    fn claim(&mut self) -> usize {
+        match self.slots.iter().position(|&used| !used) {
+            Some(idx) => {
+                self.slots[idx] = true;
+                idx
+            }
+            None => {
+                let idx = self.slots.len();
+                self.slots.push(false);
+                idx
+            }
+        }
+    }
+
+    fn release(&mut self, slot: usize) {
+        self.slots[slot] = false;
+    }
+}
+
 pub struct Runner {
     finished_send: mpsc::Sender<FinishedBuild>,
     finished_recv: mpsc::Receiver<FinishedBuild>,
     pub running: usize,
+    tids: ThreadIds,
 }
 
 impl Runner {
@@ -89,6 +130,7 @@ impl Runner {
             finished_send: tx,
             finished_recv: rx,
             running: 0,
+            tids: ThreadIds::new(),
         }
     }
 
@@ -101,15 +143,24 @@ impl Runner {
     }
 
     pub fn start(&mut self, id: BuildId, cmdline: String, depfile: Option<String>) {
+        let tid = self.tids.claim();
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
-            let fin =
-                run_build(id, &cmdline, depfile.as_deref()).unwrap_or_else(|err| FinishedBuild {
-                    id,
+            let start = Instant::now();
+            let result =
+                run_build(&cmdline, depfile.as_deref()).unwrap_or_else(|err| BuildResult {
                     success: false,
                     output: err.to_string().into_bytes(),
                     discovered_deps: None,
                 });
+            let finish = Instant::now();
+
+            let fin = FinishedBuild {
+                tid,
+                id,
+                span: (start, finish),
+                result,
+            };
             // The send will only fail if the receiver disappeared, e.g. due to shutting down.
             let _ = tx.send(fin);
         });
@@ -119,12 +170,13 @@ impl Runner {
     /// Wait for a build to complete, with a timeout.
     /// If the timeout elapses return None.
     pub fn wait(&mut self, dur: Duration) -> Option<FinishedBuild> {
-        let r = match self.finished_recv.recv_timeout(dur) {
+        let fin = match self.finished_recv.recv_timeout(dur) {
             Err(mpsc::RecvTimeoutError::Timeout) => return None,
             // The unwrap() checks the recv() call, to panic on mpsc errors.
             r => r.unwrap(),
         };
+        self.tids.release(fin.tid);
         self.running -= 1;
-        Some(r)
+        Some(fin)
     }
 }

@@ -2,10 +2,11 @@
 
 use crate::db;
 use crate::graph::*;
+use crate::progress;
 use crate::progress::Progress;
-use crate::run::FinishedBuild;
-use crate::run::Runner;
+use crate::run;
 use crate::signal;
+use crate::trace;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -280,7 +281,7 @@ pub struct Work<'a> {
     file_state: FileState,
     last_hashes: &'a Hashes,
     build_states: BuildStates,
-    runner: Runner,
+    runner: run::Runner,
 }
 
 impl<'a> Work<'a> {
@@ -299,7 +300,7 @@ impl<'a> Work<'a> {
             file_state,
             last_hashes,
             build_states: BuildStates::new(pools),
-            runner: Runner::new(),
+            runner: run::Runner::new(),
         }
     }
 
@@ -332,9 +333,8 @@ impl<'a> Work<'a> {
     }
 
     /// Given a build that just finished, record any discovered deps and hash.
-    fn record_finished(&mut self, fin: FinishedBuild) -> anyhow::Result<()> {
-        let id = fin.id;
-        let deps = match fin.discovered_deps {
+    fn record_finished(&mut self, id: BuildId, result: run::BuildResult) -> anyhow::Result<()> {
+        let deps = match result.discovered_deps {
             None => Vec::new(),
             Some(names) => names.iter().map(|name| self.graph.file_id(name)).collect(),
         };
@@ -536,17 +536,21 @@ impl<'a> Work<'a> {
                 None => continue, // timeout
                 Some(fin) => fin,
             };
-            let id = fin.id;
+            let build = self.graph.build(fin.id);
+            trace::if_enabled(|t| {
+                let desc = progress::build_message(build);
+                t.write_complete(desc, fin.tid + 1, fin.span.0, fin.span.1);
+            });
 
-            if !fin.success {
-                self.progress.failed(self.graph.build(id), &fin.output);
+            if !fin.result.success {
+                self.progress.failed(build, &fin.result.output);
                 return Ok(false);
             }
 
-            self.record_finished(fin)?;
+            self.record_finished(fin.id, fin.result)?;
             self.progress
-                .task_state(id, self.graph.build(id), BuildState::Done);
-            self.ready_dependents(id);
+                .task_state(fin.id, self.graph.build(fin.id), BuildState::Done);
+            self.ready_dependents(fin.id);
         }
 
         Ok(true)
