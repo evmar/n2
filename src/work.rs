@@ -441,13 +441,21 @@ impl<'a> Work<'a> {
         // There are likely weird interactions with builds that depend on
         // a phony output, despite that not really making sense.
 
+        // True if we need to work around
+        //   https://github.com/ninja-build/ninja/issues/1779
+        // which is a bug that a phony rule with a missing input
+        // dependency doesn't fail the build.
+        // TODO: key this behavior off of the "ninja compat" flag.
+        // TODO: reconsider how phony deps work, maybe we should always promote
+        // phony deps to order-only?
+        let workaround_missing_phony_deps = phony;
+
         // stat any non-generated inputs if needed.
         // Note that generated inputs should already have been stat()ed when
         // they were visited as outputs.
 
-        // For dirtying_ins and order-only ins, ensure we both have mtimes and
-        // that the files are present.
-        for &id in build.dirtying_ins().iter().chain(build.order_only_ins()) {
+        // For dirtying_ins, ensure we both have mtimes and that the files are present.
+        for &id in build.dirtying_ins() {
             let file = self.graph.file(id);
             let mtime = match self.file_state.get(id) {
                 Some(mtime) => mtime,
@@ -464,15 +472,29 @@ impl<'a> Work<'a> {
                     }
                 }
             };
-
             if mtime == MTime::Missing {
-                // Work around https://github.com/ninja-build/ninja/issues/1779
-                // which is a bug that a phony rule with a missing input
-                // dependency doesn't fail the build.
-                // TODO: key this off of the "ninja compat" flag.
-                let workaround_missing_phony_deps = phony;
-                if !workaround_missing_phony_deps {
-                    continue;  // ignore that these are missing
+                if workaround_missing_phony_deps {
+                    continue;
+                }
+                anyhow::bail!("{}: input {} missing", build.location, file.name);
+            }
+        }
+
+        // For order_only_ins, ensure that non-generated files are present.
+        for &id in build.order_only_ins() {
+            let file = self.graph.file(id);
+            if file.input.is_some() {
+                // Generated order-only input: we don't care if the file
+                // exists or not, we only used it for ordering.
+                continue;
+            }
+            let mtime = match self.file_state.get(id) {
+                Some(mtime) => mtime,
+                None => self.file_state.restat(id, &file.name)?,
+            };
+            if mtime == MTime::Missing {
+                if workaround_missing_phony_deps {
+                    continue;
                 }
                 anyhow::bail!("{}: input {} missing", build.location, file.name);
             }
@@ -481,6 +503,7 @@ impl<'a> Work<'a> {
         // For discovered_ins, ensure we have mtimes for them.
         // But if they're missing, it isn't an error, it just means the build
         // is dirty.
+        let mut file_missing = false;
         for &id in build.discovered_ins() {
             let file = self.graph.file(id);
             let mtime = match self.file_state.get(id) {
@@ -511,7 +534,7 @@ impl<'a> Work<'a> {
             };
             if mtime == MTime::Missing {
                 // It's ok if it's missing, but it means the build is dirty.
-                return Ok(true);
+                file_missing = true;
             }
         }
 
@@ -527,10 +550,15 @@ impl<'a> Work<'a> {
             }
             let mtime = self.file_state.restat(id, &file.name)?;
             if mtime == MTime::Missing {
-                // Output missing, which makes the build dirty without needing
-                // to consider anything else.
-                return Ok(true);
+                file_missing = true;
             }
+        }
+
+        if file_missing {
+            // If any files are missing, the build is dirty without needing
+            // to consider hashes.  But a phony build can never be dirty.
+            let dirty = !phony;
+            return Ok(dirty);
         }
 
         // If we get here, all the relevant files are present and stat()ed,
