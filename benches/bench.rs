@@ -1,8 +1,16 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use n2::canon::canon_path;
 use n2::parse::Parser;
 use n2::scanner::Scanner;
 use std::fmt::Write;
+
+// This code used Criterion, but Criterion had a massive set of dependencies,
+// was slow to compile, and clunky to actually use, so I disabled it for now.
+
+pub struct Criterion {}
+impl Criterion {
+    fn bench_function(&mut self, _name: &str, _f: impl Fn(&mut Criterion) -> ()) {}
+    fn iter(&mut self, _f: impl Fn() -> ()) {}
+}
 
 pub fn bench_canon(c: &mut Criterion) {
     c.bench_function("canon plain", |b| {
@@ -46,5 +54,5 @@ pub fn bench_parse(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_canon, bench_parse);
-criterion_main!(benches);
+// criterion_group!(benches, bench_canon, bench_parse);
+// criterion_main!(benches);

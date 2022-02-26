@@ -13,10 +13,3 @@ libc = "0.2"
 
 [profile.release]
 debug = true
-
-[dev-dependencies]
-criterion = "0.3"
-
-[[bench]]
-name = "bench"
-harness = false
