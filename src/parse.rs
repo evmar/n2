@@ -243,7 +243,7 @@ impl<'a> Parser<'a> {
         let start = self.scanner.ofs;
         loop {
             match self.scanner.read() {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' => {}
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' => {}
                 _ => {
                     self.scanner.back();
                     break;
