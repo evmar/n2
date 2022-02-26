@@ -136,6 +136,7 @@ impl Loader {
             };
             match stmt {
                 Statement::Include(f) => trace::scope("include", || self.read_file(&f))?,
+                // TODO: implement scoping for subninja
                 Statement::Subninja(f) => trace::scope("subninja", || self.read_file(&f))?,
                 Statement::Default(f) => self.default.push(self.graph.file_id(f)),
                 Statement::Rule(r) => {
