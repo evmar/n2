@@ -330,7 +330,7 @@ impl<'a> Parser<'a> {
                 self.scanner.skip_spaces();
                 EvalPart::Literal(self.scanner.slice(0, 0))
             }
-            ' ' | '$' => {
+            ' ' | '$' | ':' => {
                 self.scanner.next();
                 EvalPart::Literal(self.scanner.slice(self.scanner.ofs - 1, self.scanner.ofs))
             }
