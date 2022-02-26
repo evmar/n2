@@ -4,8 +4,8 @@ use crate::db;
 use crate::graph::*;
 use crate::progress;
 use crate::progress::Progress;
-use crate::run;
 use crate::signal;
+use crate::task;
 use crate::trace;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -304,7 +304,7 @@ pub struct Work<'a> {
     file_state: FileState,
     last_hashes: &'a Hashes,
     build_states: BuildStates,
-    runner: run::Runner,
+    runner: task::Runner,
 }
 
 impl<'a> Work<'a> {
@@ -324,7 +324,7 @@ impl<'a> Work<'a> {
             file_state,
             last_hashes,
             build_states: BuildStates::new(pools),
-            runner: run::Runner::new(parallelism),
+            runner: task::Runner::new(parallelism),
         }
     }
 
@@ -359,7 +359,7 @@ impl<'a> Work<'a> {
 
     /// Given a build that just finished, record any discovered deps and hash.
     /// Postcondition: all outputs have been stat()ed.
-    fn record_finished(&mut self, id: BuildId, result: run::BuildResult) -> anyhow::Result<()> {
+    fn record_finished(&mut self, id: BuildId, result: task::BuildResult) -> anyhow::Result<()> {
         let deps = match result.discovered_deps {
             None => Vec::new(),
             Some(names) => names.iter().map(|name| self.graph.file_id(name)).collect(),
