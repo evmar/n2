@@ -95,11 +95,12 @@ fn run() -> anyhow::Result<i32> {
         pools,
         parallelism,
     );
-    trace::scope("want_file", || {
+    trace::scope("want_file", || -> anyhow::Result<()> {
         for target in targets {
-            work.want_file(target);
+            work.want_file(target)?;
         }
-    });
+        Ok(())
+    })?;
     let success = trace::scope("work.run", || work.run())?;
     if !success {
         // Don't print any summary, the failing task is enough info.

@@ -194,9 +194,14 @@ impl BuildStates {
 
     /// Visits a BuildId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    fn want_build(&mut self, graph: &Graph, id: BuildId) {
+    fn want_build(
+        &mut self,
+        graph: &Graph,
+        stack: &mut Vec<FileId>,
+        id: BuildId,
+    ) -> anyhow::Result<()> {
         if self.get(id) != BuildState::Unknown {
-            return; // Already visited.
+            return Ok(()); // Already visited.
         }
 
         let build = graph.build(id);
@@ -205,21 +210,40 @@ impl BuildStates {
         // Any Build that doesn't depend on an output of another Build is ready.
         let mut ready = true;
         for &id in build.ordering_ins() {
-            self.want_file(graph, id);
+            self.want_file(graph, stack, id)?;
             ready = ready && graph.file(id).input.is_none();
         }
 
         if ready {
             self.set(id, build, BuildState::Ready);
         }
+        Ok(())
     }
 
     /// Visits a FileId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    pub fn want_file(&mut self, graph: &Graph, id: FileId) {
-        if let Some(bid) = graph.file(id).input {
-            self.want_build(graph, bid);
+    pub fn want_file(
+        &mut self,
+        graph: &Graph,
+        stack: &mut Vec<FileId>,
+        id: FileId,
+    ) -> anyhow::Result<()> {
+        // Check for a dependency cycle.
+        if let Some(cycle) = stack.iter().position(|&sid| sid == id) {
+            let mut err = "dependency cycle: ".to_string();
+            for &id in stack[cycle..].iter() {
+                err.push_str(&format!("{} -> ", graph.file(id).name));
+            }
+            err.push_str(&graph.file(id).name);
+            anyhow::bail!(err);
         }
+
+        stack.push(id);
+        if let Some(bid) = graph.file(id).input {
+            self.want_build(graph, stack, bid)?;
+        }
+        stack.pop();
+        Ok(())
     }
 
     pub fn pop_ready(&mut self) -> Option<BuildId> {
@@ -305,8 +329,9 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn want_file(&mut self, id: FileId) {
-        self.build_states.want_file(self.graph, id)
+    pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
+        let mut stack = Vec::new();
+        self.build_states.want_file(self.graph, &mut stack, id)
     }
 
     /// Check whether a given build is ready, generally after one of its inputs
@@ -563,5 +588,26 @@ impl<'a> Work<'a> {
         self.progress.update(&self.build_states.counts);
         self.progress.finish();
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn build_cycle() -> Result<(), anyhow::Error> {
+        let file = "
+build a: phony b
+build b: phony c
+build c: phony a
+";
+        let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
+        let a_id = graph.file_id("a");
+        let mut states = crate::work::BuildStates::new(vec![]);
+        let mut stack = Vec::new();
+        match states.want_file(&graph, &mut stack, a_id) {
+            Ok(_) => panic!("expected build cycle error"),
+            Err(err) => assert_eq!(err.to_string(), "dependency cycle: a -> b -> c -> a"),
+        }
+        Ok(())
     }
 }

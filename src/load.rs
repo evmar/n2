@@ -116,10 +116,14 @@ impl Loader {
     }
 
     fn read_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let mut bytes = match trace::scope("fs::read", || std::fs::read(path)) {
+        let bytes = match trace::scope("fs::read", || std::fs::read(path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path, e),
         };
+        self.parse(path, bytes)
+    }
+
+    fn parse(&mut self, path: &str, mut bytes: Vec<u8>) -> anyhow::Result<()> {
         bytes.push(0);
         let filename = std::rc::Rc::new(String::from(path));
 
@@ -177,4 +181,12 @@ pub fn read() -> anyhow::Result<State> {
         default: loader.default,
         pools: loader.pools,
     })
+}
+
+/// Parse a single file's content.
+#[cfg(test)]
+pub fn parse(name: &str, content: Vec<u8>) -> anyhow::Result<graph::Graph> {
+    let mut loader = Loader::new();
+    trace::scope("loader.read_file", || loader.parse(name, content))?;
+    Ok(loader.graph)
 }
