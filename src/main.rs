@@ -52,8 +52,8 @@ fn run() -> anyhow::Result<i32> {
     let mut parallelism: usize = 8;
     if let Some(parallelism_flag) = matches.opt_str("j") {
         match parallelism_flag.parse::<usize>() {
-          Ok(n) => parallelism = n,
-          Err(e) => anyhow::bail!("invalid -j {:?}: {:?}", parallelism, e),
+            Ok(n) => parallelism = n,
+            Err(e) => anyhow::bail!("invalid -j {:?}: {:?}", parallelism, e),
         }
     }
 
@@ -87,7 +87,14 @@ fn run() -> anyhow::Result<i32> {
 
     let mut progress = progress::ConsoleProgress::new();
 
-    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress, pools, parallelism);
+    let mut work = work::Work::new(
+        &mut graph,
+        &last_hashes,
+        &mut db,
+        &mut progress,
+        pools,
+        parallelism,
+    );
     trace::scope("want_file", || {
         for target in targets {
             work.want_file(target);
