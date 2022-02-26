@@ -30,6 +30,7 @@ pub enum Statement<'a> {
     Build(Build<'a>),
     Default(&'a str),
     Include(String),
+    Subninja(String),
     Pool(Pool<'a>),
 }
 
@@ -70,6 +71,13 @@ impl<'a> Parser<'a> {
                                 Some(p) => p,
                             };
                             return Ok(Some(Statement::Include(path)));
+                        }
+                        "subninja" => {
+                            let path = match self.read_path()? {
+                                None => return self.scanner.parse_error("expected path"),
+                                Some(p) => p,
+                            };
+                            return Ok(Some(Statement::Subninja(path)));
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
