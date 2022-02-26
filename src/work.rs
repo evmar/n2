@@ -18,16 +18,15 @@ pub enum BuildState {
     Unknown,
     /// Builds we want to ensure are up to date, but which aren't ready yet.
     Want,
-    /// Builds whose generated inputs are up to date and are ready to be
-    /// checked/hashed.
+    /// Builds whose dependencies are up to date and are ready to be
+    /// checked.  This is purely a function of whether all builds before
+    /// it have have run, and is independent of any file state.
     ///
     /// Preconditions:
     /// - generated inputs: have already been stat()ed as part of completing
     ///   the step that generated those inputs
     /// - non-generated inputs: may not have yet stat()ed, so doing those
     ///   stat()s is part of the work of running these builds
-    /// Note per these definitions, a build with missing non-generated inputs
-    /// is still considered ready (but will then fail to run).
     Ready,
     /// Builds who have been determined not up to date and which are ready
     /// to be executed.
@@ -359,6 +358,7 @@ impl<'a> Work<'a> {
     }
 
     /// Given a build that just finished, record any discovered deps and hash.
+    /// Postcondition: all outputs have been stat()ed.
     fn record_finished(&mut self, id: BuildId, result: run::BuildResult) -> anyhow::Result<()> {
         let deps = match result.discovered_deps {
             None => Vec::new(),
@@ -382,6 +382,24 @@ impl<'a> Work<'a> {
                 }
                 self.file_state.restat(id, &file.name)?;
             }
+        }
+
+        // Stat all the outputs.  This step just finished, so we need to update
+        // any cached state of the output files to reflect their new state.
+        let mut output_missing = false;
+        for &id in build.outs() {
+            let file = self.graph.file(id);
+            let mtime = self.file_state.restat(id, &file.name)?;
+            if mtime == MTime::Missing {
+                output_missing = true;
+            }
+        }
+
+        if output_missing {
+            // If a declared output is missing, don't record the build in
+            // in the db.  It will be considered dirty next time anyway due
+            // to the missing output.
+            return Ok(());
         }
 
         let hash = hash_build(self.graph, &mut self.file_state, build)?;
@@ -413,23 +431,23 @@ impl<'a> Work<'a> {
     }
 
     /// Check a ready build for whether it needs to run, returning true if so.
-    /// This is the place where we actually stat input files.
+    /// This is the place where we actually stat files.
     /// Prereq: any dependent input is already generated.
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = self.graph.build(id);
 
-        // Note: we ignore whether the rule is named 'phony', and instead
-        // treat all rules that lack a cmdline (incluing phony) the same.
-        // The actual semantics of ninja phony are pretty underspecified...
         let phony = build.cmdline.is_none();
+        // TODO: do we just return true immediately if phony?
+        // There are likely weird interactions with builds that depend on
+        // a phony output, despite that not really making sense.
 
         // stat any non-generated inputs if needed.
         // Note that generated inputs should already have been stat()ed when
         // they were visited as outputs.
 
-        // For dirtying_ins, ensure we both have mtimes and that the files are
-        // present.
-        for &id in build.dirtying_ins() {
+        // For dirtying_ins and order-only ins, ensure we both have mtimes and
+        // that the files are present.
+        for &id in build.dirtying_ins().iter().chain(build.order_only_ins()) {
             let file = self.graph.file(id);
             let mtime = match self.file_state.get(id) {
                 Some(mtime) => mtime,
@@ -447,59 +465,77 @@ impl<'a> Work<'a> {
                 }
             };
 
-            match mtime {
-                MTime::Stamp(_) => {}
-                MTime::Missing => {
-                    // Work around https://github.com/ninja-build/ninja/issues/1779
-                    let workaround_missing_phony_deps = phony;
-                    if !workaround_missing_phony_deps {
-                        anyhow::bail!("{}: input {} missing", build.location, file.name);
+            if mtime == MTime::Missing {
+                // Work around https://github.com/ninja-build/ninja/issues/1779
+                // which is a bug that a phony rule with a missing input
+                // dependency doesn't fail the build.
+                // TODO: key this off of the "ninja compat" flag.
+                let workaround_missing_phony_deps = phony;
+                if !workaround_missing_phony_deps {
+                    continue;  // ignore that these are missing
+                }
+                anyhow::bail!("{}: input {} missing", build.location, file.name);
+            }
+        }
+
+        // For discovered_ins, ensure we have mtimes for them.
+        // But if they're missing, it isn't an error, it just means the build
+        // is dirty.
+        for &id in build.discovered_ins() {
+            let file = self.graph.file(id);
+            let mtime = match self.file_state.get(id) {
+                Some(mtime) => mtime,
+                None => {
+                    if file.input.is_none() {
+                        self.file_state.restat(id, &file.name)?
+                    } else {
+                        // This dep is generated by some other build step, but the
+                        // build graph didn't cause that other build step to be
+                        // visited first.  This is an error in the build file.
+                        // For example, imagine:
+                        //   build generated.h: codegen_headers ...
+                        //   build generated.stamp: stamp || generated.h
+                        //   build foo.o: cc ...
+                        // If we deps discover that foo.o depends on generated.h,
+                        // we must have some dependency path from foo.o to generated.h,
+                        // either direct or indirect (like the stamp).  If that
+                        // were present, then we'd already have file_state for this
+                        // file and wouldn't get here.
+                        anyhow::bail!(
+                            "{} used {}, but has no dependency path to it",
+                            build.location,
+                            file.name
+                        );
                     }
                 }
             };
+            if mtime == MTime::Missing {
+                // It's ok if it's missing, but it means the build is dirty.
+                return Ok(true);
+            }
         }
 
-        // For discovered_ins, just ensure we have mtimes for them.
-        for &id in build.discovered_ins() {
+        // Stat all the outputs.
+        // We know this build is solely responsible for updating these outputs,
+        // and if we're checking if it's dirty we are visiting it the first
+        // time, so we stat unconditionally.
+        // This is looking at if the outputs are already present.
+        for &id in build.outs() {
             let file = self.graph.file(id);
-            if self.file_state.get(id).is_none() {
-                if file.input.is_none() {
-                    self.file_state.restat(id, &file.name)?;
-                    // We ignore the return value of stat because we don't
-                    // care whether the file is missing, per the semantics of
-                    // discovered_ins.
-                } else {
-                    // This dep is generated by some other build step, but the
-                    // build graph didn't cause that other build step to be
-                    // visited first.  This is an error in the build file.
-                    // For example, imagine:
-                    //   build generated.h: codegen_headers ...
-                    //   build generated.stamp: stamp || generated.h
-                    //   build foo.o: cc ...
-                    // If we deps discover that foo.o depends on generated.h,
-                    // we must have some dependency path from foo.o to generated.h,
-                    // either direct or indirect (like the stamp).  If that
-                    // were present, then we'd already have file_state for this
-                    // file and wouldn't get here.
-                    anyhow::bail!(
-                        "{} used {}, but has no dependency path to it",
-                        build.location,
-                        file.name
-                    );
-                }
+            if self.file_state.get(id).is_some() {
+                panic!("expected no file state for {}", file.name);
+            }
+            let mtime = self.file_state.restat(id, &file.name)?;
+            if mtime == MTime::Missing {
+                // Output missing, which makes the build dirty without needing
+                // to consider anything else.
+                return Ok(true);
             }
         }
 
-        if phony {
-            // Phony build; mark the output "files" as present.
-            for &id in build.outs() {
-                if self.file_state.get(id).is_none() {
-                    self.file_state.mark_present(id);
-                }
-            }
-            return Ok(false);
-        }
-
+        // If we get here, all the relevant files are present and stat()ed,
+        // so compare the hash against the last hash.
+        // TODO: skip this whole function if no previous hash is present.
         let hash = hash_build(self.graph, &mut self.file_state, build)?;
         Ok(self.last_hashes.changed(id, hash))
     }

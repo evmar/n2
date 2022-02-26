@@ -128,6 +128,11 @@ impl Build {
         &self.ins[0..(self.explicit_ins + self.implicit_ins)]
     }
 
+    /// Order-only inputs: inputs that are only used for ordering execution.
+    pub fn order_only_ins(&self) -> &[FileId] {
+        &self.ins[(self.explicit_ins + self.implicit_ins)..]
+    }
+
     /// Inputs that are needed before building.
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
     /// Note that we don't order on discovered_ins, because they're not allowed to
@@ -175,8 +180,6 @@ impl Build {
         )
     }
 }
-
-const UNIT_SEPARATOR: u8 = 0x1F;
 
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them,
 /// as well as mapping string filenames to the underlying Files.
@@ -311,45 +314,48 @@ impl FileState {
         self.set_mtime(id, mtime);
         Ok(mtime)
     }
+}
 
-    /// Mark a given id as "present"; used in phony deps.
-    pub fn mark_present(&mut self, id: FileId) {
-        self.set_mtime(id, MTime::Stamp(0));
+const UNIT_SEPARATOR: u8 = 0x1F;
+
+// Add a list of files to a hasher; used by hash_build.
+fn hash_files(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    graph: &Graph,
+    file_state: &mut FileState,
+    ids: &[FileId],
+) {
+    for &id in ids {
+        let mtime = file_state
+            .get(id)
+            .unwrap_or_else(|| panic!("no state for {:?}", graph.file(id).name));
+        let mtime_int = match mtime {
+            MTime::Missing => panic!("missing file {:?}", graph.file(id).name),
+            MTime::Stamp(t) => t,
+        };
+        hasher.write(graph.file(id).name.as_bytes());
+        hasher.write_u32(mtime_int);
+        hasher.write_u8(UNIT_SEPARATOR);
     }
 }
 
+// Hashes the inputs of a build to compute a signature.
+// Prerequisite: all referenced files have already been stat()ed and are present.
+// (It doesn't make sense to hash a build with missing files, because it's out
+// of date regardless of the state of the other files.)
 pub fn hash_build(
     graph: &Graph,
     file_state: &mut FileState,
     build: &Build,
 ) -> std::io::Result<Hash> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for &id in build.dirtying_ins().iter().chain(build.discovered_ins()) {
-        hasher.write(graph.file(id).name.as_bytes());
-        let mtime = file_state
-            .get(id)
-            .unwrap_or_else(|| panic!("no state for {:?}", graph.file(id).name));
-        let mtime_int = match mtime {
-            MTime::Missing => 0,
-            MTime::Stamp(t) => t + 1,
-        };
-        hasher.write_u32(mtime_int);
-        hasher.write_u8(UNIT_SEPARATOR);
-    }
+    hash_files(&mut hasher, graph, file_state, build.dirtying_ins());
+    hasher.write_u8(UNIT_SEPARATOR);
+    hash_files(&mut hasher, graph, file_state, build.discovered_ins());
+    hasher.write_u8(UNIT_SEPARATOR);
     hasher.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
     hasher.write_u8(UNIT_SEPARATOR);
-
-    for &id in build.outs() {
-        let file = graph.file(id);
-        let mtime = file_state.restat(id, &file.name)?;
-        let mtime_int = match mtime {
-            MTime::Missing => 0,
-            MTime::Stamp(t) => t + 1,
-        };
-        hasher.write(file.name.as_bytes());
-        hasher.write_u32(mtime_int);
-    }
-
+    hash_files(&mut hasher, graph, file_state, build.outs());
     Ok(Hash(hasher.finish()))
 }
 
