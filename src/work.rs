@@ -291,6 +291,7 @@ impl<'a> Work<'a> {
         db: &'a mut db::Writer,
         progress: &'a mut dyn Progress,
         pools: Vec<(String, usize)>,
+        parallelism: usize,
     ) -> Self {
         let file_state = FileState::new(graph);
         Work {
@@ -300,7 +301,7 @@ impl<'a> Work<'a> {
             file_state,
             last_hashes,
             build_states: BuildStates::new(pools),
-            runner: run::Runner::new(),
+            runner: run::Runner::new(parallelism),
         }
     }
 

@@ -15,6 +15,7 @@ fn run() -> anyhow::Result<i32> {
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");
     opts.optopt("d", "debug", "debugging tools", "TOOL");
+    opts.optopt("j", "", "parallelism (has good default)", "NUM");
     opts.optflag("h", "help", "");
     if fake_ninja_compat {
         opts.optopt("t", "", "tool", "TOOL");
@@ -48,6 +49,14 @@ fn run() -> anyhow::Result<i32> {
         }
     }
 
+    let mut parallelism: usize = 8;
+    if let Some(parallelism_flag) = matches.opt_str("j") {
+        match parallelism_flag.parse::<usize>() {
+          Ok(n) => parallelism = n,
+          Err(e) => anyhow::bail!("invalid -j {:?}: {:?}", parallelism, e),
+        }
+    }
+
     if let Some(dir) = matches.opt_str("C") {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
@@ -78,7 +87,7 @@ fn run() -> anyhow::Result<i32> {
 
     let mut progress = progress::ConsoleProgress::new();
 
-    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress, pools);
+    let mut work = work::Work::new(&mut graph, &last_hashes, &mut db, &mut progress, pools, parallelism);
     trace::scope("want_file", || {
         for target in targets {
             work.want_file(target);

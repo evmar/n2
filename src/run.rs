@@ -121,21 +121,23 @@ pub struct Runner {
     finished_recv: mpsc::Receiver<FinishedBuild>,
     pub running: usize,
     tids: ThreadIds,
+    parallelism: usize,
 }
 
 impl Runner {
-    pub fn new() -> Self {
+    pub fn new(parallelism: usize) -> Self {
         let (tx, rx) = mpsc::channel();
         Runner {
             finished_send: tx,
             finished_recv: rx,
             running: 0,
             tids: ThreadIds::new(),
+            parallelism: parallelism,
         }
     }
 
     pub fn can_start_more(&self) -> bool {
-        self.running < 8
+        self.running < self.parallelism
     }
 
     pub fn is_running(&self) -> bool {
