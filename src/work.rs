@@ -568,6 +568,23 @@ impl<'a> Work<'a> {
         Ok(self.last_hashes.changed(id, hash))
     }
 
+    /// Create the parent directories of a given list of fileids.
+    /// Used to create directories used for outputs.
+    /// TODO: do this within the thread executing the subtask?
+    fn create_parent_dirs(&self, ids: &[FileId]) -> anyhow::Result<()> {
+        let mut dirs: Vec<&std::path::Path> = Vec::new();
+        for &out in ids {
+            if let Some(parent) = std::path::Path::new(&self.graph.file(out).name).parent() {
+                if dirs.iter().find(|&&p| p == parent).is_some() {
+                    continue;
+                }
+                std::fs::create_dir_all(parent)?;
+                dirs.push(parent);
+            }
+        }
+        Ok(())
+    }
+
     // Runs the build.
     // Returns a Result for failures, but we must clean up the progress before
     // returning the result to the caller.
@@ -594,6 +611,7 @@ impl<'a> Work<'a> {
                 };
                 let build = self.graph.build(id);
                 self.build_states.set(id, build, BuildState::Running);
+                self.create_parent_dirs(build.outs())?;
                 self.runner
                     .start(id, build.cmdline.clone().unwrap(), build.depfile.clone());
                 self.progress.task_state(id, build, BuildState::Running);

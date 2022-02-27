@@ -38,6 +38,17 @@ impl TestSpace {
         std::process::Command::new(n2_binary()).args(args).output()
     }
 
+    /// Like run, but also print output if the build failed.
+    fn run_expect(&self, args: Vec<String>) -> std::io::Result<std::process::Output> {
+        let out = self.run(args)?;
+        if !out.status.success() {
+            // Gross: use print! instead of writing to stdout so Rust test
+            // framework can capture it.
+            print!("{}", std::str::from_utf8(&out.stdout).unwrap());
+        }
+        Ok(out)
+    }
+
     /// Persist the temp dir locally and abort the test.  Debugging helper.
     #[allow(dead_code)]
     fn eject(self) -> ! {
@@ -69,8 +80,27 @@ build out: touch in
 ",
     )?;
     space.write("in", "")?;
-    assert!(space.run(vec!["out".to_string()])?.status.success());
+    space.run_expect(vec!["out".to_string()])?;
     assert!(space.read("out").is_ok());
+
+    Ok(())
+}
+
+#[test]
+fn create_subdir() -> anyhow::Result<()> {
+    // Run a build rule that needs a subdir to be automatically created.
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule touch
+  command = touch $out
+build subdir/out: touch in
+",
+    )?;
+    space.write("in", "")?;
+    space.run_expect(vec!["subdir/out".to_string()])?;
+    assert!(space.read("subdir/out").is_ok());
 
     Ok(())
 }
