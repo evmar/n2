@@ -17,3 +17,10 @@ It appears profiling Rust under WSL2 is not a thing(?).
 
 On Mac, the best options seemed to be `cargo flamegraph` and
 `cargo instruments`.
+
+## Benchmarking
+
+This benchmarks load time, by asking to build a nonexistent target:
+
+1. `cargo install hyperfine`
+2. `$ hyperfine -i -- './target/release/n2 -C ~/llvm-project/llvm/utils/gn/out/ xxx'`
