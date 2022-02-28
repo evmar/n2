@@ -430,12 +430,14 @@ impl<'a> Work<'a> {
         }
     }
 
-    /// Check a ready build for whether it needs to run, returning true if so.
-    /// This is the place where we actually stat files.
+    /// Stat all the input/output files for a given build in anticipation of
+    /// deciding whether it needs to be run again.
     /// Prereq: any dependent input is already generated.
-    fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
+    /// Returns a build error if any required input files are missing.
+    /// Otherwise returns true if any expected but not required files,
+    /// e.g. outputs, are missing, implying that the build needs to be executed.
+    fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = self.graph.build(id);
-
         let phony = build.cmdline.is_none();
         // TODO: do we just return true immediately if phony?
         // There are likely weird interactions with builds that depend on
@@ -503,7 +505,6 @@ impl<'a> Work<'a> {
         // For discovered_ins, ensure we have mtimes for them.
         // But if they're missing, it isn't an error, it just means the build
         // is dirty.
-        let mut file_missing = false;
         for &id in build.discovered_ins() {
             let file = self.graph.file(id);
             let mtime = match self.file_state.get(id) {
@@ -533,8 +534,8 @@ impl<'a> Work<'a> {
                 }
             };
             if mtime == MTime::Missing {
-                // It's ok if it's missing, but it means the build is dirty.
-                file_missing = true;
+                // It's ok for these to be missing.
+                return Ok(true);
             }
         }
 
@@ -550,15 +551,31 @@ impl<'a> Work<'a> {
             }
             let mtime = self.file_state.restat(id, &file.name)?;
             if mtime == MTime::Missing {
-                file_missing = true;
+                return Ok(true);
             }
         }
 
+        // All files accounted for.
+        Ok(false)
+    }
+
+    /// Check a ready build for whether it needs to run, returning true if so.
+    /// Prereq: any dependent input is already generated.
+    fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
+        let file_missing = self.check_build_files_missing(id)?;
+
+        let build = self.graph.build(id);
+
+        // A phony build can never be dirty.
+        let phony = build.cmdline.is_none();
+        if phony {
+            return Ok(false);
+        }
+
+        // If any files are missing, the build is dirty without needing
+        // to consider hashes.
         if file_missing {
-            // If any files are missing, the build is dirty without needing
-            // to consider hashes.  But a phony build can never be dirty.
-            let dirty = !phony;
-            return Ok(dirty);
+            return Ok(true);
         }
 
         // If we get here, all the relevant files are present and stat()ed,
