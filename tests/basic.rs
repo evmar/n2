@@ -11,6 +11,12 @@ fn n2_binary() -> std::path::PathBuf {
         .to_path_buf()
 }
 
+fn n2_command(args: Vec<String>) -> std::process::Command {
+    let mut cmd = std::process::Command::new(n2_binary());
+    cmd.args(args);
+    cmd
+}
+
 /// Manages a temporary directory for invoking n2.
 struct TestSpace {
     dir: tempfile::TempDir,
@@ -32,15 +38,13 @@ impl TestSpace {
     }
 
     /// Invoke n2, returning process output.
-    fn run(&self, mut args: Vec<String>) -> std::io::Result<std::process::Output> {
-        args.push("-C".to_string());
-        args.push(self.dir.path().to_string_lossy().to_string());
-        std::process::Command::new(n2_binary()).args(args).output()
+    fn run(&self, mut cmd: std::process::Command) -> std::io::Result<std::process::Output> {
+        cmd.current_dir(self.dir.path()).output()
     }
 
     /// Like run, but also print output if the build failed.
-    fn run_expect(&self, args: Vec<String>) -> std::io::Result<std::process::Output> {
-        let out = self.run(args)?;
+    fn run_expect(&self, cmd: std::process::Command) -> std::io::Result<std::process::Output> {
+        let out = self.run(cmd)?;
         if !out.status.success() {
             // Gross: use print! instead of writing to stdout so Rust test
             // framework can capture it.
@@ -60,7 +64,7 @@ impl TestSpace {
 fn empty_file() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write("build.ninja", "")?;
-    let out = space.run(vec![])?;
+    let out = space.run(n2_command(vec![]))?;
     assert_eq!(
         std::str::from_utf8(&out.stdout)?,
         "n2: error: no path specified and no default\n"
@@ -80,7 +84,7 @@ build out: touch in
 ",
     )?;
     space.write("in", "")?;
-    space.run_expect(vec!["out".to_string()])?;
+    space.run_expect(n2_command(vec!["out".to_string()]))?;
     assert!(space.read("out").is_ok());
 
     Ok(())
@@ -99,7 +103,7 @@ build subdir/out: touch in
 ",
     )?;
     space.write("in", "")?;
-    space.run_expect(vec!["subdir/out".to_string()])?;
+    space.run_expect(n2_command(vec!["subdir/out".to_string()]))?;
     assert!(space.read("subdir/out").is_ok());
 
     Ok(())
