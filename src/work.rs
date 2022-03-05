@@ -113,6 +113,8 @@ impl BuildStates {
         let mut pools: Vec<(String, PoolState)> = vec![
             // The implied default pool.
             (String::from(""), PoolState::new(0)),
+            // TODO: the console pool is just a depth-1 pool for now.
+            (String::from("console"), PoolState::new(1)),
         ];
         pools.extend(
             depths
