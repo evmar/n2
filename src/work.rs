@@ -328,9 +328,28 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
+    /// If there's a build rule that generates build.ninja, return the FileId
+    /// to pass to want_fileid that will rebuild it.
+    pub fn build_ninja_fileid(&mut self) -> Option<FileId> {
+        if let Some(id) = self.graph.get_file_id("build.ninja") {
+            if self.graph.file(id).input.is_some() {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    pub fn want_fileid(&mut self, id: FileId) -> anyhow::Result<()> {
         let mut stack = Vec::new();
         self.build_states.want_file(self.graph, &mut stack, id)
+    }
+
+    pub fn want_file(&mut self, name: &str) -> anyhow::Result<()> {
+        let target = match self.graph.get_file_id(&name) {
+            None => anyhow::bail!("unknown path requested: {:?}", name),
+            Some(id) => id,
+        };
+        self.want_fileid(target)
     }
 
     /// Check whether a given build is ready, generally after one of its inputs
@@ -605,8 +624,9 @@ impl<'a> Work<'a> {
     // Runs the build.
     // Returns a Result for failures, but we must clean up the progress before
     // returning the result to the caller.
-    fn run_without_cleanup(&mut self) -> anyhow::Result<bool> {
+    fn run_without_cleanup(&mut self) -> anyhow::Result<Option<usize>> {
         signal::register_sigint();
+        let mut tasks_done = 0;
         while self.build_states.unfinished() {
             self.progress.update(&self.build_states.counts);
 
@@ -669,19 +689,20 @@ impl<'a> Work<'a> {
 
             if !fin.result.success {
                 self.progress.failed(build, &fin.result.output);
-                return Ok(false);
+                return Ok(None);
             }
 
+            tasks_done += 1;
             self.record_finished(fin.id, fin.result)?;
             self.progress
                 .task_state(fin.id, self.graph.build(fin.id), BuildState::Done);
             self.ready_dependents(fin.id);
         }
 
-        Ok(true)
+        Ok(Some(tasks_done))
     }
 
-    pub fn run(&mut self) -> anyhow::Result<bool> {
+    pub fn run(&mut self) -> anyhow::Result<Option<usize>> {
         let result = self.run_without_cleanup();
         // Clean up progress before returning.
         self.progress.update(&self.build_states.counts);

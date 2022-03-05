@@ -74,8 +74,6 @@ pub struct ConsoleProgress {
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
-    /// Count of build tasks that have finished.
-    pub tasks_done: usize,
 }
 
 #[allow(clippy::new_without_default)]
@@ -88,7 +86,6 @@ impl ConsoleProgress {
             last_update: Instant::now(),
             counts: StateCounts::new(),
             tasks: VecDeque::new(),
-            tasks_done: 0,
         }
     }
 }
@@ -112,7 +109,6 @@ impl Progress for ConsoleProgress {
             BuildState::Done => {
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
-                self.tasks_done += 1;
             }
             _ => {}
         }

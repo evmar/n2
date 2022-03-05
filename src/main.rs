@@ -2,10 +2,77 @@ extern crate getopts;
 
 use anyhow::anyhow;
 use n2::load;
-use n2::progress;
+use n2::progress::ConsoleProgress;
 use n2::trace;
 use n2::work;
 use std::path::Path;
+
+// The result of starting a build.
+enum BuildResult {
+    /// A build task failed.
+    Failed,
+    /// Renerated build.ninja rather than the requested build.  The caller must
+    /// reload build.ninja to continue with building.
+    Regen,
+    /// Build succeeded, and the number is the count of executed tasks.
+    Success(usize),
+}
+
+// Build a given set of targets.  If regen is true, build "build.ninja" first if
+// possible, and if that build changes build.ninja, then return
+// BuildResult::Regen to signal to the caller that we need to start the whole
+// build over.
+fn build(
+    progress: &mut ConsoleProgress,
+    parallelism: usize,
+    regen: bool,
+    target_names: &[String],
+) -> anyhow::Result<BuildResult> {
+    let mut state = trace::scope("load::read", load::read)?;
+
+    let mut work = work::Work::new(
+        &mut state.graph,
+        &state.hashes,
+        &mut state.db,
+        progress,
+        state.pools,
+        parallelism,
+    );
+
+    if regen {
+        if let Some(target) = work.build_ninja_fileid() {
+            // Attempt to rebuild build.ninja.
+            work.want_fileid(target)?;
+            match trace::scope("work.run", || work.run())? {
+                None => return Ok(BuildResult::Failed),
+                Some(0) => {
+                    // build.ninja already up to date.
+                }
+                Some(_) => {
+                    // Regenerated build.ninja; start over.
+                    return Ok(BuildResult::Regen);
+                }
+            }
+        }
+    }
+
+    if !target_names.is_empty() {
+        for name in target_names {
+            work.want_file(name)?;
+        }
+    } else if !state.default.is_empty() {
+        for target in state.default {
+            work.want_fileid(target)?;
+        }
+    } else {
+        anyhow::bail!("no path specified and no default");
+    }
+
+    Ok(match trace::scope("work.run", || work.run())? {
+        None => BuildResult::Failed,
+        Some(n) => BuildResult::Success(n),
+    })
+}
 
 fn run() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
@@ -62,56 +129,30 @@ fn run() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
-    let load::State {
-        mut graph,
-        mut db,
-        default,
-        hashes: last_hashes,
-        pools,
-    } = trace::scope("load::read", load::read)?;
+    let mut progress = ConsoleProgress::new();
 
-    let mut targets = Vec::new();
-    for free in matches.free {
-        let id = match graph.get_file_id(&free) {
-            None => anyhow::bail!("unknown path requested: {:?}", free),
-            Some(id) => id,
-        };
-        targets.push(id);
-    }
-    if targets.is_empty() {
-        targets = default;
-    }
-    if targets.is_empty() {
-        anyhow::bail!("no path specified and no default");
+    // Build once with regen=true, and if the result says we regenerated the
+    // build file, reload and build everything a second time.
+    let mut result = build(&mut progress, parallelism, true, &matches.free)?;
+    if let BuildResult::Regen = result {
+        result = build(&mut progress, parallelism, false, &matches.free)?;
     }
 
-    let mut progress = progress::ConsoleProgress::new();
-
-    let mut work = work::Work::new(
-        &mut graph,
-        &last_hashes,
-        &mut db,
-        &mut progress,
-        pools,
-        parallelism,
-    );
-    trace::scope("want_file", || -> anyhow::Result<()> {
-        for target in targets {
-            work.want_file(target)?;
+    match result {
+        BuildResult::Regen => panic!("should not happen"),
+        BuildResult::Failed => {
+            // Don't print any summary, the failing task is enough info.
+            return Ok(1);
         }
-        Ok(())
-    })?;
-    let success = trace::scope("work.run", || work.run())?;
-    if !success {
-        // Don't print any summary, the failing task is enough info.
-        return Ok(1);
+        BuildResult::Success(0) => {
+            // Special case: don't print numbers when no work done.
+            println!("n2: no work to do");
+        }
+        BuildResult::Success(n) => {
+            println!("n2: ran {} tasks, now up to date", n);
+        }
     }
-    if progress.tasks_done == 0 {
-        // Special case: don't print numbers when no work done.
-        println!("n2: no work to do");
-    } else {
-        println!("n2: ran {} tasks, now up to date", progress.tasks_done);
-    }
+
     return Ok(0);
 }
 
