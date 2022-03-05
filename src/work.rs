@@ -376,9 +376,9 @@ impl<'a> Work<'a> {
         true
     }
 
-    /// Given a build that just finished, record any discovered deps and hash.
+    /// Given a task that just finished, record any discovered deps and hash.
     /// Postcondition: all outputs have been stat()ed.
-    fn record_finished(&mut self, id: BuildId, result: task::BuildResult) -> anyhow::Result<()> {
+    fn record_finished(&mut self, id: BuildId, result: task::TaskResult) -> anyhow::Result<()> {
         let deps = match result.discovered_deps {
             None => Vec::new(),
             Some(names) => names.iter().map(|name| self.graph.file_id(name)).collect(),
@@ -677,26 +677,29 @@ impl<'a> Work<'a> {
             // to date before we wait.  Otherwise the progress might seem like
             // we're doing nothing while we wait.
             self.progress.flush();
-            let fin = match self.runner.wait(Duration::from_millis(500)) {
+            let task = match self.runner.wait(Duration::from_millis(500)) {
                 None => continue, // timeout
-                Some(fin) => fin,
+                Some(task) => task,
             };
-            let build = self.graph.build(fin.id);
+            let build = self.graph.build(task.buildid);
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);
-                t.write_complete(desc, fin.tid + 1, fin.span.0, fin.span.1);
+                t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
             });
 
-            if !fin.result.success {
-                self.progress.failed(build, &fin.result.output);
+            if !task.result.success {
+                self.progress.failed(build, &task.result.output);
                 return Ok(None);
             }
 
             tasks_done += 1;
-            self.record_finished(fin.id, fin.result)?;
-            self.progress
-                .task_state(fin.id, self.graph.build(fin.id), BuildState::Done);
-            self.ready_dependents(fin.id);
+            self.record_finished(task.buildid, task.result)?;
+            self.progress.task_state(
+                task.buildid,
+                self.graph.build(task.buildid),
+                BuildState::Done,
+            );
+            self.ready_dependents(task.buildid);
         }
 
         Ok(Some(tasks_done))

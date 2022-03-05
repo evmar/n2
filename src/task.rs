@@ -14,17 +14,17 @@ use std::os::unix::process::ExitStatusExt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-pub struct FinishedBuild {
+pub struct FinishedTask {
     /// A (faked) "thread id", used to put different finished builds in different
     /// tracks in a performance trace.
     pub tid: usize,
-    pub id: BuildId,
+    pub buildid: BuildId,
     pub span: (Instant, Instant),
-    pub result: BuildResult,
+    pub result: TaskResult,
 }
 
 /// The result of executing a build step.
-pub struct BuildResult {
+pub struct TaskResult {
     pub success: bool,
     /// Console output.
     pub output: Vec<u8>,
@@ -51,9 +51,9 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
     Ok(deps)
 }
 
-/// Executes a build step as a subprocess.
+/// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
-fn run_build(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<BuildResult> {
+fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> {
     let mut cmd = std::process::Command::new("sh")
         .arg("-c")
         .arg(cmdline)
@@ -79,7 +79,7 @@ fn run_build(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<BuildResult
         }
     }
 
-    Ok(BuildResult {
+    Ok(TaskResult {
         success,
         output,
         discovered_deps,
@@ -117,8 +117,8 @@ impl ThreadIds {
 }
 
 pub struct Runner {
-    finished_send: mpsc::Sender<FinishedBuild>,
-    finished_recv: mpsc::Receiver<FinishedBuild>,
+    finished_send: mpsc::Sender<FinishedTask>,
+    finished_recv: mpsc::Receiver<FinishedTask>,
     pub running: usize,
     tids: ThreadIds,
     parallelism: usize,
@@ -149,36 +149,35 @@ impl Runner {
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
             let start = Instant::now();
-            let result =
-                run_build(&cmdline, depfile.as_deref()).unwrap_or_else(|err| BuildResult {
-                    success: false,
-                    output: err.to_string().into_bytes(),
-                    discovered_deps: None,
-                });
+            let result = run_task(&cmdline, depfile.as_deref()).unwrap_or_else(|err| TaskResult {
+                success: false,
+                output: err.to_string().into_bytes(),
+                discovered_deps: None,
+            });
             let finish = Instant::now();
 
-            let fin = FinishedBuild {
+            let task = FinishedTask {
                 tid,
-                id,
+                buildid: id,
                 span: (start, finish),
                 result,
             };
             // The send will only fail if the receiver disappeared, e.g. due to shutting down.
-            let _ = tx.send(fin);
+            let _ = tx.send(task);
         });
         self.running += 1;
     }
 
     /// Wait for a build to complete, with a timeout.
     /// If the timeout elapses return None.
-    pub fn wait(&mut self, dur: Duration) -> Option<FinishedBuild> {
-        let fin = match self.finished_recv.recv_timeout(dur) {
+    pub fn wait(&mut self, dur: Duration) -> Option<FinishedTask> {
+        let task = match self.finished_recv.recv_timeout(dur) {
             Err(mpsc::RecvTimeoutError::Timeout) => return None,
             // The unwrap() checks the recv() call, to panic on mpsc errors.
             r => r.unwrap(),
         };
-        self.tids.release(fin.tid);
+        self.tids.release(task.tid);
         self.running -= 1;
-        Some(fin)
+        Some(task)
     }
 }
