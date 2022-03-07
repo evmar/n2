@@ -63,7 +63,7 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
             Some(p) => deps.push(p),
         }
     }
-    scanner.expect('\n')?;
+    scanner.skip('\n');
     scanner.expect('\0')?;
 
     Ok(Deps { target, deps })
@@ -72,19 +72,30 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_parse() {
-        let mut scanner =
-            Scanner::new("build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n\0");
-        let deps = match parse(&mut scanner) {
+
+    fn must_parse<'a>(s: &'a str) -> Deps<'a> {
+        let mut scanner = Scanner::new(s);
+        match parse(&mut scanner) {
             Err(err) => {
                 println!("{}", scanner.format_parse_error("test", err));
                 panic!("failed parse");
             }
             Ok(d) => d,
-        };
+        }
+    }
+
+    #[test]
+    fn test_parse() {
+        let deps = must_parse("build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n\0");
         println!("{:?}", deps);
         assert_eq!(deps.target, "build/browse.o");
         assert_eq!(deps.deps.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_without_final_newline() {
+        let deps = must_parse("build/browse.o: src/browse.cc\0");
+        assert_eq!(deps.target, "build/browse.o");
+        assert_eq!(deps.deps.len(), 1);
     }
 }
