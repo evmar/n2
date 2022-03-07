@@ -63,7 +63,7 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
             Some(p) => deps.push(p),
         }
     }
-    scanner.expect('\n')?;
+    scanner.skip('\n');
     scanner.expect('\0')?;
 
     Ok(Deps { target, deps })
@@ -90,5 +90,12 @@ mod tests {
         println!("{:?}", deps);
         assert_eq!(deps.target, "build/browse.o");
         assert_eq!(deps.deps.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_without_final_newline() {
+        let deps = must_parse("build/browse.o: src/browse.cc\0");
+        assert_eq!(deps.target, "build/browse.o");
+        assert_eq!(deps.deps.len(), 1);
     }
 }
