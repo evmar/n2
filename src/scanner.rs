@@ -51,11 +51,16 @@ impl<'a> Scanner<'a> {
         self.next();
         c
     }
+    pub fn skip(&mut self, ch: char) -> bool {
+        if self.peek() == ch {
+            self.next();
+            return true;
+        }
+        false
+    }
 
     pub fn skip_spaces(&mut self) {
-        while self.peek() == ' ' {
-            self.next();
-        }
+        while self.skip(' ') {}
     }
 
     pub fn expect(&mut self, ch: char) -> ParseResult<()> {
