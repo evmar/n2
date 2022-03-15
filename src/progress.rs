@@ -41,11 +41,11 @@ pub trait Progress {
     /// Not called for every BuildId, just the ones that start and complete.
     fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState);
 
-    /// Called when a build has failed.
+    /// Called when a build has completed.
     /// TODO: maybe this should just be part of task_state?
     /// In particular, consider the case where builds output progress as they run,
     /// as well as the case where multiple build steps are allowed to fail.
-    fn failed(&mut self, build: &Build, output: &[u8]);
+    fn completed(&mut self, build: &Build, success: bool, output: &[u8]);
 
     /// Called when the overall build has completed (success or failure), to allow
     /// cleaning up the display.
@@ -119,12 +119,14 @@ impl Progress for ConsoleProgress {
         self.print();
     }
 
-    fn failed(&mut self, build: &Build, output: &[u8]) {
-        let message = build_message(build);
-        // If the user hit ctl-c, it may have printed something on the line.
-        // So \r to go to first column first, then the same clear we use elsewhere.
-        println!("\r\x1b[Jfailed: {}", message);
-        println!("{}", String::from_utf8_lossy(output));
+    fn completed(&mut self, build: &Build, success: bool, output: &[u8]) {
+        if !success {
+            let message = build_message(build);
+            // If the user hit ctl-c, it may have printed something on the line.
+            // So \r to go to first column first, then the same clear we use elsewhere.
+            println!("\r\x1b[Jfailed: {}", message);
+            println!("{}", String::from_utf8_lossy(output));
+        }
     }
 
     fn finish(&mut self) {
