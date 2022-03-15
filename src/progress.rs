@@ -74,11 +74,13 @@ pub struct ConsoleProgress {
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
+    /// Wether to print command lines of completed programs.
+    verbose: bool,
 }
 
 #[allow(clippy::new_without_default)]
 impl ConsoleProgress {
-    pub fn new() -> Self {
+    pub fn new(verbose: bool) -> Self {
         ConsoleProgress {
             // Act like our last update was now, so that we delay slightly
             // before our first print.  This reduces flicker in the case where
@@ -86,6 +88,7 @@ impl ConsoleProgress {
             last_update: Instant::now(),
             counts: StateCounts::new(),
             tasks: VecDeque::new(),
+            verbose: verbose,
         }
     }
 }
@@ -126,6 +129,8 @@ impl Progress for ConsoleProgress {
             // So \r to go to first column first, then the same clear we use elsewhere.
             println!("\r\x1b[Jfailed: {}", message);
             println!("{}", String::from_utf8_lossy(output));
+        } else if self.verbose {
+            println!("\r\x1b[J{}", build.cmdline.as_ref().unwrap());
         }
     }
 
