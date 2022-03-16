@@ -24,7 +24,7 @@ pub struct Build<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct Default {
-    pub target: String,
+    pub targets: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -236,11 +236,13 @@ impl<'a> Parser<'a> {
     }
 
     fn read_default(&mut self) -> ParseResult<Default> {
+        let mut targets = Vec::new();
         let target = match self.read_path()? {
             None => return self.scanner.parse_error("expected path"),
             Some(p) => p,
         };
-        Ok(Default { target })
+        targets.push(target);
+        Ok(Default { targets })
     }
 
     fn skip_comment(&mut self) -> ParseResult<()> {
@@ -397,7 +399,7 @@ mod tests {
         assert_eq!(
             ast,
             Statement::Default(Default {
-                target: "f:oo".to_string()
+                targets: vec!["f:oo".to_string()]
             })
         );
     }
