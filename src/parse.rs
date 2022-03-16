@@ -3,11 +3,13 @@
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
+#[derive(Debug, PartialEq)]
 pub struct Rule {
     pub name: String,
     pub vars: LazyVars,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Build<'a> {
     pub rule: &'a str,
     pub line: usize,
@@ -20,15 +22,18 @@ pub struct Build<'a> {
     pub vars: LazyVars,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Default<'a> {
     pub target: &'a str,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Pool<'a> {
     pub name: &'a str,
     pub depth: usize,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Statement<'a> {
     Rule(Rule),
     Build(Build<'a>),
@@ -386,9 +391,6 @@ mod tests {
     #[test]
     fn test_parse_default() {
         let ast = must_read("default foo\n");
-        match ast {
-            Statement::Default(Default { target }) => assert_eq!(target, "foo"),
-            _ => assert!(false),
-        }
+        assert_eq!(ast, Statement::Default(Default { target: "foo" }));
     }
 }

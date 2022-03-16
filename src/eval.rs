@@ -11,14 +11,14 @@ pub trait Env {
 }
 
 /// One token within an EvalString, either literal text or a variable reference.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum EvalPart<T: AsRef<str>> {
     Literal(T),
     VarRef(T),
 }
 
 /// A parsed but unexpanded variable-reference string, e.g. "cc $in -o $out".
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
 impl<T: AsRef<str>> EvalString<T> {
     pub fn new(parts: Vec<EvalPart<T>>) -> Self {
@@ -81,7 +81,7 @@ impl<'a> Env for Vars<'a> {
 /// For variables attached to a rule we keep them unexpanded in memory because
 /// they may be expanded in multiple different ways depending on which rule uses
 /// them.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LazyVars(Vec<(String, EvalString<String>)>);
 #[allow(clippy::new_without_default)]
 impl LazyVars {
