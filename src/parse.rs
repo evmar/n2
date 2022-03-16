@@ -363,3 +363,32 @@ impl<'a> Parser<'a> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn must_read<'a>(s: &'a str) -> Statement<'a> {
+        let scanner = Scanner::new(s);
+        let mut parser = Parser::new(scanner);
+        match parser.read() {
+            Err(err) => {
+                println!("{}", parser.format_parse_error("test", err));
+                panic!("failed parse");
+            }
+            Ok(None) => {
+                panic!("unexpected eof");
+            }
+            Ok(Some(d)) => d,
+        }
+    }
+
+    #[test]
+    fn test_parse_default() {
+        let ast = must_read("default foo\n");
+        match ast {
+            Statement::Default(Default { target }) => assert_eq!(target, "foo"),
+            _ => assert!(false),
+        }
+    }
+}
