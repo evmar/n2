@@ -20,6 +20,10 @@ pub struct Build<'a> {
     pub vars: LazyVars,
 }
 
+pub struct Default<'a> {
+    pub target: &'a str,
+}
+
 pub struct Pool<'a> {
     pub name: &'a str,
     pub depth: usize,
@@ -28,7 +32,7 @@ pub struct Pool<'a> {
 pub enum Statement<'a> {
     Rule(Rule),
     Build(Build<'a>),
-    Default(&'a str),
+    Default(Default<'a>),
     Include(String),
     Subninja(String),
     Pool(Pool<'a>),
@@ -64,7 +68,7 @@ impl<'a> Parser<'a> {
                     match ident {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
                         "build" => return Ok(Some(Statement::Build(self.read_build()?))),
-                        "default" => return Ok(Some(Statement::Default(self.read_ident()?))),
+                        "default" => return Ok(Some(Statement::Default(self.read_default()?))),
                         "include" => {
                             let path = match self.read_path()? {
                                 None => return self.scanner.parse_error("expected path"),
@@ -224,6 +228,11 @@ impl<'a> Parser<'a> {
             order_only_ins,
             vars,
         })
+    }
+
+    fn read_default(&mut self) -> ParseResult<Default<'a>> {
+        let target = self.read_ident()?;
+        Ok(Default { target })
     }
 
     fn skip_comment(&mut self) -> ParseResult<()> {
