@@ -84,6 +84,7 @@ fn run() -> anyhow::Result<i32> {
     opts.optopt("d", "debug", "debugging tools", "TOOL");
     opts.optopt("j", "", "parallelism (has good default)", "NUM");
     opts.optflag("h", "help", "");
+    opts.optflag("v", "verbose", "print executed command lines");
     if fake_ninja_compat {
         opts.optopt("t", "", "tool", "TOOL");
         opts.optflag("", "version", "print fake ninja version");
@@ -129,7 +130,7 @@ fn run() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
-    let mut progress = ConsoleProgress::new();
+    let mut progress = ConsoleProgress::new(matches.opt_present("v"));
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.

@@ -41,11 +41,11 @@ pub trait Progress {
     /// Not called for every BuildId, just the ones that start and complete.
     fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState);
 
-    /// Called when a build has failed.
+    /// Called when a build has completed.
     /// TODO: maybe this should just be part of task_state?
     /// In particular, consider the case where builds output progress as they run,
     /// as well as the case where multiple build steps are allowed to fail.
-    fn failed(&mut self, build: &Build, output: &[u8]);
+    fn completed(&mut self, build: &Build, success: bool, output: &[u8]);
 
     /// Called when the overall build has completed (success or failure), to allow
     /// cleaning up the display.
@@ -74,11 +74,13 @@ pub struct ConsoleProgress {
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
+    /// Wether to print command lines of completed programs.
+    verbose: bool,
 }
 
 #[allow(clippy::new_without_default)]
 impl ConsoleProgress {
-    pub fn new() -> Self {
+    pub fn new(verbose: bool) -> Self {
         ConsoleProgress {
             // Act like our last update was now, so that we delay slightly
             // before our first print.  This reduces flicker in the case where
@@ -86,6 +88,7 @@ impl ConsoleProgress {
             last_update: Instant::now(),
             counts: StateCounts::new(),
             tasks: VecDeque::new(),
+            verbose: verbose,
         }
     }
 }
@@ -119,12 +122,16 @@ impl Progress for ConsoleProgress {
         self.print();
     }
 
-    fn failed(&mut self, build: &Build, output: &[u8]) {
-        let message = build_message(build);
-        // If the user hit ctl-c, it may have printed something on the line.
-        // So \r to go to first column first, then the same clear we use elsewhere.
-        println!("\r\x1b[Jfailed: {}", message);
-        println!("{}", String::from_utf8_lossy(output));
+    fn completed(&mut self, build: &Build, success: bool, output: &[u8]) {
+        if !success {
+            let message = build_message(build);
+            // If the user hit ctl-c, it may have printed something on the line.
+            // So \r to go to first column first, then the same clear we use elsewhere.
+            println!("\r\x1b[Jfailed: {}", message);
+            println!("{}", String::from_utf8_lossy(output));
+        } else if self.verbose {
+            println!("\r\x1b[J{}", build.cmdline.as_ref().unwrap());
+        }
     }
 
     fn finish(&mut self) {

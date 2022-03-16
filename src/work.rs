@@ -693,8 +693,9 @@ impl<'a> Work<'a> {
                 t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
             });
 
+            self.progress
+                .completed(build, task.result.success, &task.result.output);
             if !task.result.success {
-                self.progress.failed(build, &task.result.output);
                 return Ok(None);
             }
 
