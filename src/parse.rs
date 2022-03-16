@@ -23,8 +23,8 @@ pub struct Build<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Default<'a> {
-    pub target: &'a str,
+pub struct Default {
+    pub target: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -37,7 +37,7 @@ pub struct Pool<'a> {
 pub enum Statement<'a> {
     Rule(Rule),
     Build(Build<'a>),
-    Default(Default<'a>),
+    Default(Default),
     Include(String),
     Subninja(String),
     Pool(Pool<'a>),
@@ -235,8 +235,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn read_default(&mut self) -> ParseResult<Default<'a>> {
-        let target = self.read_ident()?;
+    fn read_default(&mut self) -> ParseResult<Default> {
+        let target = match self.read_path()? {
+            None => return self.scanner.parse_error("expected path"),
+            Some(p) => p,
+        };
         Ok(Default { target })
     }
 
@@ -390,7 +393,12 @@ mod tests {
 
     #[test]
     fn test_parse_default() {
-        let ast = must_read("default foo\n");
-        assert_eq!(ast, Statement::Default(Default { target: "foo" }));
+        let ast = must_read("default f$:oo\n");
+        assert_eq!(
+            ast,
+            Statement::Default(Default {
+                target: "f:oo".to_string()
+            })
+        );
     }
 }
