@@ -237,11 +237,14 @@ impl<'a> Parser<'a> {
 
     fn read_default(&mut self) -> ParseResult<Default> {
         let mut targets = Vec::new();
-        let target = match self.read_path()? {
-            None => return self.scanner.parse_error("expected path"),
-            Some(p) => p,
-        };
-        targets.push(target);
+        while let Some(target) = self.read_path()? {
+            targets.push(target);
+            self.scanner.skip_spaces();
+        }
+        if targets.is_empty() {
+          return self.scanner.parse_error("expected path");
+        }
+        self.scanner.expect('\n')?;
         Ok(Default { targets })
     }
 
@@ -395,11 +398,11 @@ mod tests {
 
     #[test]
     fn test_parse_default() {
-        let ast = must_read("default f$:oo\n");
+        let ast = must_read("default f$:oo bar \n");
         assert_eq!(
             ast,
             Statement::Default(Default {
-                targets: vec!["f:oo".to_string()]
+                targets: vec!["f:oo".to_string(), "bar".to_string()]
             })
         );
     }
