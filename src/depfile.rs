@@ -57,11 +57,8 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
     };
     scanner.expect(':')?;
     let mut deps = Vec::new();
-    loop {
-        match read_path(scanner)? {
-            None => break,
-            Some(p) => deps.push(p),
-        }
+    while let Some(p) = read_path(scanner)? {
+        deps.push(p);
     }
     scanner.skip('\n');
     scanner.expect('\0')?;
