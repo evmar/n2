@@ -149,27 +149,25 @@ impl<'a> Parser<'a> {
         Ok(Pool { name, depth })
     }
 
-    fn read_build(&mut self) -> ParseResult<Build<'a>> {
-        let line = self.scanner.line;
-        let mut outs = Vec::new();
+    fn read_paths_to(&mut self, v: &mut Vec<String>) -> ParseResult<()> {
         loop {
             self.scanner.skip_spaces();
             match self.read_path()? {
-                Some(path) => outs.push(path),
-                None => break,
+                Some(path) => v.push(path),
+                None => break Ok(()),
             }
         }
+    }
+
+    fn read_build(&mut self) -> ParseResult<Build<'a>> {
+        let line = self.scanner.line;
+        let mut outs = Vec::new();
+        self.read_paths_to(&mut outs)?;
         let explicit_outs = outs.len();
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            loop {
-                self.scanner.skip_spaces();
-                match self.read_path()? {
-                    Some(path) => outs.push(path),
-                    None => break,
-                }
-            }
+            self.read_paths_to(&mut outs)?;
         }
 
         self.scanner.expect(':')?;
@@ -177,13 +175,7 @@ impl<'a> Parser<'a> {
         let rule = self.read_ident()?;
 
         let mut ins = Vec::new();
-        loop {
-            self.scanner.skip_spaces();
-            match self.read_path()? {
-                Some(path) => ins.push(path),
-                None => break,
-            }
-        }
+        self.read_paths_to(&mut ins)?;
         let explicit_ins = ins.len();
 
         if self.scanner.peek() == '|' {
@@ -191,13 +183,7 @@ impl<'a> Parser<'a> {
             if self.scanner.peek() == '|' {
                 self.scanner.back();
             } else {
-                loop {
-                    self.scanner.skip_spaces();
-                    match self.read_path()? {
-                        Some(path) => ins.push(path),
-                        None => break,
-                    }
-                }
+                self.read_paths_to(&mut ins)?;
             }
         }
         let implicit_ins = ins.len() - explicit_ins;
@@ -205,13 +191,7 @@ impl<'a> Parser<'a> {
         if self.scanner.peek() == '|' {
             self.scanner.next();
             self.scanner.expect('|')?;
-            loop {
-                self.scanner.skip_spaces();
-                match self.read_path()? {
-                    Some(path) => ins.push(path),
-                    None => break,
-                }
-            }
+            self.read_paths_to(&mut ins)?;
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
 
