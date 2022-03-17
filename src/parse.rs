@@ -150,13 +150,12 @@ impl<'a> Parser<'a> {
     }
 
     fn read_paths_to(&mut self, v: &mut Vec<String>) -> ParseResult<()> {
-        loop {
+        self.scanner.skip_spaces();
+        while let Some(path) = self.read_path()? {
+            v.push(path);
             self.scanner.skip_spaces();
-            match self.read_path()? {
-                Some(path) => v.push(path),
-                None => break Ok(()),
-            }
         }
+        Ok(())
     }
 
     fn read_build(&mut self) -> ParseResult<Build<'a>> {
