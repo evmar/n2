@@ -54,7 +54,7 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
 /// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
 fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> {
-    let mut cmd = std::process::Command::new("sh")
+    let mut cmd = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(cmdline)
         .output()?;
