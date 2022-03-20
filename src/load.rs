@@ -38,7 +38,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 struct Loader {
     graph: graph::Graph,
     default: Vec<FileId>,
-    rules: HashMap<String, parse::Rule>,
+    rules: HashMap<String, eval::LazyVars>,
     pools: Vec<(String, usize)>,
 }
 
@@ -51,13 +51,9 @@ impl Loader {
             pools: Vec::new(),
         };
 
-        loader.rules.insert(
-            "phony".to_owned(),
-            parse::Rule {
-                name: "phony".to_owned(),
-                vars: eval::LazyVars::new(),
-            },
-        );
+        loader
+            .rules
+            .insert("phony".to_owned(), eval::LazyVars::new());
 
         loader
     }
@@ -93,12 +89,12 @@ impl Loader {
             build: &build,
         };
         let build_vars = &b.vars;
-        let envs: [&dyn eval::Env; 4] = [&implicit_vars, build_vars, &rule.vars, env];
+        let envs: [&dyn eval::Env; 4] = [&implicit_vars, build_vars, rule, env];
 
         let lookup = |key: &str| {
             build_vars
                 .get(key)
-                .or_else(|| rule.vars.get(key))
+                .or_else(|| rule.get(key))
                 .map(|var| var.evaluate(&envs))
         };
 
@@ -139,20 +135,20 @@ impl Loader {
                 Some(s) => s,
             };
             match stmt {
-                Statement::Include(f) => trace::scope("include", || self.read_file(&f))?,
+                Statement::Include(path) => trace::scope("include", || self.read_file(&path))?,
                 // TODO: implement scoping for subninja
-                Statement::Subninja(f) => trace::scope("subninja", || self.read_file(&f))?,
-                Statement::Default(ds) => {
+                Statement::Subninja(path) => trace::scope("subninja", || self.read_file(&path))?,
+                Statement::Default(defaults) => {
                     let graph = &mut self.graph;
                     self.default
-                        .extend(ds.into_iter().map(|f| graph.file_id(f)));
+                        .extend(defaults.into_iter().map(|f| graph.file_id(f)));
                 }
-                Statement::Rule(r) => {
-                    self.rules.insert(r.name.clone(), r);
+                Statement::Rule(rule) => {
+                    self.rules.insert(rule.name.to_owned(), rule.vars);
                 }
-                Statement::Build(b) => self.add_build(filename.clone(), &parser.vars, b)?,
-                Statement::Pool(p) => {
-                    self.pools.push((p.name.to_string(), p.depth));
+                Statement::Build(build) => self.add_build(filename.clone(), &parser.vars, build)?,
+                Statement::Pool(pool) => {
+                    self.pools.push((pool.name.to_string(), pool.depth));
                 }
             };
         }

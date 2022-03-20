@@ -4,8 +4,8 @@ use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
 #[derive(Debug)]
-pub struct Rule {
-    pub name: String,
+pub struct Rule<'a> {
+    pub name: &'a str,
     pub vars: LazyVars,
 }
 
@@ -30,7 +30,7 @@ pub struct Pool<'a> {
 
 #[derive(Debug)]
 pub enum Statement<'a> {
-    Rule(Rule),
+    Rule(Rule<'a>),
     Build(Build<'a>),
     Default(Vec<String>),
     Include(String),
@@ -113,14 +113,11 @@ impl<'a> Parser<'a> {
         Ok(vars)
     }
 
-    fn read_rule(&mut self) -> ParseResult<Rule> {
+    fn read_rule(&mut self) -> ParseResult<Rule<'a>> {
         let name = self.read_ident()?;
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
-        Ok(Rule {
-            name: name.to_owned(),
-            vars,
-        })
+        Ok(Rule { name, vars })
     }
 
     fn read_pool(&mut self) -> ParseResult<Pool<'a>> {
