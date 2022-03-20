@@ -1,6 +1,7 @@
 extern crate getopts;
 
 use anyhow::anyhow;
+use n2::fs;
 use n2::load;
 use n2::progress::ConsoleProgress;
 use n2::trace;
@@ -28,9 +29,11 @@ fn build(
     regen: bool,
     target_names: &[String],
 ) -> anyhow::Result<BuildResult> {
-    let mut state = trace::scope("load::read", load::read)?;
+    let fs = fs::RealFileSystem {};
+    let mut state = trace::scope("load::read", || load::read(&fs))?;
 
     let mut work = work::Work::new(
+        &fs,
         &mut state.graph,
         &state.hashes,
         &mut state.db,

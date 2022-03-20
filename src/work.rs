@@ -1,6 +1,8 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::db;
+use crate::fs;
+use crate::fs::FileSystem;
 use crate::graph::*;
 use crate::progress;
 use crate::progress::Progress;
@@ -299,6 +301,7 @@ impl BuildStates {
 }
 
 pub struct Work<'a> {
+    fs: &'a dyn FileSystem,
     graph: &'a mut Graph,
     db: &'a mut db::Writer,
 
@@ -311,6 +314,7 @@ pub struct Work<'a> {
 
 impl<'a> Work<'a> {
     pub fn new(
+        fs: &'a dyn FileSystem,
         graph: &'a mut Graph,
         last_hashes: &'a Hashes,
         db: &'a mut db::Writer,
@@ -320,6 +324,7 @@ impl<'a> Work<'a> {
     ) -> Self {
         let file_state = FileState::new(graph);
         Work {
+            fs,
             graph,
             db,
             progress,
@@ -406,10 +411,10 @@ impl<'a> Work<'a> {
                             file.name
                         );
                     }
-                    self.file_state.restat(id, &file.name)?
+                    self.file_state.restat(self.fs, id, &file.name)?
                 }
             };
-            if mtime == MTime::Missing {
+            if mtime == fs::MTime::Missing {
                 return Ok(Some(id));
             }
         }
@@ -443,8 +448,8 @@ impl<'a> Work<'a> {
         let mut output_missing = false;
         for &id in build.outs() {
             let file = self.graph.file(id);
-            let mtime = self.file_state.restat(id, &file.name)?;
-            if mtime == MTime::Missing {
+            let mtime = self.file_state.restat(self.fs, id, &file.name)?;
+            if mtime == fs::MTime::Missing {
                 output_missing = true;
             }
         }
@@ -525,10 +530,10 @@ impl<'a> Work<'a> {
                                 build.location, &file.name
                             );
                         }
-                        self.file_state.restat(id, &file.name)?
+                        self.file_state.restat(self.fs, id, &file.name)?
                     }
                 };
-                if mtime == MTime::Missing {
+                if mtime == fs::MTime::Missing {
                     if workaround_missing_phony_deps {
                         continue;
                     }
@@ -546,9 +551,9 @@ impl<'a> Work<'a> {
                 }
                 let mtime = match self.file_state.get(id) {
                     Some(mtime) => mtime,
-                    None => self.file_state.restat(id, &file.name)?,
+                    None => self.file_state.restat(self.fs, id, &file.name)?,
                 };
-                if mtime == MTime::Missing {
+                if mtime == fs::MTime::Missing {
                     if workaround_missing_phony_deps {
                         continue;
                     }
@@ -574,8 +579,8 @@ impl<'a> Work<'a> {
             if self.file_state.get(id).is_some() {
                 panic!("expected no file state for {}", file.name);
             }
-            let mtime = self.file_state.restat(id, &file.name)?;
-            if mtime == MTime::Missing {
+            let mtime = self.file_state.restat(self.fs, id, &file.name)?;
+            if mtime == fs::MTime::Missing {
                 return Ok(true);
             }
         }
@@ -711,6 +716,8 @@ impl<'a> Work<'a> {
         Ok(Some(tasks_done))
     }
 
+    /// Returns a failed Result on n2-level error, None if a task failed,
+    /// and the number of tasks run (possibly 0) on success.
     pub fn run(&mut self) -> anyhow::Result<Option<usize>> {
         let result = self.run_without_cleanup();
         // Clean up progress before returning.

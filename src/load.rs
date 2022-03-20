@@ -1,5 +1,6 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
+use crate::fs::FileSystem;
 use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::scanner::Scanner;
@@ -35,16 +36,18 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 }
 
 /// Internal state used while loading.
-struct Loader {
+struct Loader<'a> {
+    fs: &'a dyn FileSystem,
     graph: graph::Graph,
     default: Vec<FileId>,
     rules: HashMap<String, parse::Rule>,
     pools: Vec<(String, usize)>,
 }
 
-impl Loader {
-    fn new() -> Self {
+impl<'a> Loader<'a> {
+    fn new(fs: &'a dyn FileSystem) -> Self {
         let mut loader = Loader {
+            fs,
             graph: graph::Graph::new(),
             default: Vec::new(),
             rules: HashMap::new(),
@@ -62,10 +65,10 @@ impl Loader {
         loader
     }
 
-    fn add_build<'a>(
+    fn add_build<'e>(
         &mut self,
         filename: std::rc::Rc<String>,
-        env: &eval::Vars<'a>,
+        env: &eval::Vars<'e>,
         b: parse::Build,
     ) -> anyhow::Result<()> {
         let mut build = graph::Build::new(graph::FileLoc {
@@ -116,7 +119,7 @@ impl Loader {
     }
 
     fn read_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let bytes = match trace::scope("fs::read", || std::fs::read(path)) {
+        let bytes = match trace::scope("fs::read", || self.fs.read(path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path, e),
         };
@@ -166,8 +169,8 @@ pub struct State {
 }
 
 /// Load build.ninja/.n2_db and return the loaded build graph and state.
-pub fn read() -> anyhow::Result<State> {
-    let mut loader = Loader::new();
+pub fn read(fs: &dyn FileSystem) -> anyhow::Result<State> {
+    let mut loader = Loader::new(fs);
     trace::scope("loader.read_file", || loader.read_file("build.ninja"))?;
     let mut hashes = graph::Hashes::new(&loader.graph);
     let db = trace::scope("db::open", || {
@@ -186,7 +189,9 @@ pub fn read() -> anyhow::Result<State> {
 /// Parse a single file's content.
 #[cfg(test)]
 pub fn parse(name: &str, content: Vec<u8>) -> anyhow::Result<graph::Graph> {
-    let mut loader = Loader::new();
+    // TODO: this might access disk if the input build file has 'include's etc.
+    let mut fs = crate::fs::RealFileSystem::new();
+    let mut loader = Loader::new(&mut fs);
     trace::scope("loader.read_file", || loader.parse(name, content))?;
     Ok(loader.graph)
 }
