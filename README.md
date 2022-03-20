@@ -1,28 +1,19 @@
 # n2, an alternative ninja implementation
 
 n2 (pronounced "into") implements enough of [ninja](https://ninja-build.org/)
-to at least successfully build a couple of projects that build with ninja.
+to successfully build some projects that build with ninja.
 
 I wrote it to explore some alternative ideas I had around how to structure
 a build system.
 
 ## Differences from Ninja
 
+n2 is [missing many Ninja features](doc/missing.md).
+
+n2 does some things Ninja doesn't:
+
 - Builds start tasks as soon as an out of date one is found, rather than
   gathering all the out of date tasks before executing.
 - Fancier status output, modeled after Bazel.
 - `-d trace` generates a performance trace as used by Chrome's `about:tracing`
   or alternatives (speedscope, perfetto).
-
-## Missing features
-
-Known missing pieces of real Ninja include:
-
-- Windows support, including MVSC-related features;
-- RSP files;
-- Dynamic dependencies;
-- Other [rule variables](https://ninja-build.org/manual.html#ref_rule) such as
-  `in_newline`;
-- Many command-line flags such as the various `-t` tools.
-
-There are likely many more pieces I overlooked.
