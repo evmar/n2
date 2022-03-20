@@ -1,5 +1,7 @@
 # n2, an alternative ninja implementation
 
+![CI status](https://github.com/evmar/n2/actions/workflows/ci.yml/badge.svg)
+
 n2 (pronounced "into") implements enough of [ninja](https://ninja-build.org/)
 to successfully build some projects that build with ninja.
 
