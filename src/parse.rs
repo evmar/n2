@@ -232,12 +232,12 @@ impl<'a> Parser<'a> {
 
     fn read_default(&mut self) -> ParseResult<Vec<String>> {
         let mut defaults = Vec::new();
-        loop {
-            match self.read_path()? {
-                Some(path) => defaults.push(path),
-                None => break,
-            }
+        while let Some(path) = self.read_path()? {
+            defaults.push(path);
             self.scanner.skip_spaces();
+        }
+        if defaults.is_empty() {
+            return self.scanner.parse_error("expected path");
         }
         self.scanner.expect('\n')?;
         Ok(defaults)
