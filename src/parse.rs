@@ -3,11 +3,13 @@
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
+#[derive(Debug)]
 pub struct Rule {
     pub name: String,
     pub vars: LazyVars,
 }
 
+#[derive(Debug)]
 pub struct Build<'a> {
     pub rule: &'a str,
     pub line: usize,
@@ -20,15 +22,17 @@ pub struct Build<'a> {
     pub vars: LazyVars,
 }
 
+#[derive(Debug)]
 pub struct Pool<'a> {
     pub name: &'a str,
     pub depth: usize,
 }
 
+#[derive(Debug)]
 pub enum Statement<'a> {
     Rule(Rule),
     Build(Build<'a>),
-    Default(&'a str),
+    Default(Vec<String>),
     Include(String),
     Subninja(String),
     Pool(Pool<'a>),
@@ -64,7 +68,7 @@ impl<'a> Parser<'a> {
                     match ident {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
                         "build" => return Ok(Some(Statement::Build(self.read_build()?))),
-                        "default" => return Ok(Some(Statement::Default(self.read_ident()?))),
+                        "default" => return Ok(Some(Statement::Default(self.read_default()?))),
                         "include" => {
                             let path = match self.read_path()? {
                                 None => return self.scanner.parse_error("expected path"),
@@ -226,6 +230,19 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn read_default(&mut self) -> ParseResult<Vec<String>> {
+        let mut defaults = Vec::new();
+        loop {
+            match self.read_path()? {
+                Some(path) => defaults.push(path),
+                None => break,
+            }
+            self.scanner.skip_spaces();
+        }
+        self.scanner.expect('\n')?;
+        Ok(defaults)
+    }
+
     fn skip_comment(&mut self) -> ParseResult<()> {
         loop {
             match self.scanner.read() {
@@ -352,5 +369,26 @@ impl<'a> Parser<'a> {
                 EvalPart::VarRef(ident)
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_defaults() {
+        let mut parser = Parser::new(Scanner::new(
+            "
+var = 3
+default a b$var c
+\0",
+        ));
+        let default = match parser.read().unwrap().unwrap() {
+            Statement::Default(d) => d,
+            s => panic!("expected default, got {:?}", s),
+        };
+        assert_eq!(default, vec!["a", "b3", "c"]);
+        println!("{:?}", default);
     }
 }

@@ -142,7 +142,11 @@ impl Loader {
                 Statement::Include(f) => trace::scope("include", || self.read_file(&f))?,
                 // TODO: implement scoping for subninja
                 Statement::Subninja(f) => trace::scope("subninja", || self.read_file(&f))?,
-                Statement::Default(f) => self.default.push(self.graph.file_id(f)),
+                Statement::Default(ds) => {
+                    let graph = &mut self.graph;
+                    self.default
+                        .extend(ds.into_iter().map(|f| graph.file_id(f)));
+                }
                 Statement::Rule(r) => {
                     self.rules.insert(r.name.clone(), r);
                 }
