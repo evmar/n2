@@ -15,6 +15,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Cargo cache
+      uses: actions/cache@v2
+      with:
+        key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+        path: ~/.cargo/registry
     - name: Build
       run: cargo build --verbose
     - name: Run tests
