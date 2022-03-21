@@ -1,6 +1,8 @@
 //! The n2 database stores information about previous builds for determining
 //! which files are up to date.
 
+use crate::densemap;
+use crate::densemap::DenseMap;
 use crate::graph::BuildId;
 use crate::graph::FileId;
 use crate::graph::Graph;
@@ -16,20 +18,29 @@ use std::io::Write;
 
 /// Files are identified by integers that are stable across n2 executions.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct Id(usize);
-
+pub struct Id(u32);
+impl densemap::Index for Id {
+    fn index(&self) -> usize {
+        self.0 as usize
+    }
+}
+impl From<usize> for Id {
+    fn from(u: usize) -> Id {
+        Id(u as u32)
+    }
+}
 /// The loaded state of a database, as needed to make updates to the stored
 /// state.  Other state is directly loaded into the build graph.
 pub struct IdMap {
     /// Maps db::Id to FileId.
-    fileids: Vec<FileId>,
+    fileids: DenseMap<Id, FileId>,
     /// Maps FileId to db::Id.
     db_ids: HashMap<FileId, Id>,
 }
 impl IdMap {
     pub fn new() -> Self {
         IdMap {
-            fileids: Vec::new(),
+            fileids: DenseMap::new(),
             db_ids: HashMap::new(),
         }
     }
@@ -131,9 +142,8 @@ impl Writer {
         let id = match self.ids.db_ids.get(&fileid) {
             Some(&id) => id,
             None => {
-                let id = Id(self.ids.fileids.len());
+                let id = self.ids.fileids.push(fileid);
                 self.ids.db_ids.insert(fileid, id);
-                self.ids.fileids.push(fileid);
                 self.write_file(&graph.file(fileid).name)?;
                 id
             }
@@ -205,7 +215,7 @@ impl<'a> BReader<'a> {
     }
 
     fn read_id(&mut self) -> std::io::Result<Id> {
-        self.read_u24().map(|n| Id(n as usize))
+        self.read_u24().map(|n| Id(n as u32))
     }
 
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {
@@ -235,9 +245,8 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
         if len & mask == 0 {
             let name = r.read_str(len as usize)?;
             let fileid = graph.file_id(name);
-            let dbid = Id(ids.fileids.len());
+            let dbid = ids.fileids.push(fileid);
             ids.db_ids.insert(fileid, dbid);
-            ids.fileids.push(fileid);
         } else {
             len &= !mask;
 
@@ -246,7 +255,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
             let mut bids = HashSet::new();
             for _ in 0..len {
                 let id = r.read_id()?;
-                if let Some(bid) = graph.file(ids.fileids[id.0]).input {
+                if let Some(bid) = graph.file(*ids.fileids.get(id)).input {
                     bids.insert(bid);
                 }
             }
@@ -255,7 +264,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
             let mut deps = Vec::new();
             for _ in 0..len {
                 let id = r.read_id()?;
-                deps.push(ids.fileids[id.0]);
+                deps.push(*ids.fileids.get(id));
             }
 
             let hash = Hash(r.read_u64()?);
