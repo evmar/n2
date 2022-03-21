@@ -13,29 +13,29 @@ pub struct Hash(pub u64);
 
 /// Id for File nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct FileId(usize);
+pub struct FileId(u32);
 impl densemap::Index for FileId {
     fn index(&self) -> usize {
-        self.0
+        self.0 as usize
     }
 }
 impl From<usize> for FileId {
     fn from(u: usize) -> FileId {
-        FileId(u)
+        FileId(u as u32)
     }
 }
 
 /// Id for Build nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct BuildId(usize);
+pub struct BuildId(u32);
 impl densemap::Index for BuildId {
     fn index(&self) -> usize {
-        self.0
+        self.0 as usize
     }
 }
 impl From<usize> for BuildId {
     fn from(u: usize) -> BuildId {
-        BuildId(u)
+        BuildId(u as u32)
     }
 }
 
