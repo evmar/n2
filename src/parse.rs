@@ -43,6 +43,36 @@ pub struct Parser<'a> {
     pub vars: Vars<'a>,
 }
 
+/// Baseline implementation of is_ident_char.
+#[cfg(test)]
+fn is_ident_char_baseline(c: u8) -> bool {
+    match c as char {
+        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' => true,
+        _ => false,
+    }
+}
+
+/// Lookup table implementation of is_ident_char.  Produces same output as
+/// _baseline version.  256-entry table is encoded as 4 64-bit integers.
+/// See gen_lookup_table.py for how it was generated.
+fn is_ident_char(c: u8) -> bool {
+    let lookup: [u64; 4] = [0x3ff600000000000, 0x7fffffe87fffffe, 0x0, 0x0];
+    (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
+}
+
+#[cfg(test)]
+fn is_path_char_baseline(c: u8) -> bool {
+    match c as char {
+        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' => true,
+        _ => false,
+    }
+}
+
+fn is_path_char(c: u8) -> bool {
+    let lookup: [u64; 4] = [0x3fff80000000000, 0x7fffffe87fffffe, 0x0, 0x0];
+    (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
+}
+
 impl<'a> Parser<'a> {
     pub fn new(scanner: Scanner<'a>) -> Parser<'a> {
         Parser {
@@ -234,15 +264,8 @@ impl<'a> Parser<'a> {
 
     fn read_ident(&mut self) -> ParseResult<&'a str> {
         let start = self.scanner.ofs;
-        loop {
-            match self.scanner.read() {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' => {}
-                _ => {
-                    self.scanner.back();
-                    break;
-                }
-            }
-        }
+        while is_ident_char(self.scanner.read() as u8) {}
+        self.scanner.back();
         let end = self.scanner.ofs;
         if end == start {
             return self.scanner.parse_error("failed to scan ident");
@@ -279,34 +302,36 @@ impl<'a> Parser<'a> {
     fn read_path(&mut self) -> ParseResult<Option<String>> {
         let mut path = String::with_capacity(64);
         loop {
-            match self.scanner.read() {
-                '\0' => {
-                    self.scanner.back();
-                    return self.scanner.parse_error("unexpected EOF");
-                }
-                '$' => {
-                    let part = self.read_escape()?;
-                    match part {
-                        EvalPart::Literal(l) => path.push_str(l),
-                        EvalPart::VarRef(v) => {
-                            if let Some(v) = self.vars.get(v) {
-                                path.push_str(v);
+            let c = self.scanner.read();
+            if is_path_char(c as u8) {
+                path.push(c);
+            } else {
+                match c {
+                    '\0' => {
+                        self.scanner.back();
+                        return self.scanner.parse_error("unexpected EOF");
+                    }
+                    '$' => {
+                        let part = self.read_escape()?;
+                        match part {
+                            EvalPart::Literal(l) => path.push_str(l),
+                            EvalPart::VarRef(v) => {
+                                if let Some(v) = self.vars.get(v) {
+                                    path.push_str(v);
+                                }
                             }
                         }
                     }
-                }
-                ':' | '|' | ' ' | '\n' => {
-                    self.scanner.back();
-                    break;
-                }
-                c @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+') => {
-                    path.push(c);
-                }
-                c => {
-                    self.scanner.back();
-                    return self
-                        .scanner
-                        .parse_error(format!("unexpected character {:?}", c));
+                    ':' | '|' | ' ' | '\n' => {
+                        self.scanner.back();
+                        break;
+                    }
+                    c => {
+                        self.scanner.back();
+                        return self
+                            .scanner
+                            .parse_error(format!("unexpected character {:?}", c));
+                    }
                 }
             }
         }
@@ -366,5 +391,24 @@ default a b$var c
         };
         assert_eq!(default, vec!["a", "b3", "c"]);
         println!("{:?}", default);
+    }
+
+    #[test]
+    fn lookup_tables_match_baseline() {
+        for i in (0 as u8)..=255 {
+            assert_eq!(
+                is_ident_char(i),
+                is_ident_char_baseline(i),
+                "mismatch at {}",
+                i
+            );
+
+            assert_eq!(
+                is_path_char(i),
+                is_path_char_baseline(i),
+                "mismatch at {}",
+                i
+            );
+        }
     }
 }
