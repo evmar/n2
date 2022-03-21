@@ -62,8 +62,27 @@ impl std::fmt::Display for FileLoc {
     }
 }
 
+/// Input files to a Build.
+pub struct BuildIns {
+    /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
+    /// This is mostly to simplify some of the iteration and is a little more
+    /// memory efficient than three separate Vecs, but it is kept internal to
+    /// Build and only exposed via methods on Build.
+    pub ids: Vec<FileId>,
+    pub explicit: usize,
+    pub implicit: usize,
+    // order_only count implied by other counts.
+    // pub order_only: usize,
+}
+
+/// Output files from a Build.
+pub struct BuildOuts {
+    /// Similar to ins, we keep both explicit and implicit outs in one Vec.
+    pub ids: Vec<FileId>,
+    pub explicit: usize,
+}
+
 /// A single build action, generating File outputs from File inputs with a command.
-#[derive(Debug)]
 pub struct Build {
     /// Source location this Build was declared.
     pub location: FileLoc,
@@ -80,68 +99,42 @@ pub struct Build {
     /// Pool to execute this build in, if any.
     pub pool: Option<String>,
 
-    /// Input files.
-    /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
-    /// This is mostly to simplify some of the iteration and is a little more
-    /// memory efficient than three separate Vecs, but it is kept internal to
-    /// Build and only exposed via different methods like .dirtying_ins() below.
-    ins: Vec<FileId>,
-    explicit_ins: usize,
-    implicit_ins: usize,
-    order_only_ins: usize,
+    pub ins: BuildIns,
 
     /// Additional inputs discovered from a previous build.
     discovered_ins: Vec<FileId>,
 
     /// Output files.
-    /// Similar to ins, we keep both explicit and implicit outs in one Vec.
-    outs: Vec<FileId>,
-    explicit_outs: usize,
+    pub outs: BuildOuts,
 }
 impl Build {
-    pub fn new(loc: FileLoc) -> Self {
+    pub fn new(loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
         Build {
             location: loc,
             desc: None,
             cmdline: None,
             depfile: None,
             pool: None,
-            ins: Vec::new(),
-            explicit_ins: 0,
-            implicit_ins: 0,
-            order_only_ins: 0,
+            ins,
             discovered_ins: Vec::new(),
-            outs: Vec::new(),
-            explicit_outs: 0,
+            outs,
         }
-    }
-
-    pub fn set_ins(&mut self, ins: Vec<FileId>, exp: usize, imp: usize, ord: usize) {
-        self.ins = ins;
-        self.explicit_ins = exp;
-        self.implicit_ins = imp;
-        self.order_only_ins = ord;
-    }
-
-    pub fn set_outs(&mut self, outs: Vec<FileId>, exp: usize) {
-        self.outs = outs;
-        self.explicit_outs = exp;
     }
 
     /// Input paths that appear in `$in`.
     pub fn explicit_ins(&self) -> &[FileId] {
-        &self.ins[0..self.explicit_ins]
+        &self.ins.ids[0..self.ins.explicit]
     }
 
     /// Input paths that, if changed, invalidate the output.
     /// Note this omits discovered_ins, which also invalidate the output.
     pub fn dirtying_ins(&self) -> &[FileId] {
-        &self.ins[0..(self.explicit_ins + self.implicit_ins)]
+        &self.ins.ids[0..(self.ins.explicit + self.ins.implicit)]
     }
 
     /// Order-only inputs: inputs that are only used for ordering execution.
     pub fn order_only_ins(&self) -> &[FileId] {
-        &self.ins[(self.explicit_ins + self.implicit_ins)..]
+        &self.ins.ids[(self.ins.explicit + self.ins.implicit)..]
     }
 
     /// Inputs that are needed before building.
@@ -149,13 +142,13 @@ impl Build {
     /// Note that we don't order on discovered_ins, because they're not allowed to
     /// affect build order.
     pub fn ordering_ins(&self) -> &[FileId] {
-        &self.ins
+        &self.ins.ids
     }
 
     /// Potentially update discovered_ins with a new set of deps, returning true if they changed.
     pub fn update_discovered(&mut self, mut deps: Vec<FileId>) -> bool {
         // Filter out any deps that were already listed in the build file.
-        deps.retain(|id| !self.ins.contains(id));
+        deps.retain(|id| !self.ins.ids.contains(id));
         if deps == self.discovered_ins {
             false
         } else {
@@ -175,12 +168,12 @@ impl Build {
 
     /// Output paths that appear in `$out`.
     pub fn explicit_outs(&self) -> &[FileId] {
-        &self.outs[0..self.explicit_outs]
+        &self.outs.ids[0..self.outs.explicit]
     }
 
     /// Output paths that are updated when the build runs.
     pub fn outs(&self) -> &[FileId] {
-        &self.outs
+        &self.outs.ids
     }
 
     pub fn debug_name(&self, graph: &Graph) -> String {
@@ -247,10 +240,10 @@ impl Graph {
     /// Add a new Build, generating a BuildId for it.
     pub fn add_build(&mut self, build: Build) {
         let id = self.builds.next_id();
-        for &inf in &build.ins {
+        for &inf in &build.ins.ids {
             self.files.get_mut(inf).dependents.push(id);
         }
-        for &out in &build.outs {
+        for &out in &build.outs.ids {
             let f = self.files.get_mut(out);
             match f.input {
                 Some(b) => panic!("double link {:?}", b),

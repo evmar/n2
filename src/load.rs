@@ -64,19 +64,23 @@ impl Loader {
         env: &eval::Vars<'a>,
         b: parse::Build,
     ) -> anyhow::Result<()> {
-        let mut build = graph::Build::new(graph::FileLoc {
-            filename,
-            line: b.line,
-        });
-        build.set_ins(
-            b.ins.into_iter().map(|f| self.graph.file_id(f)).collect(),
-            b.explicit_ins,
-            b.implicit_ins,
-            b.order_only_ins,
-        );
-        build.set_outs(
-            b.outs.into_iter().map(|f| self.graph.file_id(f)).collect(),
-            b.explicit_outs,
+        let ins = graph::BuildIns {
+            ids: b.ins.into_iter().map(|f| self.graph.file_id(f)).collect(),
+            explicit: b.explicit_ins,
+            implicit: b.implicit_ins,
+            // order_only is unused
+        };
+        let outs = graph::BuildOuts {
+            ids: b.outs.into_iter().map(|f| self.graph.file_id(f)).collect(),
+            explicit: b.explicit_outs,
+        };
+        let mut build = graph::Build::new(
+            graph::FileLoc {
+                filename,
+                line: b.line,
+            },
+            ins,
+            outs,
         );
 
         let rule = match self.rules.get(b.rule) {
