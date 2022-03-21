@@ -1,6 +1,7 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::db;
+use crate::densemap::DenseMap;
 use crate::graph::*;
 use crate::progress;
 use crate::progress::Progress;
@@ -92,8 +93,7 @@ impl PoolState {
 
 /// BuildStates tracks progress of each Build step through the build.
 struct BuildStates {
-    /// Maps BuildId to BuildState.
-    states: Vec<BuildState>,
+    states: DenseMap<BuildId, BuildState>,
 
     // Counts of builds in each state.
     counts: StateCounts,
@@ -109,7 +109,7 @@ struct BuildStates {
 }
 
 impl BuildStates {
-    fn new(depths: Vec<(String, usize)>) -> Self {
+    fn new(size: BuildId, depths: Vec<(String, usize)>) -> Self {
         let mut pools: Vec<(String, PoolState)> = vec![
             // The implied default pool.
             (String::from(""), PoolState::new(0)),
@@ -122,7 +122,7 @@ impl BuildStates {
                 .map(|(name, depth)| (name, PoolState::new(depth))),
         );
         BuildStates {
-            states: Vec::new(),
+            states: DenseMap::new_sized(size, BuildState::Unknown),
             counts: StateCounts::new(),
             ready: HashSet::new(),
             pools,
@@ -130,18 +130,14 @@ impl BuildStates {
     }
 
     fn get(&self, id: BuildId) -> BuildState {
-        self.states
-            .get(id.index())
-            .map_or(BuildState::Unknown, |&s| s)
+        *self.states.get(id)
     }
 
     fn set(&mut self, id: BuildId, build: &Build, state: BuildState) {
-        if id.index() >= self.states.len() {
-            self.states.resize(id.index() + 1, BuildState::Unknown);
-        }
-        let prev = self.states[id.index()];
+        let mprev = self.states.get_mut(id);
+        let prev = *mprev;
         // println!("{:?} {:?}=>{:?}", id, prev, state);
-        self.states[id.index()] = state;
+        *mprev = state;
         match prev {
             BuildState::Ready => {
                 self.ready.remove(&id);
@@ -319,13 +315,14 @@ impl<'a> Work<'a> {
         parallelism: usize,
     ) -> Self {
         let file_state = FileState::new(graph);
+        let builds = graph.builds.next_id();
         Work {
             graph,
             db,
             progress,
             file_state,
             last_hashes,
-            build_states: BuildStates::new(pools),
+            build_states: BuildStates::new(builds, pools),
             runner: task::Runner::new(parallelism),
         }
     }
@@ -732,7 +729,7 @@ build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
         let a_id = graph.file_id("a");
-        let mut states = crate::work::BuildStates::new(vec![]);
+        let mut states = crate::work::BuildStates::new(graph.builds.next_id(), vec![]);
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {
             Ok(_) => panic!("expected build cycle error"),

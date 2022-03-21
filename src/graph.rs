@@ -1,6 +1,7 @@
 //! The build graph, a graph between files and commands.
 
 use crate::canon::canon_path;
+use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
@@ -13,18 +14,28 @@ pub struct Hash(pub u64);
 /// Id for File nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FileId(usize);
-impl FileId {
+impl densemap::Index for FileId {
     fn index(&self) -> usize {
         self.0
+    }
+}
+impl From<usize> for FileId {
+    fn from(u: usize) -> FileId {
+        FileId(u)
     }
 }
 
 /// Id for Build nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BuildId(usize);
-impl BuildId {
-    pub fn index(&self) -> usize {
+impl densemap::Index for BuildId {
+    fn index(&self) -> usize {
         self.0
+    }
+}
+impl From<usize> for BuildId {
+    fn from(u: usize) -> BuildId {
+        BuildId(u)
     }
 }
 
@@ -184,8 +195,8 @@ impl Build {
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them,
 /// as well as mapping string filenames to the underlying Files.
 pub struct Graph {
-    files: Vec<File>,
-    builds: Vec<Build>,
+    files: DenseMap<FileId, File>,
+    pub builds: DenseMap<BuildId, Build>,
     file_to_id: HashMap<String, FileId>,
 }
 
@@ -193,26 +204,24 @@ impl Graph {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Graph {
-            files: Vec::new(),
-            builds: Vec::new(),
+            files: DenseMap::new(),
+            builds: DenseMap::new(),
             file_to_id: HashMap::new(),
         }
     }
 
     /// Add a new file, generating a new FileId for it.
     fn add_file(&mut self, name: String) -> FileId {
-        let id = self.files.len();
         self.files.push(File {
             name,
             input: None,
             dependents: Vec::new(),
-        });
-        FileId(id)
+        })
     }
 
     /// Look up a file by its FileId.
     pub fn file(&self, id: FileId) -> &File {
-        &self.files[id.index()]
+        self.files.get(id)
     }
 
     /// Canonicalize a path and get/generate its FileId.
@@ -237,12 +246,12 @@ impl Graph {
 
     /// Add a new Build, generating a BuildId for it.
     pub fn add_build(&mut self, build: Build) {
-        let id = BuildId(self.builds.len());
-        for inf in &build.ins {
-            self.files[inf.index()].dependents.push(id);
+        let id = self.builds.next_id();
+        for &inf in &build.ins {
+            self.files.get_mut(inf).dependents.push(id);
         }
-        for out in &build.outs {
-            let f = &mut self.files[out.index()];
+        for &out in &build.outs {
+            let f = self.files.get_mut(out);
             match f.input {
                 Some(b) => panic!("double link {:?}", b),
                 None => f.input = Some(id),
@@ -253,11 +262,11 @@ impl Graph {
 
     /// Look up a Build by BuildId.
     pub fn build(&self, id: BuildId) -> &Build {
-        &self.builds[id.index()]
+        &self.builds.get(id)
     }
     /// Look up a Build by BuildId.
     pub fn build_mut(&mut self, id: BuildId) -> &mut Build {
-        &mut self.builds[id.index()]
+        self.builds.get_mut(id)
     }
 }
 
@@ -284,34 +293,22 @@ pub fn stat(path: &str) -> std::io::Result<MTime> {
     })
 }
 
-/// Gathered state of on-disk files, indexed by FileId.
-pub struct FileState(Vec<Option<MTime>>);
+/// Gathered state of on-disk files.
+/// Due to discovered deps this map may grow after graph initialization.
+pub struct FileState(DenseMap<FileId, Option<MTime>>);
 
 impl FileState {
     pub fn new(graph: &Graph) -> Self {
-        let mut files = Vec::new();
-        files.resize(graph.files.len(), None);
-        FileState(files)
+        FileState(DenseMap::new_sized(graph.files.next_id(), None))
     }
 
     pub fn get(&self, id: FileId) -> Option<MTime> {
-        if id.index() >= self.0.len() {
-            return None;
-        }
-        self.0[id.index()]
-    }
-
-    fn set_mtime(&mut self, id: FileId, mtime: MTime) {
-        // The set of files may grow after initialization time due to discovering deps after builds.
-        if id.index() >= self.0.len() {
-            self.0.resize(id.index() + 1, None);
-        }
-        self.0[id.index()] = Some(mtime)
+        *self.0.lookup(id).unwrap_or(&None)
     }
 
     pub fn restat(&mut self, id: FileId, path: &str) -> std::io::Result<MTime> {
         let mtime = stat(path)?;
-        self.set_mtime(id, mtime);
+        self.0.set_grow(id, Some(mtime), None);
         Ok(mtime)
     }
 }
@@ -359,23 +356,21 @@ pub fn hash_build(
     Ok(Hash(hasher.finish()))
 }
 
-pub struct Hashes(Vec<Option<Hash>>);
+pub struct Hashes(HashMap<BuildId, Hash>);
 
 impl Hashes {
-    pub fn new(graph: &Graph) -> Hashes {
-        let mut v = Vec::new();
-        v.resize(graph.builds.len(), None);
-        Hashes(v)
+    pub fn new() -> Hashes {
+        Hashes(HashMap::new())
     }
 
     pub fn set(&mut self, id: BuildId, hash: Hash) {
-        self.0[id.index()] = Some(hash);
+        self.0.insert(id, hash);
     }
 
     pub fn changed(&self, id: BuildId, hash: Hash) -> bool {
-        let last_hash = match self.0[id.0] {
+        let last_hash = match self.0.get(&id) {
             None => return true,
-            Some(h) => h,
+            Some(h) => *h,
         };
         hash != last_hash
     }

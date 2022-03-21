@@ -1,5 +1,6 @@
 pub mod canon;
 mod db;
+mod densemap;
 mod depfile;
 mod eval;
 mod graph;

@@ -169,7 +169,7 @@ pub struct State {
 pub fn read() -> anyhow::Result<State> {
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || loader.read_file("build.ninja"))?;
-    let mut hashes = graph::Hashes::new(&loader.graph);
+    let mut hashes = graph::Hashes::new();
     let db = trace::scope("db::open", || {
         db::open(".n2_db", &mut loader.graph, &mut hashes)
     })
