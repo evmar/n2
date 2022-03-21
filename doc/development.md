@@ -13,9 +13,32 @@ but ran into trouble making my custom string type compatible with hash tables.
 
 ## Profiling
 
-It appears profiling Rust under WSL2 is not a thing(?).
+### gperftools
 
-On Mac, the best options seemed to be `cargo flamegraph` and
+I played with a few profilers, but I think the gperftools profiler turned out
+to be significantly better than the others.  To install:
+
+```
+$ apt install libgoogle-perftools-dev
+$ go install github.com/google/pprof@latest
+```
+
+To use:
+
+```
+[possibly modify main.rs to make the app do more work than normal]
+$ LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libprofiler.so CPUPROFILE=p ./target/release/n2 ...
+$ pprof -http=:8080 ./target/release/n2 p
+```
+
+The web server it brings up shows an interactive graph, top functions,
+annotated code, disassembly...
+
+### Other options
+
+It appears `perf` profiling of Rust under WSL2 is not a thing(?).
+
+Some other options on Mac that seemed ok are `cargo flamegraph` and
 `cargo instruments`.
 
 ## Benchmarking
