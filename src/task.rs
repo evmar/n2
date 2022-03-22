@@ -37,9 +37,7 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
         Ok(b) => b,
         Err(e) => bail!("read {}: {}", path, e),
     };
-    bytes.push(0);
-
-    let mut scanner = Scanner::new(unsafe { std::str::from_utf8_unchecked(&bytes) });
+    let mut scanner = Scanner::new(&mut bytes);
     let parsed_deps = depfile::parse(&mut scanner)
         .map_err(|err| anyhow!(scanner.format_parse_error(path, err)))?;
     // TODO verify deps refers to correct output

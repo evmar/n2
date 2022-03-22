@@ -2,7 +2,6 @@
 
 use crate::graph::FileId;
 use crate::parse::Statement;
-use crate::scanner::Scanner;
 use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
@@ -124,12 +123,9 @@ impl Loader {
     }
 
     fn parse(&mut self, path: &str, mut bytes: Vec<u8>) -> anyhow::Result<()> {
-        bytes.push(0);
         let filename = std::rc::Rc::new(String::from(path));
 
-        let mut parser = parse::Parser::new(Scanner::new(unsafe {
-            std::str::from_utf8_unchecked(&bytes)
-        }));
+        let mut parser = parse::Parser::new(&mut bytes);
         loop {
             let stmt = match parser
                 .read()

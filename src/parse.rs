@@ -74,9 +74,9 @@ fn is_path_char(c: u8) -> bool {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(scanner: Scanner<'a>) -> Parser<'a> {
+    pub fn new(buf: &'a mut Vec<u8>) -> Parser<'a> {
         Parser {
-            scanner,
+            scanner: Scanner::new(buf),
             vars: Vars::new(),
         }
     }
@@ -379,12 +379,13 @@ mod tests {
 
     #[test]
     fn parse_defaults() {
-        let mut parser = Parser::new(Scanner::new(
-            "
+        let mut buf = "
 var = 3
 default a b$var c
-\0",
-        ));
+        "
+        .as_bytes()
+        .to_vec();
+        let mut parser = Parser::new(&mut buf);
         let default = match parser.read().unwrap().unwrap() {
             Statement::Default(d) => d,
             s => panic!("expected default, got {:?}", s),

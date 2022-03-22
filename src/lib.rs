@@ -7,7 +7,7 @@ mod graph;
 pub mod load;
 pub mod parse;
 pub mod progress;
-pub mod scanner;
+mod scanner;
 mod signal;
 mod task;
 pub mod trace;

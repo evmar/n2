@@ -70,8 +70,8 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
 mod tests {
     use super::*;
 
-    fn must_parse<'a>(s: &'a str) -> Deps<'a> {
-        let mut scanner = Scanner::new(s);
+    fn must_parse<'a>(buf: &'a mut Vec<u8>) -> Deps<'a> {
+        let mut scanner = Scanner::new(buf);
         match parse(&mut scanner) {
             Err(err) => {
                 println!("{}", scanner.format_parse_error("test", err));
@@ -83,7 +83,8 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        let deps = must_parse("build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n\0");
+        let mut file = b"build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n".to_vec();
+        let deps = must_parse(&mut file);
         println!("{:?}", deps);
         assert_eq!(deps.target, "build/browse.o");
         assert_eq!(deps.deps.len(), 3);
@@ -91,7 +92,8 @@ mod tests {
 
     #[test]
     fn test_parse_without_final_newline() {
-        let deps = must_parse("build/browse.o: src/browse.cc\0");
+        let mut file = b"build/browse.o: src/browse.cc".to_vec();
+        let deps = must_parse(&mut file);
         assert_eq!(deps.target, "build/browse.o");
         assert_eq!(deps.deps.len(), 1);
     }

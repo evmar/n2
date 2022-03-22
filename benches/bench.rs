@@ -1,7 +1,6 @@
 use n2::canon::canon_path;
 use n2::parse::Parser;
-use n2::scanner::Scanner;
-use std::fmt::Write;
+use std::io::Write;
 
 // This code used Criterion, but Criterion had a massive set of dependencies,
 // was slow to compile, and clunky to actually use, so I disabled it for now.
@@ -32,7 +31,7 @@ pub fn bench_canon(c: &mut Criterion) {
 }
 
 pub fn bench_parse(c: &mut Criterion) {
-    let mut input = String::new();
+    let mut input: Vec<u8> = Vec::new();
     for i in 0..50 {
         write!(
             input,
@@ -43,12 +42,12 @@ pub fn bench_parse(c: &mut Criterion) {
         )
         .unwrap();
     }
-    input.push(0 as char);
 
     c.bench_function("parse", |b| {
         b.iter(|| {
-            let scanner = Scanner::new(&input);
-            let mut parser = Parser::new(scanner);
+            // TODO: no clone
+            let mut inp = input.clone();
+            let mut parser = Parser::new(&mut inp);
             parser.read().unwrap();
         })
     });

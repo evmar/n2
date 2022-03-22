@@ -8,13 +8,14 @@ pub struct ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 pub struct Scanner<'a> {
-    buf: &'a str,
+    buf: &'a [u8],
     pub ofs: usize,
     pub line: usize,
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(buf: &'a str) -> Self {
+    pub fn new(buf: &'a mut Vec<u8>) -> Self {
+        buf.push(0);
         Scanner {
             buf,
             ofs: 0,
@@ -23,10 +24,10 @@ impl<'a> Scanner<'a> {
     }
 
     pub fn slice(&self, start: usize, end: usize) -> &'a str {
-        unsafe { self.buf.get_unchecked(start..end) }
+        unsafe { std::str::from_utf8_unchecked(self.buf.get_unchecked(start..end)) }
     }
     pub fn peek(&self) -> char {
-        unsafe { *self.buf.as_bytes().get_unchecked(self.ofs) as char }
+        unsafe { *self.buf.get_unchecked(self.ofs) as char }
     }
     pub fn next(&mut self) {
         if self.peek() == '\n' {
@@ -81,7 +82,7 @@ impl<'a> Scanner<'a> {
 
     pub fn format_parse_error(&self, filename: &str, err: ParseError) -> String {
         let mut ofs = 0;
-        let lines = self.buf.split('\n');
+        let lines = self.buf.split(|&c| c == '\n' as u8);
         for (line_number, line) in lines.enumerate() {
             if ofs + line.len() >= err.ofs {
                 let mut msg = "parse error: ".to_string();
@@ -91,12 +92,12 @@ impl<'a> Scanner<'a> {
                 let prefix = format!("{}:{}: ", filename, line_number + 1);
                 msg.push_str(&prefix);
 
-                let mut context = line;
+                let mut context = unsafe { std::str::from_utf8_unchecked(line) };
                 let mut col = err.ofs - ofs;
                 if col > 40 {
                     // Trim beginning of line to fit it on screen.
                     msg.push_str("...");
-                    context = &line[col - 20..];
+                    context = &context[col - 20..];
                     col = 3 + 20;
                 }
                 if context.len() > 40 {
