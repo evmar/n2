@@ -10,12 +10,12 @@ pub struct Rule<'a> {
 }
 
 #[derive(Debug)]
-pub struct Build<'a> {
+pub struct Build<'a, Path> {
     pub rule: &'a str,
     pub line: usize,
-    pub outs: Vec<String>,
+    pub outs: Vec<Path>,
     pub explicit_outs: usize,
-    pub ins: Vec<String>,
+    pub ins: Vec<Path>,
     pub explicit_ins: usize,
     pub implicit_ins: usize,
     pub order_only_ins: usize,
@@ -29,12 +29,12 @@ pub struct Pool<'a> {
 }
 
 #[derive(Debug)]
-pub enum Statement<'a> {
+pub enum Statement<'a, Path> {
     Rule(Rule<'a>),
-    Build(Build<'a>),
-    Default(Vec<String>),
-    Include(String),
-    Subninja(String),
+    Build(Build<'a, Path>),
+    Default(Vec<Path>),
+    Include(Path),
+    Subninja(Path),
     Pool(Pool<'a>),
 }
 
@@ -73,6 +73,11 @@ fn is_path_char(c: u8) -> bool {
     (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
 }
 
+pub trait Loader {
+    type Path;
+    fn path(&mut self, path: &str) -> Self::Path;
+}
+
 impl<'a> Parser<'a> {
     pub fn new(buf: &'a mut Vec<u8>) -> Parser<'a> {
         Parser {
@@ -85,7 +90,10 @@ impl<'a> Parser<'a> {
         self.scanner.format_parse_error(filename, err)
     }
 
-    pub fn read(&mut self) -> ParseResult<Option<Statement<'a>>> {
+    pub fn read<L: Loader>(
+        &mut self,
+        loader: &mut L,
+    ) -> ParseResult<Option<Statement<'a, L::Path>>> {
         loop {
             match self.scanner.peek() {
                 '\0' => return Ok(None),
@@ -97,21 +105,23 @@ impl<'a> Parser<'a> {
                     self.scanner.skip_spaces();
                     match ident {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
-                        "build" => return Ok(Some(Statement::Build(self.read_build()?))),
-                        "default" => return Ok(Some(Statement::Default(self.read_default()?))),
+                        "build" => return Ok(Some(Statement::Build(self.read_build(loader)?))),
+                        "default" => {
+                            return Ok(Some(Statement::Default(self.read_default(loader)?)))
+                        }
                         "include" => {
-                            let path = match self.read_path()? {
+                            let id = match self.read_path(loader)? {
                                 None => return self.scanner.parse_error("expected path"),
                                 Some(p) => p,
                             };
-                            return Ok(Some(Statement::Include(path)));
+                            return Ok(Some(Statement::Include(id)));
                         }
                         "subninja" => {
-                            let path = match self.read_path()? {
+                            let id = match self.read_path(loader)? {
                                 None => return self.scanner.parse_error("expected path"),
                                 Some(p) => p,
                             };
-                            return Ok(Some(Statement::Subninja(path)));
+                            return Ok(Some(Statement::Subninja(id)));
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
@@ -176,24 +186,28 @@ impl<'a> Parser<'a> {
         Ok(Pool { name, depth })
     }
 
-    fn read_paths_to(&mut self, v: &mut Vec<String>) -> ParseResult<()> {
+    fn read_paths_to<L: Loader>(
+        &mut self,
+        loader: &mut L,
+        v: &mut Vec<L::Path>,
+    ) -> ParseResult<()> {
         self.scanner.skip_spaces();
-        while let Some(path) = self.read_path()? {
+        while let Some(path) = self.read_path(loader)? {
             v.push(path);
             self.scanner.skip_spaces();
         }
         Ok(())
     }
 
-    fn read_build(&mut self) -> ParseResult<Build<'a>> {
+    fn read_build<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Build<'a, L::Path>> {
         let line = self.scanner.line;
         let mut outs = Vec::new();
-        self.read_paths_to(&mut outs)?;
+        self.read_paths_to(loader, &mut outs)?;
         let explicit_outs = outs.len();
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            self.read_paths_to(&mut outs)?;
+            self.read_paths_to(loader, &mut outs)?;
         }
 
         self.scanner.expect(':')?;
@@ -201,7 +215,7 @@ impl<'a> Parser<'a> {
         let rule = self.read_ident()?;
 
         let mut ins = Vec::new();
-        self.read_paths_to(&mut ins)?;
+        self.read_paths_to(loader, &mut ins)?;
         let explicit_ins = ins.len();
 
         if self.scanner.peek() == '|' {
@@ -209,7 +223,7 @@ impl<'a> Parser<'a> {
             if self.scanner.peek() == '|' {
                 self.scanner.back();
             } else {
-                self.read_paths_to(&mut ins)?;
+                self.read_paths_to(loader, &mut ins)?;
             }
         }
         let implicit_ins = ins.len() - explicit_ins;
@@ -217,7 +231,7 @@ impl<'a> Parser<'a> {
         if self.scanner.peek() == '|' {
             self.scanner.next();
             self.scanner.expect('|')?;
-            self.read_paths_to(&mut ins)?;
+            self.read_paths_to(loader, &mut ins)?;
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
 
@@ -236,9 +250,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn read_default(&mut self) -> ParseResult<Vec<String>> {
+    fn read_default<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Vec<L::Path>> {
         let mut defaults = Vec::new();
-        while let Some(path) = self.read_path()? {
+        while let Some(path) = self.read_path(loader)? {
             defaults.push(path);
             self.scanner.skip_spaces();
         }
@@ -299,7 +313,7 @@ impl<'a> Parser<'a> {
         Ok(EvalString::new(parts))
     }
 
-    fn read_path(&mut self) -> ParseResult<Option<String>> {
+    fn read_path<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Option<L::Path>> {
         let mut path = String::with_capacity(64);
         loop {
             let c = self.scanner.read();
@@ -338,7 +352,7 @@ impl<'a> Parser<'a> {
         if path.is_empty() {
             return Ok(None);
         }
-        Ok(Some(path))
+        Ok(Some(loader.path(&path)))
     }
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'a str>> {
@@ -373,6 +387,14 @@ impl<'a> Parser<'a> {
     }
 }
 
+struct StringLoader {}
+impl Loader for StringLoader {
+    type Path = String;
+    fn path(&mut self, path: &str) -> Self::Path {
+        path.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,7 +408,7 @@ default a b$var c
         .as_bytes()
         .to_vec();
         let mut parser = Parser::new(&mut buf);
-        let default = match parser.read().unwrap().unwrap() {
+        let default = match parser.read(&mut StringLoader {}).unwrap().unwrap() {
             Statement::Default(d) => d,
             s => panic!("expected default, got {:?}", s),
         };

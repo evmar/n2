@@ -727,7 +727,7 @@ build a: phony b
 build b: phony c
 build c: phony a
 ";
-        let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
+        let mut graph = crate::load::parse("build.ninja".to_string(), file.as_bytes().to_vec())?;
         let a_id = graph.file_id("a");
         let mut states = crate::work::BuildStates::new(graph.builds.next_id(), vec![]);
         let mut stack = Vec::new();

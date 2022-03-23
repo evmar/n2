@@ -1,5 +1,5 @@
 use n2::canon::canon_path;
-use n2::parse::Parser;
+//use n2::parse::Parser;
 use std::io::Write;
 
 // This code used Criterion, but Criterion had a massive set of dependencies,
@@ -46,9 +46,9 @@ pub fn bench_parse(c: &mut Criterion) {
     c.bench_function("parse", |b| {
         b.iter(|| {
             // TODO: no clone
-            let mut inp = input.clone();
-            let mut parser = Parser::new(&mut inp);
-            parser.read().unwrap();
+            // let mut inp = input.clone();
+            // let mut parser = Parser::new(&mut inp);
+            // parser.read().unwrap();
         })
     });
 }
