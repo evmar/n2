@@ -41,6 +41,9 @@ pub enum Statement<'a, Path> {
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
     pub vars: Vars<'a>,
+    /// Reading paths is very hot when parsing, so we always read into this buffer
+    /// and then immediately pass in to Loader::path() to canonicalize it in-place.
+    path_buf: String,
 }
 
 /// Baseline implementation of is_ident_char.
@@ -75,7 +78,7 @@ fn is_path_char(c: u8) -> bool {
 
 pub trait Loader {
     type Path;
-    fn path(&mut self, path: &str) -> Self::Path;
+    fn path(&mut self, path: &mut String) -> Self::Path;
 }
 
 impl<'a> Parser<'a> {
@@ -83,6 +86,7 @@ impl<'a> Parser<'a> {
         Parser {
             scanner: Scanner::new(buf),
             vars: Vars::new(),
+            path_buf: String::with_capacity(64),
         }
     }
 
@@ -314,11 +318,11 @@ impl<'a> Parser<'a> {
     }
 
     fn read_path<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Option<L::Path>> {
-        let mut path = String::with_capacity(64);
+        self.path_buf.clear();
         loop {
             let c = self.scanner.read();
             if is_path_char(c as u8) {
-                path.push(c);
+                self.path_buf.push(c);
             } else {
                 match c {
                     '\0' => {
@@ -328,10 +332,10 @@ impl<'a> Parser<'a> {
                     '$' => {
                         let part = self.read_escape()?;
                         match part {
-                            EvalPart::Literal(l) => path.push_str(l),
+                            EvalPart::Literal(l) => self.path_buf.push_str(l),
                             EvalPart::VarRef(v) => {
                                 if let Some(v) = self.vars.get(v) {
-                                    path.push_str(v);
+                                    self.path_buf.push_str(v);
                                 }
                             }
                         }
@@ -349,10 +353,10 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        if path.is_empty() {
+        if self.path_buf.is_empty() {
             return Ok(None);
         }
-        Ok(Some(loader.path(&path)))
+        Ok(Some(loader.path(&mut self.path_buf)))
     }
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'a str>> {
@@ -390,7 +394,7 @@ impl<'a> Parser<'a> {
 struct StringLoader {}
 impl Loader for StringLoader {
     type Path = String;
-    fn path(&mut self, path: &str) -> Self::Path {
+    fn path(&mut self, path: &mut String) -> Self::Path {
         path.to_string()
     }
 }

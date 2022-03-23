@@ -243,8 +243,8 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
         };
         let mask = 0b1000_0000_0000_0000;
         if len & mask == 0 {
-            let name = r.read_str(len as usize)?;
-            let fileid = graph.file_id(name);
+            let mut name = r.read_str(len as usize)?;
+            let fileid = graph.file_id(&mut name);
             let dbid = ids.fileids.push(fileid);
             ids.db_ids.insert(fileid, dbid);
         } else {

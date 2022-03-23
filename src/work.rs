@@ -330,7 +330,7 @@ impl<'a> Work<'a> {
     /// If there's a build rule that generates build.ninja, return the FileId
     /// to pass to want_fileid that will rebuild it.
     pub fn build_ninja_fileid(&mut self) -> Option<FileId> {
-        if let Some(id) = self.graph.get_file_id("build.ninja") {
+        if let Some(id) = self.graph.lookup_file_id("build.ninja") {
             if self.graph.file(id).input.is_some() {
                 return Some(id);
             }
@@ -344,7 +344,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn want_file(&mut self, name: &str) -> anyhow::Result<()> {
-        let target = match self.graph.get_file_id(&name) {
+        let target = match self.graph.lookup_file_id(&name) {
             None => anyhow::bail!("unknown path requested: {:?}", name),
             Some(id) => id,
         };
@@ -419,7 +419,10 @@ impl<'a> Work<'a> {
     fn record_finished(&mut self, id: BuildId, result: task::TaskResult) -> anyhow::Result<()> {
         let deps = match result.discovered_deps {
             None => Vec::new(),
-            Some(names) => names.iter().map(|name| self.graph.file_id(name)).collect(),
+            Some(names) => names
+                .into_iter()
+                .map(|mut name| self.graph.file_id(&mut name))
+                .collect(),
         };
         let deps_changed = self.graph.build_mut(id).update_discovered(deps);
 
@@ -728,7 +731,7 @@ build b: phony c
 build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja".to_string(), file.as_bytes().to_vec())?;
-        let a_id = graph.file_id("a");
+        let a_id = graph.file_id(&mut "a".to_string());
         let mut states = crate::work::BuildStates::new(graph.builds.next_id(), vec![]);
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {

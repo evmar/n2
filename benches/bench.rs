@@ -12,6 +12,7 @@ impl Criterion {
 }
 
 pub fn bench_canon(c: &mut Criterion) {
+    // TODO switch to canon_path_in_place
     c.bench_function("canon plain", |b| {
         b.iter(|| {
             let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\

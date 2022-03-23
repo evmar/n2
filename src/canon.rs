@@ -39,9 +39,7 @@ impl<T: Copy> StackStack<T> {
 /// Does not access the disk, but only simplifies things like
 /// "foo/./bar" => "foo/bar".
 /// These paths can show up due to variable expansion in particular.
-pub fn canon_path<T: Into<String>>(inpath: T) -> String {
-    let mut path: String = inpath.into();
-
+pub fn canon_path_in_place(path: &mut String) {
     // Safety: this traverses the path buffer to move data around.
     // We maintain the invariant that *dst always points to a point within
     // the buffer, and that src is always checked against end before reading.
@@ -52,7 +50,7 @@ pub fn canon_path<T: Into<String>>(inpath: T) -> String {
         let end = src.add(path.len());
 
         if src == end {
-            return path;
+            return;
         }
         if *src == b'/' {
             src = src.add(1);
@@ -123,8 +121,13 @@ pub fn canon_path<T: Into<String>>(inpath: T) -> String {
         }
 
         path.truncate(dst.offset_from(path.as_ptr()) as usize);
-        path
     }
+}
+
+pub fn canon_path<T: Into<String>>(inpath: T) -> String {
+    let mut path: String = inpath.into();
+    canon_path_in_place(&mut path);
+    path
 }
 
 #[cfg(test)]

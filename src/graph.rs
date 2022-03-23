@@ -1,6 +1,6 @@
 //! The build graph, a graph between files and commands.
 
-use crate::canon::canon_path;
+use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::Hasher;
@@ -218,21 +218,21 @@ impl Graph {
     }
 
     /// Canonicalize a path and get/generate its FileId.
-    pub fn file_id(&mut self, f: impl Into<String>) -> FileId {
-        let canon = canon_path(f);
-        match self.file_to_id.get(&canon) {
+    pub fn file_id(&mut self, canon: &mut String) -> FileId {
+        canon_path_in_place(canon);
+        match self.file_to_id.get(canon) {
             Some(id) => *id,
             None => {
                 // TODO: so many string copies :<
                 let id = self.add_file(canon.clone());
-                self.file_to_id.insert(canon, id);
+                self.file_to_id.insert(canon.clone(), id);
                 id
             }
         }
     }
 
     /// Canonicalize a path and look up its FileId.
-    pub fn get_file_id(&self, f: &str) -> Option<FileId> {
+    pub fn lookup_file_id(&self, f: &str) -> Option<FileId> {
         let canon = canon_path(f);
         self.file_to_id.get(&canon).copied()
     }

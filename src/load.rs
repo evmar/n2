@@ -43,7 +43,7 @@ struct Loader {
 
 impl parse::Loader for Loader {
     type Path = FileId;
-    fn path(&mut self, path: &str) -> Self::Path {
+    fn path(&mut self, path: &mut String) -> Self::Path {
         self.graph.file_id(path)
     }
 }
@@ -175,7 +175,7 @@ pub struct State {
 pub fn read() -> anyhow::Result<State> {
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || {
-        let id = loader.graph.file_id("build.ninja");
+        let id = loader.graph.file_id(&mut "build.ninja".to_string());
         loader.read_file(id)
     })?;
     let mut hashes = graph::Hashes::new();
