@@ -360,18 +360,15 @@ impl<'a> Parser<'a> {
     }
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'a str>> {
-        Ok(match self.scanner.peek() {
+        Ok(match self.scanner.read() {
             '\n' => {
-                self.scanner.next();
                 self.scanner.skip_spaces();
                 EvalPart::Literal(self.scanner.slice(0, 0))
             }
             ' ' | '$' | ':' => {
-                self.scanner.next();
                 EvalPart::Literal(self.scanner.slice(self.scanner.ofs - 1, self.scanner.ofs))
             }
             '{' => {
-                self.scanner.next();
                 let start = self.scanner.ofs;
                 loop {
                     match self.scanner.read() {
@@ -384,6 +381,7 @@ impl<'a> Parser<'a> {
                 EvalPart::VarRef(self.scanner.slice(start, end))
             }
             _ => {
+                self.scanner.back();
                 let ident = self.read_ident()?;
                 EvalPart::VarRef(ident)
             }
