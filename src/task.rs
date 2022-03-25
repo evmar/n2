@@ -9,10 +9,14 @@ use crate::depfile;
 use crate::graph::BuildId;
 use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
-use std::io::Write;
-use std::os::unix::process::ExitStatusExt;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::io::Write;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 pub struct FinishedTask {
     /// A (faked) "thread id", used to put different finished builds in different
@@ -69,6 +73,7 @@ fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> 
         };
     } else {
         // Command failed.
+        #[cfg(unix)]
         if let Some(sig) = cmd.status.signal() {
             match sig {
                 libc::SIGINT => write!(output, "interrupted").unwrap(),
