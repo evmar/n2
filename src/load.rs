@@ -4,6 +4,7 @@ use crate::graph::FileId;
 use crate::parse::Statement;
 use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// A variable lookup environment for magic $in/$out variables.
@@ -24,10 +25,10 @@ impl<'a> BuildImplicitVars<'a> {
     }
 }
 impl<'a> eval::Env for BuildImplicitVars<'a> {
-    fn get_var(&self, var: &str) -> Option<String> {
+    fn get_var(&self, var: &str) -> Option<Cow<str>> {
         match var {
-            "in" => Some(self.file_list(self.build.explicit_ins())),
-            "out" => Some(self.file_list(self.build.explicit_outs())),
+            "in" => Some(Cow::Owned(self.file_list(self.build.explicit_ins()))),
+            "out" => Some(Cow::Owned(self.file_list(self.build.explicit_outs()))),
             _ => None,
         }
     }

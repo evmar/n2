@@ -1,13 +1,13 @@
 //! Represents parsed Ninja strings with embedded variable references, e.g.
 //! `c++ $in -o $out`, and mechanisms for expanding those into plain strings.
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 /// An environment providing a mapping of variable name to variable value.
 /// A given EvalString may be expanded with multiple environments as possible
 /// context.
 pub trait Env {
-    fn get_var(&self, var: &str) -> Option<String>;
+    fn get_var(&self, var: &str) -> Option<Cow<str>>;
 }
 
 /// One token within an EvalString, either literal text or a variable reference.
@@ -72,8 +72,11 @@ impl<'a> Vars<'a> {
     }
 }
 impl<'a> Env for Vars<'a> {
-    fn get_var(&self, var: &str) -> Option<String> {
-        self.0.get(var).cloned()
+    fn get_var(&self, var: &str) -> Option<Cow<str>> {
+        match self.0.get(var) {
+            Some(str) => Some(Cow::Borrowed(str.as_str())),
+            None => None,
+        }
     }
 }
 
@@ -103,8 +106,8 @@ impl LazyVars {
         &self.0
     }
 }
-impl Env for LazyVars {
-    fn get_var(&self, var: &str) -> Option<String> {
-        self.get(var).map(|val| val.evaluate(&[]))
+impl<'a> Env for LazyVars {
+    fn get_var(&self, var: &str) -> Option<Cow<str>> {
+        self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
     }
 }
