@@ -1,19 +1,22 @@
 //! Parser for .ninja files.
 //!
 //! See design notes on parsing in doc/design_notes.md.
+//!
+//! To avoid allocations parsing frequently uses references into the input
+//! text, marked with the lifetime `'text`.
 
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
 #[derive(Debug)]
-pub struct Rule<'a> {
-    pub name: &'a str,
+pub struct Rule<'text> {
+    pub name: &'text str,
     pub vars: LazyVars,
 }
 
 #[derive(Debug)]
-pub struct Build<'a, Path> {
-    pub rule: &'a str,
+pub struct Build<'text, Path> {
+    pub rule: &'text str,
     pub line: usize,
     pub outs: Vec<Path>,
     pub explicit_outs: usize,
@@ -25,24 +28,24 @@ pub struct Build<'a, Path> {
 }
 
 #[derive(Debug)]
-pub struct Pool<'a> {
-    pub name: &'a str,
+pub struct Pool<'text> {
+    pub name: &'text str,
     pub depth: usize,
 }
 
 #[derive(Debug)]
-pub enum Statement<'a, Path> {
-    Rule(Rule<'a>),
-    Build(Build<'a, Path>),
+pub enum Statement<'text, Path> {
+    Rule(Rule<'text>),
+    Build(Build<'text, Path>),
     Default(Vec<Path>),
     Include(Path),
     Subninja(Path),
-    Pool(Pool<'a>),
+    Pool(Pool<'text>),
 }
 
-pub struct Parser<'a> {
-    scanner: Scanner<'a>,
-    pub vars: Vars<'a>,
+pub struct Parser<'text> {
+    scanner: Scanner<'text>,
+    pub vars: Vars<'text>,
     /// Reading paths is very hot when parsing, so we always read into this buffer
     /// and then immediately pass in to Loader::path() to canonicalize it in-place.
     path_buf: String,
@@ -83,8 +86,8 @@ pub trait Loader {
     fn path(&mut self, path: &mut String) -> Self::Path;
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(buf: &'a mut Vec<u8>) -> Parser<'a> {
+impl<'text> Parser<'text> {
+    pub fn new(buf: &'text mut Vec<u8>) -> Parser<'text> {
         Parser {
             scanner: Scanner::new(buf),
             vars: Vars::new(),
@@ -99,7 +102,7 @@ impl<'a> Parser<'a> {
     pub fn read<L: Loader>(
         &mut self,
         loader: &mut L,
-    ) -> ParseResult<Option<Statement<'a, L::Path>>> {
+    ) -> ParseResult<Option<Statement<'text, L::Path>>> {
         loop {
             match self.scanner.peek() {
                 '\0' => return Ok(None),
@@ -140,7 +143,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn read_vardef(&mut self) -> ParseResult<EvalString<&'a str>> {
+    fn read_vardef(&mut self) -> ParseResult<EvalString<&'text str>> {
         self.scanner.skip_spaces();
         self.scanner.expect('=')?;
         self.scanner.skip_spaces();
@@ -159,14 +162,14 @@ impl<'a> Parser<'a> {
         Ok(vars)
     }
 
-    fn read_rule(&mut self) -> ParseResult<Rule<'a>> {
+    fn read_rule(&mut self) -> ParseResult<Rule<'text>> {
         let name = self.read_ident()?;
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Rule { name, vars })
     }
 
-    fn read_pool(&mut self) -> ParseResult<Pool<'a>> {
+    fn read_pool(&mut self) -> ParseResult<Pool<'text>> {
         let name = self.read_ident()?;
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
@@ -205,7 +208,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn read_build<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Build<'a, L::Path>> {
+    fn read_build<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Build<'text, L::Path>> {
         let line = self.scanner.line;
         let mut outs = Vec::new();
         self.read_paths_to(loader, &mut outs)?;
@@ -282,7 +285,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn read_ident(&mut self) -> ParseResult<&'a str> {
+    fn read_ident(&mut self) -> ParseResult<&'text str> {
         let start = self.scanner.ofs;
         while is_ident_char(self.scanner.read() as u8) {}
         self.scanner.back();
@@ -293,7 +296,7 @@ impl<'a> Parser<'a> {
         Ok(self.scanner.slice(start, end))
     }
 
-    fn read_eval(&mut self) -> ParseResult<EvalString<&'a str>> {
+    fn read_eval(&mut self) -> ParseResult<EvalString<&'text str>> {
         // Guaranteed at least one part.
         let mut parts = Vec::with_capacity(1);
         let mut ofs = self.scanner.ofs;
@@ -361,7 +364,7 @@ impl<'a> Parser<'a> {
         Ok(Some(loader.path(&mut self.path_buf)))
     }
 
-    fn read_escape(&mut self) -> ParseResult<EvalPart<&'a str>> {
+    fn read_escape(&mut self) -> ParseResult<EvalPart<&'text str>> {
         Ok(match self.scanner.read() {
             '\n' => {
                 self.scanner.skip_spaces();

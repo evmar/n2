@@ -61,16 +61,16 @@ impl EvalString<&str> {
 
 /// A single scope's worth of variable definitions.
 #[derive(Debug)]
-pub struct Vars<'a>(HashMap<&'a str, String>);
+pub struct Vars<'text>(HashMap<&'text str, String>);
 #[allow(clippy::new_without_default)]
-impl<'a> Vars<'a> {
-    pub fn new() -> Vars<'a> {
+impl<'text> Vars<'text> {
+    pub fn new() -> Vars<'text> {
         Vars(HashMap::new())
     }
-    pub fn insert(&mut self, key: &'a str, val: String) {
+    pub fn insert(&mut self, key: &'text str, val: String) {
         self.0.insert(key, val);
     }
-    pub fn get(&self, key: &'a str) -> Option<&String> {
+    pub fn get(&self, key: &'text str) -> Option<&String> {
         self.0.get(key)
     }
 }
