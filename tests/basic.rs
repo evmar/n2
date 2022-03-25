@@ -83,16 +83,30 @@ fn empty_file() -> anyhow::Result<()> {
     Ok(())
 }
 
+
+#[cfg(unix)]
+fn touch_command() -> String {
+  "
+rule touch
+  command = touch $out
+".to_owned()
+}
+
+#[cfg(windows)]
+fn touch_command() -> String {
+  "
+rule touch
+  command = cmd /c type nul > $out
+".to_owned()
+}
+
 #[test]
 fn basic_build() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-        "
-rule touch
-  command = touch $out
-build out: touch in
-",
+      &(touch_command() + "build out: touch in
+"),
     )?;
     space.write("in", "")?;
     space.run_expect(&mut n2_command(vec!["out"]))?;
@@ -100,18 +114,14 @@ build out: touch in
 
     Ok(())
 }
-
 #[test]
 fn create_subdir() -> anyhow::Result<()> {
     // Run a build rule that needs a subdir to be automatically created.
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-        "
-rule touch
-  command = touch $out
-build subdir/out: touch in
-",
+      &(touch_command() + "build subdir/out: touch in
+"),
     )?;
     space.write("in", "")?;
     space.run_expect(&mut n2_command(vec!["subdir/out"]))?;
