@@ -18,6 +18,9 @@ pub enum EvalPart<T: AsRef<str>> {
 }
 
 /// A parsed but unexpanded variable-reference string, e.g. "cc $in -o $out".
+/// This is generic to support EvalString<&str>, which is used for immediately-
+/// expanded evals, like top-level bindings, and EvalString<String>, which is
+/// used for delayed evals like in `rule` blocks.
 #[derive(Debug)]
 pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
 impl<T: AsRef<str>> EvalString<T> {
