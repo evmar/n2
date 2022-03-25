@@ -8,6 +8,9 @@ to successfully build some projects that build with ninja.
 I wrote it to explore some alternative ideas I had around how to structure
 a build system.
 
+[Here's a small demo](https://asciinema.org/a/480446) of n2 building some of
+Clang.
+
 ## More reading
 
 - [Design notes](doc/design_notes.md).
