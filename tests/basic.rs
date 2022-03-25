@@ -130,6 +130,7 @@ fn create_subdir() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
 fn generate_build_file() -> anyhow::Result<()> {
     // Run a project where a build rule generates the build.ninja.
