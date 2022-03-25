@@ -10,6 +10,7 @@ use crate::graph::BuildId;
 use crate::work::BuildState;
 use crate::work::StateCounts;
 
+#[cfg(unix)]
 #[allow(clippy::uninit_assumed_init)]
 pub fn get_terminal_cols() -> Option<usize> {
     unsafe {
@@ -18,6 +19,25 @@ pub fn get_terminal_cols() -> Option<usize> {
             return None;
         }
         Some(winsize.ws_col as usize)
+    }
+}
+
+#[cfg(windows)]
+#[allow(clippy::uninit_assumed_init)]
+pub fn get_terminal_cols() -> Option<usize> {
+    extern crate winapi;
+    extern crate kernel32;
+    use kernel32::{GetConsoleScreenBufferInfo, GetStdHandle};
+    let console = unsafe { GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE) };
+    if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+        return None;
+    }
+    unsafe {
+        let mut csbi = ::std::mem::MaybeUninit::uninit().assume_init();
+        if GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
+            return None;
+        }
+        Some(csbi.dwSize.X as usize)
     }
 }
 

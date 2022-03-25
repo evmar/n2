@@ -4,10 +4,12 @@
 //! and let the parent properly print that progress.  This also lets us still
 //! write out pending debug traces, too.
 
+#[cfg(unix)]
 extern "C" fn sigint_handler(_sig: libc::c_int) {
     // Do nothing; SA_RESETHAND should clear the handler.
 }
 
+#[cfg(unix)]
 pub fn register_sigint() {
     // Safety: registering a signal handler is libc unsafe code.
     unsafe {

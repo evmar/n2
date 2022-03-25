@@ -4,7 +4,12 @@ use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::Hasher;
+
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 
 /// Hash value used to identify a given instance of a Build's execution;
 /// compared to verify whether a Build is up to date.
@@ -272,10 +277,26 @@ pub enum MTime {
     Stamp(u32),
 }
 
+#[cfg(windows)]
+fn mtime_from_filetime(mut filetime: u64) -> i64 {
+    // FILETIME is in 100-nanosecond increments since 1600. Convert to seconds since 2000.
+    filetime /= 1000000000 / 100; // 100ns -> s.
+
+    // 1600 epoch -> 2000 epoch (subtract 400 years).
+    use std::convert::TryInto;
+    (filetime - 12622770400).try_into().unwrap()
+}
+
 /// stat() an on-disk path, producing its MTime.
 pub fn stat(path: &str) -> std::io::Result<MTime> {
+    // TODO: Support timestamps with better-than-seconds resolution.
+    // TODO: On Windows, use FindFirstFileEx()/FindNextFile() to get timestamps per
+    //       directory, for better stat perf.
     Ok(match std::fs::metadata(path) {
+        #[cfg(unix)]
         Ok(meta) => MTime::Stamp(meta.mtime() as u32),
+        #[cfg(windows)]
+        Ok(meta) => MTime::Stamp(mtime_from_filetime(meta.last_write_time()) as u32),
         Err(err) => {
             if err.kind() == std::io::ErrorKind::NotFound {
                 MTime::Missing

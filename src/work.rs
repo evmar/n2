@@ -5,12 +5,14 @@ use crate::densemap::DenseMap;
 use crate::graph::*;
 use crate::progress;
 use crate::progress::Progress;
-use crate::signal;
 use crate::task;
 use crate::trace;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::time::Duration;
+
+#[cfg(unix)]
+use crate::signal;
 
 /// Build steps go through this sequence of states.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -631,6 +633,7 @@ impl<'a> Work<'a> {
     // Returns a Result for failures, but we must clean up the progress before
     // returning the result to the caller.
     fn run_without_cleanup(&mut self) -> anyhow::Result<Option<usize>> {
+        #[cfg(unix)]
         signal::register_sigint();
         let mut tasks_done = 0;
         while self.build_states.unfinished() {
