@@ -25,3 +25,21 @@ Finally, all the checking happens when deciding whether a ready build is dirty:
 But if any of those files are missing we call it dirty without bothering to
 compute a hash. In this manner we never compute a hash involving any missing
 files.
+
+## Parsing
+
+Parsing .ninja files is part of the critical path for n2, because it must
+be complete before any other work can be done.  Some properties of the n2
+parser that break abstraction to this end:
+
+- There is no separate lexer.  Ninja syntax is not really lexer friendly
+  in the first place.
+- When possible, `$variable` expansions happen as they're encountered, so
+  that we don't need to build up a parsed representation of strings and
+  carry around variable environments.
+- Parsed entities that deal with paths are generic over a `Path` type, and
+  path strings are converted to Paths as they are parsed.  (In practice
+  the `Path` type is `graph::FileId`, but the parsing code isn't aware of
+  this type directly.)  This (and the previous bullet) allows the parser to
+  reuse a single `String` buffer when parsing paths, which is the bulk of what
+  the parser does.

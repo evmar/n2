@@ -8,6 +8,11 @@ to successfully build some projects that build with ninja.
 I wrote it to explore some alternative ideas I had around how to structure
 a build system.
 
+## More reading
+
+- [Design notes](doc/design_notes.md).
+- [Development tips](doc/development.md).
+
 ## Differences from Ninja
 
 n2 is [missing many Ninja features](doc/missing.md).

@@ -1,4 +1,6 @@
 //! Parser for .ninja files.
+//!
+//! See design notes on parsing in doc/design_notes.md.
 
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
