@@ -33,9 +33,16 @@ pub struct FinishedTask {
     pub result: TaskResult,
 }
 
+#[derive(PartialEq)]
+pub enum Termination {
+    Success,
+    Interrupted,
+    Failure,
+}
+
 /// The result of executing a build step.
 pub struct TaskResult {
-    pub success: bool,
+    pub termination: Termination,
     /// Console output.
     pub output: Vec<u8>,
     pub discovered_deps: Option<Vec<String>>,
@@ -78,7 +85,7 @@ fn run_task(
         write_rspfile(rspfile)?;
     }
     let mut result = run_command(cmdline)?;
-    if result.success {
+    if result.termination == Termination::Success {
         if let Some(depfile) = depfile {
             result.discovered_deps = Some(read_depfile(depfile)?);
         }
@@ -109,17 +116,26 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     output.append(&mut cmd.stderr);
     let success = cmd.status.success();
 
-    if !success {
+    let mut termination;
+
+    if success {
+        termination = Termination::Success;
+    } else {
+        termination = Termination::Failure;
+        // Command failed.
         if let Some(sig) = cmd.status.signal() {
             match sig {
-                libc::SIGINT => write!(output, "interrupted").unwrap(),
+                libc::SIGINT => {
+                    write!(output, "interrupted").unwrap();
+                    termination = Termination::Interrupted;
+                }
                 _ => write!(output, "signal {}", sig).unwrap(),
             }
         }
     }
 
     Ok(TaskResult {
-        success,
+        termination,
         output,
         discovered_deps: None,
     })
@@ -220,10 +236,14 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     // TODO: Set up pipes so that we can print the process's output.
     //output.append(&mut cmd.stdout);
     //output.append(&mut cmd.stderr);
-    let success = exit_code == 0;
+    let termination = match exit_code {
+        0 => Termination::Success,
+        0xC000013A => Termination::Interrupted,
+        _ => Termination::Failed,
+    };
 
     Ok(TaskResult {
-        success,
+        termination,
         output,
         discovered_deps: None,
     })
@@ -301,7 +321,7 @@ impl Runner {
             let result =
                 run_task(&cmdline, depfile.as_deref(), rspfile.as_ref()).unwrap_or_else(|err| {
                     TaskResult {
-                        success: false,
+                        termination: Termination::Failure,
                         output: err.to_string().into_bytes(),
                         discovered_deps: None,
                     }

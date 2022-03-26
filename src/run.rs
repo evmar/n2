@@ -19,6 +19,7 @@ enum BuildResult {
 struct BuildParams<'a> {
     parallelism: usize,
     regen: bool,
+    keep_going: usize,
     target_names: &'a [String],
 }
 
@@ -34,6 +35,7 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
         &state.hashes,
         &mut state.db,
         progress,
+        params.keep_going,
         state.pools,
         params.parallelism,
     );
@@ -109,6 +111,12 @@ fn run_impl() -> anyhow::Result<i32> {
         &format!("parallelism [default from system={}]", parallelism),
         "NUM",
     );
+    opts.optopt(
+        "k",
+        "",
+        "keep going until at least N failures (0 means infinity) [default=1]",
+        "N",
+    );
     opts.optflag("h", "help", "");
     opts.optflag("v", "verbose", "print executed command lines");
     if fake_ninja_compat {
@@ -162,6 +170,14 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
+    let keep_going = match matches.opt_str("k") {
+        Some(val) => match val.parse::<usize>() {
+            Ok(n) => n,
+            Err(e) => anyhow::bail!("invalid -k {:?}: {:?}", val, e),
+        },
+        None => 1,
+    };
+
     if let Some(dir) = matches.opt_str("C") {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
@@ -174,6 +190,7 @@ fn run_impl() -> anyhow::Result<i32> {
     let mut params = BuildParams {
         parallelism,
         regen: true,
+        keep_going,
         target_names: &matches.free,
     };
     let mut result = build(&mut progress, &params)?;
