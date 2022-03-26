@@ -308,6 +308,7 @@ pub struct Work<'a> {
     file_state: FileState,
     last_hashes: &'a Hashes,
     build_states: BuildStates,
+    dry_run: bool,
     runner: task::Runner,
 }
 
@@ -317,6 +318,7 @@ impl<'a> Work<'a> {
         last_hashes: &'a Hashes,
         db: &'a mut db::Writer,
         progress: &'a mut dyn Progress,
+        dry_run: bool,
         keep_going: usize,
         pools: Vec<(String, usize)>,
         parallelism: usize,
@@ -327,6 +329,7 @@ impl<'a> Work<'a> {
             graph,
             db,
             progress,
+            dry_run,
             keep_going,
             file_state,
             last_hashes,
@@ -445,6 +448,12 @@ impl<'a> Work<'a> {
             }
         }
 
+        if self.dry_run {
+            // In dry run mode we didn't actually run the task so we don't
+            // expect the output files to change.
+            return Ok(());
+        }
+
         // Stat all the outputs.  This step just finished, so we need to update
         // any cached state of the output files to reflect their new state.
         let build = self.graph.build(id);
@@ -517,7 +526,7 @@ impl<'a> Work<'a> {
 
             // stat any non-generated inputs if needed.
             // Note that generated inputs should already have been stat()ed when
-            // they were visited as outputs.
+            // they were visited as outputs unless we're doing a dry run.
 
             // For dirtying_ins, ensure we both have mtimes and that the files are present.
             for &id in build.dirtying_ins() {
@@ -525,7 +534,7 @@ impl<'a> Work<'a> {
                 let mtime = match self.file_state.get(id) {
                     Some(mtime) => mtime,
                     None => {
-                        if file.input.is_some() {
+                        if file.input.is_some() && !self.dry_run {
                             // This is a logic error in ninja; any generated file should
                             // already have been visited by this point.
                             panic!(
@@ -539,6 +548,9 @@ impl<'a> Work<'a> {
                 if mtime == MTime::Missing {
                     if workaround_missing_phony_deps {
                         continue;
+                    }
+                    if self.dry_run {
+                        return Ok(true);
                     }
                     anyhow::bail!("{}: input {} missing", build.location, file.name);
                 }
@@ -670,6 +682,7 @@ impl<'a> Work<'a> {
                     build.cmdline.clone().unwrap(),
                     build.depfile.clone(),
                     build.rspfile.clone(),
+                    self.dry_run,
                 );
                 self.progress.task_state(id, build, BuildState::Running);
                 made_progress = true;

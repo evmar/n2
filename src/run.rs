@@ -19,6 +19,7 @@ enum BuildResult {
 struct BuildParams<'a> {
     parallelism: usize,
     regen: bool,
+    dry_run: bool,
     keep_going: usize,
     target_names: &'a [String],
     build_filename: &'a String,
@@ -36,6 +37,7 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
         &state.hashes,
         &mut state.db,
         progress,
+        params.dry_run,
         params.keep_going,
         state.pools,
         params.parallelism,
@@ -125,6 +127,7 @@ fn run_impl() -> anyhow::Result<i32> {
         "N",
     );
     opts.optflag("h", "help", "");
+    opts.optflag("n", "", "dry run");
     opts.optflag("v", "verbose", "print executed command lines");
     if fake_ninja_compat {
         opts.optflag("", "version", "print fake ninja version");
@@ -195,6 +198,8 @@ fn run_impl() -> anyhow::Result<i32> {
         build_filename = name;
     }
 
+    let dry_run = matches.opt_present("n");
+
     let mut progress = ConsoleProgress::new(matches.opt_present("v"), use_fancy_terminal());
 
     // Build once with regen=true, and if the result says we regenerated the
@@ -203,6 +208,7 @@ fn run_impl() -> anyhow::Result<i32> {
     let mut params = BuildParams {
         parallelism,
         regen: true,
+        dry_run,
         keep_going,
         target_names: &matches.free,
         build_filename: &build_filename,

@@ -80,9 +80,17 @@ fn run_task(
     cmdline: &str,
     depfile: Option<&str>,
     rspfile: Option<&RspFile>,
+    dry_run: bool,
 ) -> anyhow::Result<TaskResult> {
     if let Some(rspfile) = rspfile {
         write_rspfile(rspfile)?;
+    }
+    if dry_run {
+        return Ok(TaskResult {
+            termination: Termination::Success,
+            output: vec![],
+            discovered_deps: None,
+        });
     }
     let mut result = run_command(cmdline)?;
     if result.termination == Termination::Success {
@@ -308,18 +316,17 @@ impl Runner {
         cmdline: String,
         depfile: Option<String>,
         rspfile: Option<RspFile>,
+        dry_run: bool,
     ) {
         let tid = self.tids.claim();
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
             let start = Instant::now();
-            let result =
-                run_task(&cmdline, depfile.as_deref(), rspfile.as_ref()).unwrap_or_else(|err| {
-                    TaskResult {
-                        termination: Termination::Failure,
-                        output: err.to_string().into_bytes(),
-                        discovered_deps: None,
-                    }
+            let result = run_task(&cmdline, depfile.as_deref(), rspfile.as_ref(), dry_run)
+                .unwrap_or_else(|err| TaskResult {
+                    termination: Termination::Failure,
+                    output: err.to_string().into_bytes(),
+                    discovered_deps: None,
                 });
             let finish = Instant::now();
 

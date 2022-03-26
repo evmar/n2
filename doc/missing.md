@@ -10,7 +10,6 @@
 ## Missing flags
 
 - `-l`, load average throttling
-- `-n`, dry run
 
 ### Missing subcommands
 
