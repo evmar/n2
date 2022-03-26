@@ -3,7 +3,7 @@
 use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
-use std::hash::Hasher;
+use std::hash::{self, Hasher};
 use std::os::unix::fs::MetadataExt;
 
 /// Hash value used to identify a given instance of a Build's execution;
@@ -62,6 +62,12 @@ impl std::fmt::Display for FileLoc {
     }
 }
 
+#[derive(Debug, Clone, Hash)]
+pub struct RspFile {
+    pub path: std::path::PathBuf,
+    pub content: String,
+}
+
 /// Input files to a Build.
 pub struct BuildIns {
     /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
@@ -96,6 +102,9 @@ pub struct Build {
     /// Path to generated `.d` file, if any.
     pub depfile: Option<String>,
 
+    // Struct that contains the path to the rsp file and its contents, if any.
+    pub rspfile: Option<RspFile>,
+
     /// Pool to execute this build in, if any.
     pub pool: Option<String>,
 
@@ -114,6 +123,7 @@ impl Build {
             desc: None,
             cmdline: None,
             depfile: None,
+            rspfile: None,
             pool: None,
             ins,
             discovered_ins: Vec::new(),
@@ -344,6 +354,8 @@ pub fn hash_build(
     hash_files(&mut hasher, graph, file_state, build.discovered_ins());
     hasher.write_u8(UNIT_SEPARATOR);
     hasher.write(build.cmdline.as_ref().map(|c| c.as_bytes()).unwrap_or(b""));
+    hasher.write_u8(UNIT_SEPARATOR);
+    hash::Hash::hash(&build.rspfile, &mut hasher);
     hasher.write_u8(UNIT_SEPARATOR);
     hash_files(&mut hasher, graph, file_state, build.outs());
     Ok(Hash(hasher.finish()))

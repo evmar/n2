@@ -6,7 +6,7 @@
 //! the subprocesses though?
 
 use crate::depfile;
-use crate::graph::BuildId;
+use crate::graph::{BuildId, RspFile};
 use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
 use std::io::Write;
@@ -49,9 +49,30 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
     Ok(deps)
 }
 
+fn write_rspfile(rspfile: &RspFile) -> anyhow::Result<()> {
+    if let Some(parent) = rspfile.path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&rspfile.path, &rspfile.content)?;
+    Ok(())
+}
+
+fn remove_rspfile(rspfile: &RspFile) -> anyhow::Result<()> {
+    std::fs::remove_file(&rspfile.path)?;
+    Ok(())
+}
+
 /// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
-fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> {
+fn run_task(
+    cmdline: &str,
+    depfile: Option<&str>,
+    rspfile: Option<&RspFile>,
+) -> anyhow::Result<TaskResult> {
+    if let Some(rspfile) = rspfile {
+        write_rspfile(rspfile)?;
+    }
+
     let mut cmd = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(cmdline)
@@ -75,6 +96,10 @@ fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> 
                 _ => write!(output, "signal {}", sig).unwrap(),
             }
         }
+    }
+
+    if let Some(rspfile) = rspfile {
+        remove_rspfile(rspfile)?;
     }
 
     Ok(TaskResult {
@@ -142,16 +167,25 @@ impl Runner {
         self.running > 0
     }
 
-    pub fn start(&mut self, id: BuildId, cmdline: String, depfile: Option<String>) {
+    pub fn start(
+        &mut self,
+        id: BuildId,
+        cmdline: String,
+        depfile: Option<String>,
+        rspfile: Option<RspFile>,
+    ) {
         let tid = self.tids.claim();
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
             let start = Instant::now();
-            let result = run_task(&cmdline, depfile.as_deref()).unwrap_or_else(|err| TaskResult {
-                success: false,
-                output: err.to_string().into_bytes(),
-                discovered_deps: None,
-            });
+            let result =
+                run_task(&cmdline, depfile.as_deref(), rspfile.as_ref()).unwrap_or_else(|err| {
+                    TaskResult {
+                        success: false,
+                        output: err.to_string().into_bytes(),
+                        discovered_deps: None,
+                    }
+                });
             let finish = Instant::now();
 
             let task = FinishedTask {

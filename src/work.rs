@@ -655,8 +655,12 @@ impl<'a> Work<'a> {
                 let build = self.graph.build(id);
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
-                self.runner
-                    .start(id, build.cmdline.clone().unwrap(), build.depfile.clone());
+                self.runner.start(
+                    id,
+                    build.cmdline.clone().unwrap(),
+                    build.depfile.clone(),
+                    build.rspfile.clone(),
+                );
                 self.progress.task_state(id, build, BuildState::Running);
                 made_progress = true;
             }
