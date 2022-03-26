@@ -301,6 +301,7 @@ pub struct Work<'a> {
     db: &'a mut db::Writer,
 
     progress: &'a mut dyn Progress,
+    keep_going: usize,
     file_state: FileState,
     last_hashes: &'a Hashes,
     build_states: BuildStates,
@@ -313,6 +314,7 @@ impl<'a> Work<'a> {
         last_hashes: &'a Hashes,
         db: &'a mut db::Writer,
         progress: &'a mut dyn Progress,
+        keep_going: usize,
         pools: Vec<(String, usize)>,
         parallelism: usize,
     ) -> Self {
@@ -322,6 +324,7 @@ impl<'a> Work<'a> {
             graph,
             db,
             progress,
+            keep_going: keep_going,
             file_state,
             last_hashes,
             build_states: BuildStates::new(builds, pools),
@@ -700,11 +703,27 @@ impl<'a> Work<'a> {
                 t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
             });
 
-            self.progress
-                .completed(build, task.result.success, &task.result.output);
-            if !task.result.success {
-                return Ok(None);
-            }
+            self.progress.completed(
+                build,
+                task.result.termination == task::Termination::Success,
+                &task.result.output,
+            );
+            match task.result.termination {
+                task::Termination::Failure => {
+                    // Uh-oh! Check whether we should carry on.
+                    if self.keep_going > 0 {
+                        self.keep_going -= 1;
+                        if self.keep_going == 0 {
+                            return Ok(None);
+                        }
+                    }
+                }
+                task::Termination::Interrupted => {
+                    // If the task was interrupted bail immediately.
+                    return Ok(None);
+                }
+                task::Termination::Success => {}
+            };
 
             tasks_done += 1;
             self.record_finished(task.buildid, task.result)?;

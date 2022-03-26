@@ -18,16 +18,18 @@ enum BuildResult {
     Success(usize),
 }
 
+struct BuildParams<'a> {
+    parallelism: usize,
+    regen: bool,
+    keep_going: usize,
+    target_names: &'a [String],
+}
+
 // Build a given set of targets.  If regen is true, build "build.ninja" first if
 // possible, and if that build changes build.ninja, then return
 // BuildResult::Regen to signal to the caller that we need to start the whole
 // build over.
-fn build(
-    progress: &mut ConsoleProgress,
-    parallelism: usize,
-    regen: bool,
-    target_names: &[String],
-) -> anyhow::Result<BuildResult> {
+fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result<BuildResult> {
     let mut state = trace::scope("load::read", load::read)?;
 
     let mut work = work::Work::new(
@@ -35,11 +37,12 @@ fn build(
         &state.hashes,
         &mut state.db,
         progress,
+        params.keep_going,
         state.pools,
-        parallelism,
+        params.parallelism,
     );
 
-    if regen {
+    if params.regen {
         if let Some(target) = work.build_ninja_fileid() {
             // Attempt to rebuild build.ninja.
             work.want_fileid(target)?;
@@ -56,8 +59,8 @@ fn build(
         }
     }
 
-    if !target_names.is_empty() {
-        for name in target_names {
+    if !params.target_names.is_empty() {
+        for name in params.target_names {
             work.want_file(name)?;
         }
     } else if !state.default.is_empty() {
@@ -109,6 +112,12 @@ fn run() -> anyhow::Result<i32> {
         &format!("parallelism [default from system={}]", parallelism),
         "NUM",
     );
+    opts.optopt(
+        "k",
+        "",
+        "keep going until at least N failures (0 means infinity) [default=1]",
+        "N",
+    );
     opts.optflag("h", "help", "");
     opts.optflag("v", "verbose", "print executed command lines");
     if fake_ninja_compat {
@@ -150,6 +159,14 @@ fn run() -> anyhow::Result<i32> {
         }
     }
 
+    let keep_going = match matches.opt_str("k") {
+        Some(val) => match val.parse::<usize>() {
+            Ok(n) => n,
+            Err(e) => anyhow::bail!("invalid -k {:?}: {:?}", val, e),
+        },
+        None => 1,
+    };
+
     if let Some(dir) = matches.opt_str("C") {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
@@ -159,9 +176,16 @@ fn run() -> anyhow::Result<i32> {
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
-    let mut result = build(&mut progress, parallelism, true, &matches.free)?;
+    let mut params = BuildParams {
+        parallelism,
+        regen: true,
+        keep_going,
+        target_names: &matches.free,
+    };
+    let mut result = build(&mut progress, &params)?;
     if let BuildResult::Regen = result {
-        result = build(&mut progress, parallelism, false, &matches.free)?;
+        params.regen = false;
+        result = build(&mut progress, &params)?;
     }
 
     match result {
