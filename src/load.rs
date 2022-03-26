@@ -1,6 +1,6 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
-use crate::graph::FileId;
+use crate::graph::{FileId, RspFile};
 use crate::parse::Statement;
 use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
@@ -13,11 +13,11 @@ struct BuildImplicitVars<'a> {
     build: &'a graph::Build,
 }
 impl<'a> BuildImplicitVars<'a> {
-    fn file_list(&self, ids: &[FileId]) -> String {
+    fn file_list(&self, ids: &[FileId], sep: char) -> String {
         let mut out = String::new();
         for &id in ids {
             if !out.is_empty() {
-                out.push(' ');
+                out.push(sep);
             }
             out.push_str(&self.graph.file(id).name);
         }
@@ -27,8 +27,9 @@ impl<'a> BuildImplicitVars<'a> {
 impl<'a> eval::Env for BuildImplicitVars<'a> {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
         match var {
-            "in" => Some(Cow::Owned(self.file_list(self.build.explicit_ins()))),
-            "out" => Some(Cow::Owned(self.file_list(self.build.explicit_outs()))),
+            "in" => Some(Cow::Owned(self.file_list(self.build.explicit_ins(), ' '))),
+            "in_newline" => Some(Cow::Owned(self.file_list(self.build.explicit_ins(), '\n'))),
+            "out" => Some(Cow::Owned(self.file_list(self.build.explicit_outs(), ' '))),
             _ => None,
         }
     }
@@ -113,9 +114,22 @@ impl Loader {
         let desc = lookup("description");
         let depfile = lookup("depfile");
         let pool = lookup("pool");
+
+        let rspfile_path = lookup("rspfile");
+        let rspfile_content = lookup("rspfile_content");
+        let rspfile = match (rspfile_path, rspfile_content) {
+            (None, None) => None,
+            (Some(path), Some(content)) => Some(RspFile {
+                path: std::path::PathBuf::from(path),
+                content,
+            }),
+            _ => bail!("rspfile and rspfile_content need to be both specified"),
+        };
+
         build.cmdline = cmdline;
         build.desc = desc;
         build.depfile = depfile;
+        build.rspfile = rspfile;
         build.pool = pool;
 
         self.graph.add_build(build);
