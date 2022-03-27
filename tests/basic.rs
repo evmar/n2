@@ -50,6 +50,10 @@ impl TestSpace {
         std::fs::read(self.dir.path().join(path))
     }
 
+    fn metadata(&self, path: &str) -> std::io::Result<std::fs::Metadata> {
+        std::fs::metadata(self.dir.path().join(path))
+    }
+
     /// Invoke n2, returning process output.
     fn run(&self, cmd: &mut std::process::Command) -> std::io::Result<std::process::Output> {
         cmd.current_dir(self.dir.path()).output()
@@ -148,6 +152,61 @@ EOT
 
     // Run: everything should be up to date.
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "no work");
+
+    Ok(())
+}
+
+#[test]
+fn generate_rsp_file() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule cat
+  command = cat ${out}.rsp > ${out}
+  rspfile = ${out}.rsp
+  rspfile_content = 1 $in 2 $in_newline 3
+
+rule litter
+  command = cat make/me/${out}.rsp > ${out}
+  rspfile = make/me/${out}.rsp
+  rspfile_content = random stuff
+
+rule touch
+  command = touch $out
+
+build main: cat foo bar baz in
+build foo: litter bar
+build bar: touch baz
+build baz: touch in
+",
+    )?;
+    String::from_utf8(space.read("build.ninja").unwrap()).unwrap();
+    space.write("in", "go!")?;
+
+    let _ = space.run_expect(&mut n2_command(vec!["main"]))?;
+
+    // The 'main' and 'foo' targets copy the contents of their rsp file to their
+    // output.
+    let main_rsp = space.read("main").unwrap();
+    assert_eq!(main_rsp, b"1 foo bar baz in 2 foo\nbar\nbaz\nin 3");
+    let foo_rsp = space.read("foo").unwrap();
+    assert_eq!(foo_rsp, b"random stuff");
+
+    // The 'make/me' directory was created when writing an rsp file.
+    // It should still be there.
+    let meta = space.metadata("make/me").unwrap();
+    assert!(meta.is_dir());
+
+    // The rsp files themselves should have been cleaned up.
+    let err = space.metadata("main.rsp").unwrap_err();
+    assert!(err.kind() == std::io::ErrorKind::NotFound);
+    let err = space.metadata("make/me/foo.rsp").unwrap_err();
+    assert!(err.kind() == std::io::ErrorKind::NotFound);
+
+    // Run again: everything should be up to date.
+    let out = space.run_expect(&mut n2_command(vec!["main"]))?;
     assert_output_contains(&out, "no work");
 
     Ok(())
