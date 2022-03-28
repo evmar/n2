@@ -1,34 +1,36 @@
 //! Path canonicalization.
 
+use std::mem::MaybeUninit;
+
 /// An on-stack stack of values.
 /// Used for tracking locations of parent components within a path.
 struct StackStack<T> {
     n: usize,
-    vals: [T; 60],
+    vals: [MaybeUninit<T>; 60],
 }
 
 impl<T: Copy> StackStack<T> {
-    #[allow(deprecated)]
     fn new() -> Self {
         StackStack {
             n: 0,
             // Safety: we only access vals[i] after setting it.
-            vals: unsafe { std::mem::uninitialized() },
+            vals: unsafe { MaybeUninit::uninit().assume_init() },
         }
     }
 
-    fn push(&mut self, ptr: T) {
+    fn push(&mut self, val: T) {
         if self.n >= self.vals.len() {
             panic!("too many path components");
         }
-        self.vals[self.n] = ptr;
+        self.vals[self.n].write(val);
         self.n += 1;
     }
 
     fn pop(&mut self) -> Option<T> {
         if self.n > 0 {
             self.n -= 1;
-            Some(self.vals[self.n])
+            // Safety: we only access vals[i] after setting it.
+            Some(unsafe { self.vals[self.n].assume_init() })
         } else {
             None
         }
