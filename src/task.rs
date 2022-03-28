@@ -150,8 +150,10 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     // std::process::Command can't take a string and pass it through to CreateProcess unchanged,
     // so call that ourselves.
 
-    // TODO: Set this to just 0 for console pool jobs.
-    let process_flags = winapi::um::winbase::CREATE_NEW_PROCESS_GROUP;
+    // TODO: Set this to true  console pool jobs once support for that is implemented.
+    let is_in_console_pool = false;
+
+    let process_flags = if is_in_console_pool { 0 } else { winapi::um::winbase::CREATE_NEW_PROCESS_GROUP};
 
     let mut startup_info = zeroed_startupinfo();
     startup_info.cb = std::mem::size_of::<winapi::um::processthreadsapi::STARTUPINFOA>() as u32;
