@@ -221,6 +221,7 @@ build baz: touch in
 }
 
 /// Run a task that prints something, and verify it shows up.
+#[cfg(unix)]
 #[test]
 fn spam_output() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
