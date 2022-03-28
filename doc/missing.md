@@ -20,7 +20,3 @@
 Most of `-d` (debugging), `-t` (tools).
 
 No `-w` (warnings).
-
-## Missing rule variables
-
-- `$in_newline`, `$out_newline`

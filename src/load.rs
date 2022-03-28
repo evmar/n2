@@ -30,6 +30,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
             "in" => Some(Cow::Owned(self.file_list(self.build.explicit_ins(), ' '))),
             "in_newline" => Some(Cow::Owned(self.file_list(self.build.explicit_ins(), '\n'))),
             "out" => Some(Cow::Owned(self.file_list(self.build.explicit_outs(), ' '))),
+            "out_newline" => Some(Cow::Owned(self.file_list(self.build.explicit_outs(), '\n'))),
             _ => None,
         }
     }
