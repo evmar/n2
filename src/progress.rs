@@ -2,6 +2,7 @@
 //! user.
 
 use std::collections::VecDeque;
+use std::io::Write;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -94,13 +95,15 @@ pub struct ConsoleProgress {
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
-    /// Wether to print command lines of completed programs.
+    /// Whether to print command lines of completed programs.
     verbose: bool,
+    /// Whether to print a progress bar and currently running tasks.
+    fancy_terminal: bool,
 }
 
 #[allow(clippy::new_without_default)]
 impl ConsoleProgress {
-    pub fn new(verbose: bool) -> Self {
+    pub fn new(verbose: bool, fancy_terminal: bool) -> Self {
         ConsoleProgress {
             // Act like our last update was now, so that we delay slightly
             // before our first print.  This reduces flicker in the case where
@@ -108,7 +111,8 @@ impl ConsoleProgress {
             last_update: Instant::now(),
             counts: StateCounts::new(),
             tasks: VecDeque::new(),
-            verbose: verbose,
+            verbose,
+            fancy_terminal,
         }
     }
 }
@@ -116,7 +120,7 @@ impl ConsoleProgress {
 impl Progress for ConsoleProgress {
     fn update(&mut self, counts: &StateCounts) {
         self.counts = counts.clone();
-        self.maybe_print();
+        self.maybe_print_progress();
     }
 
     fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState) {
@@ -135,27 +139,41 @@ impl Progress for ConsoleProgress {
             }
             _ => {}
         }
-        self.maybe_print();
+        self.maybe_print_progress();
     }
 
     fn flush(&mut self) {
-        self.print();
+        self.print_progress();
     }
 
     fn completed(&mut self, build: &Build, success: bool, output: &[u8]) {
+        // By default we don't want to print anything when a task completes,
+        // but we do want to print the completed task when:
+        // - failed tasks
+        // - when we opted in to verbose output
+        // - when we aren't doing fancy terminal progress display
+        // - when the task had output (even in non-failing cases)
+
+        let message = if self.verbose {
+            build.cmdline.as_ref().unwrap()
+        } else {
+            build_message(build)
+        };
         if !success {
-            let message = build_message(build);
-            // If the user hit ctl-c, it may have printed something on the line.
-            // So \r to go to first column first, then the same clear we use elsewhere.
-            println!("\r\x1b[Jfailed: {}", message);
-            println!("{}", String::from_utf8_lossy(output));
-        } else if self.verbose {
-            println!("\r\x1b[J{}", build.cmdline.as_ref().unwrap());
+            self.clear_progress();
+            println!("failed: {}", message);
+        } else if self.verbose || !self.fancy_terminal || output.len() > 0 {
+            self.clear_progress();
+            println!("{}", message);
+        }
+
+        if output.len() > 0 {
+            std::io::stdout().write_all(output).unwrap();
         }
     }
 
     fn finish(&mut self) {
-        print!("\x1b[J");
+        self.clear_progress();
     }
 }
 
@@ -183,9 +201,22 @@ impl ConsoleProgress {
         bar
     }
 
-    fn print(&self) {
+    fn clear_progress(&self) {
+        if !self.fancy_terminal {
+            return;
+        }
+        // If the user hit ctl-c, it may have printed something on the line.
+        // So \r to go to first column first, then clear anything below.
+        std::io::stdout().write_all(b"\r\x1b[J").unwrap();
+    }
+
+    fn print_progress(&self) {
+        if !self.fancy_terminal {
+            return;
+        }
+        self.clear_progress();
         println!(
-            "\x1b[J[{}] {}/{} done, {}/{} running",
+            "[{}] {}/{} done, {}/{} running",
             self.progress_bar(),
             self.counts.get(BuildState::Done),
             self.counts.total(),
@@ -216,13 +247,13 @@ impl ConsoleProgress {
         print!("\x1b[{}A", lines);
     }
 
-    fn maybe_print(&mut self) {
+    fn maybe_print_progress(&mut self) {
         let now = Instant::now();
         let delta = now.duration_since(self.last_update);
         if delta < Duration::from_millis(50) {
             return;
         }
-        self.print();
+        self.print_progress();
         self.last_update = now;
     }
 }

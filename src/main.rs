@@ -74,6 +74,19 @@ fn build(
     })
 }
 
+#[cfg(unix)]
+fn use_fancy_terminal() -> bool {
+    unsafe {
+        libc::isatty(/* stdout */ 1) == 1
+    }
+}
+
+#[cfg(windows)]
+fn use_fancy_terminal() -> bool {
+    // TODO(windows): GetConsoleMode
+    true
+}
+
 fn run() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
     let fake_ninja_compat =
@@ -130,7 +143,7 @@ fn run() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
-    let mut progress = ConsoleProgress::new(matches.opt_present("v"));
+    let mut progress = ConsoleProgress::new(matches.opt_present("v"), use_fancy_terminal());
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.

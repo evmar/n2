@@ -219,3 +219,33 @@ build baz: touch in
 
     Ok(())
 }
+
+/// Run a task that prints something, and verify it shows up.
+#[test]
+fn spam_output() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule quiet
+  description = quiet $out
+  command = touch $out
+rule spam
+  description = spam $out
+  command = echo greetz from $out && touch $out
+build a: quiet
+build b: spam a
+build c: quiet b
+",
+    )?;
+    let out = space.run_expect(&mut n2_command(vec!["c"]))?;
+    assert_output_contains(
+        &out,
+        "quiet a
+spam b
+greetz from b
+quiet c
+",
+    );
+    Ok(())
+}
