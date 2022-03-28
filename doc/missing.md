@@ -1,7 +1,6 @@
 # Missing features from Ninja
 
 - Windows support, including MVSC-related features.
-- RSP files.
 - Dynamic dependencies.
 - `console` pool.  n2 currently just treats `console` as an ordinary pool of
   depth 1, and only shows console output after the task completes.
