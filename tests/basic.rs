@@ -83,21 +83,22 @@ fn empty_file() -> anyhow::Result<()> {
     Ok(())
 }
 
-
 #[cfg(unix)]
 fn touch_command() -> String {
-  "
+    "
 rule touch
   command = touch $out
-".to_owned()
+"
+    .to_owned()
 }
 
 #[cfg(windows)]
 fn touch_command() -> String {
-  "
+    "
 rule touch
   command = cmd /c type nul > $out
-".to_owned()
+"
+    .to_owned()
 }
 
 #[test]
@@ -105,7 +106,8 @@ fn basic_build() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-      &(touch_command() + "build out: touch in
+        &(touch_command()
+            + "build out: touch in
 "),
     )?;
     space.write("in", "")?;
@@ -120,7 +122,8 @@ fn create_subdir() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-      &(touch_command() + "build subdir/out: touch in
+        &(touch_command()
+            + "build subdir/out: touch in
 "),
     )?;
     space.write("in", "")?;
