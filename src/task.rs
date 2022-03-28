@@ -58,8 +58,18 @@ fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
 
 /// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
-#[cfg(unix)]
 fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> {
+    let mut result = run_command(cmdline)?;
+    if result.success {
+        if let Some(depfile) = depfile {
+            result.discovered_deps = Some(read_depfile(depfile)?);
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(unix)]
+fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     let mut cmd = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(cmdline)
@@ -69,14 +79,7 @@ fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> 
     output.append(&mut cmd.stderr);
     let success = cmd.status.success();
 
-    let mut discovered_deps: Option<Vec<String>> = None;
-    if success {
-        discovered_deps = match depfile {
-            None => None,
-            Some(deps) => Some(read_depfile(deps)?),
-        };
-    } else {
-        // Command failed.
+    if !success {
         if let Some(sig) = cmd.status.signal() {
             match sig {
                 libc::SIGINT => write!(output, "interrupted").unwrap(),
@@ -88,7 +91,7 @@ fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> 
     Ok(TaskResult {
         success,
         output,
-        discovered_deps,
+        discovered_deps: None,
     })
 }
 
@@ -127,7 +130,7 @@ fn zeroed_process_information() -> winapi::um::processthreadsapi::PROCESS_INFORM
 }
 
 #[cfg(windows)]
-fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> {
+fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     // Don't want to run `cmd /c` since that limits cmd line length to 8192 bytes.
     // std::process::Command can't take a string and pass it through to CreateProcess unchanged,
     // so call that ourselves.
@@ -189,20 +192,10 @@ fn run_task(cmdline: &str, depfile: Option<&str>) -> anyhow::Result<TaskResult> 
     //output.append(&mut cmd.stderr);
     let success = exit_code == 0;
 
-    let mut discovered_deps: Option<Vec<String>> = None;
-    if success {
-        discovered_deps = match depfile {
-            None => None,
-            Some(deps) => Some(read_depfile(deps)?),
-        };
-    } else {
-        // Command failed.
-    }
-
     Ok(TaskResult {
         success,
         output,
-        discovered_deps,
+        discovered_deps: None,
     })
 }
 
