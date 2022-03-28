@@ -171,6 +171,7 @@ EOT
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
 fn generate_rsp_file() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
