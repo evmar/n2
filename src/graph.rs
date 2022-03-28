@@ -4,12 +4,7 @@ use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::{self, Hasher};
-
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
-
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
+use std::time::SystemTime;
 
 /// Hash value used to identify a given instance of a Build's execution;
 /// compared to verify whether a Build is up to date.
@@ -284,29 +279,15 @@ impl Graph {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum MTime {
     Missing,
-    Stamp(u32),
-}
-
-#[cfg(windows)]
-fn mtime_from_filetime(mut filetime: u64) -> i64 {
-    // FILETIME is in 100-nanosecond increments since 1600. Convert to seconds since 2000.
-    filetime /= 1000000000 / 100; // 100ns -> s.
-
-    // 1600 epoch -> 2000 epoch (subtract 400 years).
-    use std::convert::TryInto;
-    (filetime - 12622770400).try_into().unwrap()
+    Stamp(SystemTime),
 }
 
 /// stat() an on-disk path, producing its MTime.
 pub fn stat(path: &str) -> std::io::Result<MTime> {
-    // TODO: Support timestamps with better-than-seconds resolution.
     // TODO: On Windows, use FindFirstFileEx()/FindNextFile() to get timestamps per
     //       directory, for better stat perf.
     Ok(match std::fs::metadata(path) {
-        #[cfg(unix)]
-        Ok(meta) => MTime::Stamp(meta.mtime() as u32),
-        #[cfg(windows)]
-        Ok(meta) => MTime::Stamp(mtime_from_filetime(meta.last_write_time()) as u32),
+        Ok(meta) => MTime::Stamp(meta.modified().unwrap()),
         Err(err) => {
             if err.kind() == std::io::ErrorKind::NotFound {
                 MTime::Missing
@@ -347,15 +328,16 @@ fn hash_files(
     ids: &[FileId],
 ) {
     for &id in ids {
+        let name = &graph.file(id).name;
         let mtime = file_state
             .get(id)
-            .unwrap_or_else(|| panic!("no state for {:?}", graph.file(id).name));
-        let mtime_int = match mtime {
-            MTime::Missing => panic!("missing file {:?}", graph.file(id).name),
-            MTime::Stamp(t) => t,
+            .unwrap_or_else(|| panic!("no state for {:?}", name));
+        let mtime = match mtime {
+            MTime::Stamp(mtime) => mtime,
+            MTime::Missing => panic!("missing file: {:?}", name),
         };
         hasher.write(graph.file(id).name.as_bytes());
-        hasher.write_u32(mtime_int);
+        std::hash::Hash::hash(&mtime, hasher);
         hasher.write_u8(UNIT_SEPARATOR);
     }
 }
@@ -400,4 +382,34 @@ impl Hashes {
         };
         hash != last_hash
     }
+}
+
+#[test]
+fn stat_mtime_resolution() {
+    use std::time::Duration;
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let filename = temp_dir.path().join("dummy");
+    let filename = filename.to_str().unwrap();
+
+    // Write once and stat.
+    std::fs::write(filename, "foo").unwrap();
+    let mtime1 = match stat(filename).unwrap() {
+        MTime::Stamp(mtime) => mtime,
+        _ => panic!("File not found: {}", filename),
+    };
+
+    // Sleep for a short interval.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Write twice and stat.
+    std::fs::write(filename, "foo").unwrap();
+    let mtime2 = match stat(filename).unwrap() {
+        MTime::Stamp(mtime) => mtime,
+        _ => panic!("File not found: {}", filename),
+    };
+
+    let diff = mtime2.duration_since(mtime1).unwrap();
+    assert!(diff > Duration::ZERO);
+    assert!(diff < Duration::from_millis(100));
 }
