@@ -8,16 +8,14 @@ use crate::graph::FileId;
 use crate::graph::Graph;
 use crate::graph::Hash;
 use crate::graph::Hashes;
-use anyhow::{anyhow, bail};
+use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-use std::io::Write;
+use std::fs;
+use std::io::{BufReader, BufWriter, Write};
 
 /// Files are identified by integers that are stable across n2 executions.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Id(u32);
 impl densemap::Index for Id {
     fn index(&self) -> usize {
@@ -33,249 +31,111 @@ impl From<usize> for Id {
 /// state.  Other state is directly loaded into the build graph.
 pub struct IdMap {
     /// Maps db::Id to FileId.
-    fileids: DenseMap<Id, FileId>,
+    file_ids: DenseMap<Id, FileId>,
     /// Maps FileId to db::Id.
     db_ids: HashMap<FileId, Id>,
 }
+
 impl IdMap {
     pub fn new() -> Self {
         IdMap {
-            fileids: DenseMap::new(),
+            file_ids: DenseMap::new(),
             db_ids: HashMap::new(),
         }
-    }
-}
-
-/// Buffer that accumulates a single record's worth of writes.
-/// Caller calls various .write_*() methods and then flush()es it to a Write.
-struct WriteBuf {
-    buf: [u8; 16 << 10],
-    len: usize,
-}
-
-#[allow(clippy::erasing_op)]
-#[allow(clippy::identity_op)]
-impl WriteBuf {
-    #[allow(deprecated)]
-    fn new() -> Self {
-        unsafe {
-            WriteBuf {
-                buf: std::mem::uninitialized(),
-                len: 0,
-            }
-        }
-    }
-
-    fn write_u16(&mut self, n: u16) {
-        self.buf[self.len..(self.len + 2)]
-            .copy_from_slice(&[((n >> (8 * 1)) & 0xFF) as u8, ((n >> (8 * 0)) & 0xFF) as u8]);
-        self.len += 2;
-    }
-
-    fn write_u24(&mut self, n: u32) {
-        self.buf[self.len..(self.len + 3)].copy_from_slice(&[
-            ((n >> (8 * 2)) & 0xFF) as u8,
-            ((n >> (8 * 1)) & 0xFF) as u8,
-            ((n >> (8 * 0)) & 0xFF) as u8,
-        ]);
-        self.len += 3;
-    }
-
-    fn write_u64(&mut self, n: u64) {
-        // Perf note: I tinkered with this in godbolt and using this form of
-        // copy_from_slice generated much better code (generating a bswap
-        // instruction!) than alternatives that did different kinds of indexing.
-        self.buf[self.len..(self.len + 8)].copy_from_slice(&[
-            ((n >> (8 * 7)) & 0xFF) as u8,
-            ((n >> (8 * 6)) & 0xFF) as u8,
-            ((n >> (8 * 5)) & 0xFF) as u8,
-            ((n >> (8 * 4)) & 0xFF) as u8,
-            ((n >> (8 * 3)) & 0xFF) as u8,
-            ((n >> (8 * 2)) & 0xFF) as u8,
-            ((n >> (8 * 1)) & 0xFF) as u8,
-            ((n >> (8 * 0)) & 0xFF) as u8,
-        ]);
-        self.len += 8;
-    }
-
-    fn write_str(&mut self, s: &str) {
-        self.write_u16(s.len() as u16);
-        self.buf[self.len..self.len + s.len()].copy_from_slice(s.as_bytes());
-        self.len += s.len();
-    }
-
-    fn write_id(&mut self, id: Id) {
-        if id.0 > (1 << 24) {
-            panic!("too many fileids");
-        }
-        self.write_u24(id.0 as u32);
-    }
-
-    fn flush<W: Write>(&mut self, w: &mut W) -> std::io::Result<()> {
-        w.write_all(&self.buf[0..self.len])?;
-        self.len = 0;
-        Ok(())
     }
 }
 
 /// An opened database, ready for writes.
 pub struct Writer {
     ids: IdMap,
-    w: File,
+    w: BufWriter<fs::File>,
 }
 
 impl Writer {
-    fn new(ids: IdMap, w: File) -> Self {
+    fn new(ids: IdMap, w: fs::File) -> Self {
+        let w = BufWriter::new(w);
         Writer { ids, w }
     }
 
-    fn write_file(&mut self, name: &str) -> std::io::Result<()> {
-        if name.len() >= 0b1000_0000_0000_0000 {
-            panic!("filename too long");
-        }
-        let mut buf = WriteBuf::new();
-        buf.write_str(name);
-        buf.flush(&mut self.w)
-    }
-
-    fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> std::io::Result<Id> {
-        let id = match self.ids.db_ids.get(&fileid) {
+    fn ensure_id(&mut self, graph: &Graph, file_id: FileId) -> anyhow::Result<Id> {
+        let id = match self.ids.db_ids.get(&file_id) {
             Some(&id) => id,
             None => {
-                let id = self.ids.fileids.push(fileid);
-                self.ids.db_ids.insert(fileid, id);
-                self.write_file(&graph.file(fileid).name)?;
+                let id = self.ids.file_ids.push(file_id);
+                self.ids.db_ids.insert(file_id, id);
+
+                let entry = DbEntry::File(graph.file(file_id).name.to_owned());
+                serde_cbor::ser::to_writer(&mut self.w, &entry)?;
+
                 id
             }
         };
         Ok(id)
     }
 
-    pub fn write_build(&mut self, graph: &Graph, id: BuildId, hash: Hash) -> std::io::Result<()> {
+    pub fn write_build(&mut self, graph: &Graph, id: BuildId, hash: Hash) -> anyhow::Result<()> {
         let build = graph.build(id);
-        let mut buf = WriteBuf::new();
-        let outs = build.outs();
-        let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
-        buf.write_u16(mark);
-        for &out in outs {
-            let id = self.ensure_id(graph, out)?;
-            buf.write_id(id);
-        }
-
-        let deps = build.discovered_ins();
-        buf.write_u16(deps.len() as u16);
-        for &dep in deps {
-            let id = self.ensure_id(graph, dep)?;
-            buf.write_id(id);
-        }
-
-        buf.write_u64(hash.0);
-
-        buf.flush(&mut self.w)
+        let outs = build
+            .outs()
+            .iter()
+            .map(|&file_id| self.ensure_id(graph, file_id))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let deps = build
+            .discovered_ins()
+            .iter()
+            .map(|&file_id| self.ensure_id(graph, file_id))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let entry = DbEntry::Build { outs, deps, hash };
+        serde_cbor::ser::to_writer(&mut self.w, &entry)?;
+        self.w.flush()?;
+        Ok(())
     }
 }
 
-/// Provides lower-level methods for reading serialized data.
-struct BReader<'a> {
-    r: BufReader<&'a mut File>,
-}
-impl<'a> BReader<'a> {
-    fn read_u16(&mut self) -> std::io::Result<u16> {
-        let mut arr: [u8; 2] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
-        self.r.read_exact(buf)?;
-        Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
-    }
+/// Opens or creates an on-disk database, loading its state into the provided Graph.
+pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(path)?;
+    let mut buf = BufReader::with_capacity(1usize << 16, &mut f);
+    let mut de = serde_cbor::Deserializer::from_reader(&mut buf).into_iter();
 
-    #[allow(clippy::erasing_op)]
-    #[allow(clippy::identity_op)]
-    fn read_u24(&mut self) -> std::io::Result<u32> {
-        let mut arr: [u8; 3] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
-        self.r.read_exact(buf)?;
-        Ok(((buf[0] as u32) << (8 * 2))
-            | ((buf[1] as u32) << (8 * 1))
-            | ((buf[2] as u32) << (8 * 0)))
-    }
-
-    #[allow(clippy::erasing_op)]
-    #[allow(clippy::identity_op)]
-    fn read_u64(&mut self) -> std::io::Result<u64> {
-        let mut arr: [u8; 8] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
-        self.r.read_exact(buf)?;
-        Ok(((buf[0] as u64) << (8 * 7))
-            | ((buf[1] as u64) << (8 * 6))
-            | ((buf[2] as u64) << (8 * 5))
-            | ((buf[3] as u64) << (8 * 4))
-            | ((buf[4] as u64) << (8 * 3))
-            | ((buf[5] as u64) << (8 * 2))
-            | ((buf[6] as u64) << (8 * 1))
-            | ((buf[7] as u64) << (8 * 0)))
-    }
-
-    fn read_id(&mut self) -> std::io::Result<Id> {
-        self.read_u24().map(|n| Id(n as u32))
-    }
-
-    fn read_str(&mut self, len: usize) -> std::io::Result<String> {
-        let mut buf = Vec::with_capacity(len);
-        // Safety: buf contents are uninitialized here, but we never read them
-        // before initialization.
-        unsafe { buf.set_len(len) };
-        self.r.read_exact(buf.as_mut_slice())?;
-        Ok(unsafe { String::from_utf8_unchecked(buf) })
-    }
-}
-
-/// Reads an on-disk database, loading its state into the provided Graph/Hashes.
-fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
-    let mut r = BReader {
-        r: std::io::BufReader::new(&mut f),
-    };
     let mut ids = IdMap::new();
 
     loop {
-        let mut len = match r.read_u16() {
-            Ok(r) => r,
-            Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(err) => bail!(err),
+        let entry = match de.next() {
+            None => break,
+            Some(Ok(entry)) => entry,
+            Some(Err(err)) => return Err(err.into()),
         };
-        let mask = 0b1000_0000_0000_0000;
-        if len & mask == 0 {
-            let mut name = r.read_str(len as usize)?;
-            let fileid = graph.file_id(&mut name);
-            let dbid = ids.fileids.push(fileid);
-            ids.db_ids.insert(fileid, dbid);
-        } else {
-            len &= !mask;
-
-            // Map each output to the associated build.
-            // In the common case, there is only one.
-            let mut bids = HashSet::new();
-            for _ in 0..len {
-                let id = r.read_id()?;
-                if let Some(bid) = graph.file(*ids.fileids.get(id)).input {
-                    bids.insert(bid);
+        match entry {
+            DbEntry::File(mut name) => {
+                let file_id = graph.file_id(&mut name);
+                let db_id = ids.file_ids.push(file_id);
+                ids.db_ids.insert(file_id, db_id);
+            }
+            DbEntry::Build { outs, deps, hash } => {
+                // Map each output to the associated build.
+                // In the common case, there is only one.
+                let builds = outs
+                    .into_iter()
+                    .filter_map(|id| graph.file(*ids.file_ids.get(id)).input)
+                    .collect::<HashSet<_>>();
+                let deps = deps
+                    .into_iter()
+                    .map(|id| *ids.file_ids.get(id))
+                    .collect::<Vec<_>>();
+                if builds.len() == 1 {
+                    // Common case: only one associated build.
+                    let bid = builds.into_iter().next().unwrap();
+                    graph.build_mut(bid).set_discovered_ins(deps);
+                    hashes.set(bid, hash);
+                } else {
+                    // The graph layout has changed since this build was recorded.
+                    // The hashes won't line up anyway so it will be treated as dirty.
                 }
-            }
-
-            let len = r.read_u16()?;
-            let mut deps = Vec::new();
-            for _ in 0..len {
-                let id = r.read_id()?;
-                deps.push(*ids.fileids.get(id));
-            }
-
-            let hash = Hash(r.read_u64()?);
-            if bids.len() == 1 {
-                // Common case: only one associated build.
-                let &id = bids.iter().next().unwrap();
-                graph.build_mut(id).set_discovered_ins(deps);
-                hashes.set(id, hash);
-            } else {
-                // The graph layout has changed since this build was recorded.
-                // The hashes won't line up anyway so it will be treated as dirty.
             }
         }
     }
@@ -283,18 +143,18 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
     Ok(Writer::new(ids, f))
 }
 
-/// Opens or creates an on-disk database, loading its state into the provided Graph.
-pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
-    match std::fs::OpenOptions::new()
-        .read(true)
-        .append(true)
-        .open(path)
-    {
-        Ok(f) => read(f, graph, hashes),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            let f = std::fs::File::create(path)?;
-            Ok(Writer::new(IdMap::new(), f))
-        }
-        Err(err) => Err(anyhow!(err)),
-    }
+#[derive(Serialize, Deserialize)]
+enum DbEntry {
+    #[serde(rename = "f")]
+    File(String),
+
+    #[serde(rename = "b")]
+    Build {
+        #[serde(rename = "o")]
+        outs: Vec<Id>,
+        #[serde(rename = "d")]
+        deps: Vec<Id>,
+        #[serde(rename = "h")]
+        hash: Hash,
+    },
 }
