@@ -256,7 +256,12 @@ impl Graph {
         for &out in &build.outs.ids {
             let f = self.files.get_mut(out);
             match f.input {
-                Some(b) => panic!("double link {:?}", b),
+                Some(b) => {
+                    // TODO this occurs when two builds claim the same output
+                    // file, which is an ordinary user error and which should
+                    // be pretty-printed to the user as such.
+                    panic!("double link {:?}", b);
+                }
                 None => f.input = Some(id),
             }
         }
