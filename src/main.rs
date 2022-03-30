@@ -91,15 +91,35 @@ fn use_fancy_terminal() -> bool {
     }
 }
 
+#[cfg(unix)]
+fn get_default_parallelism() -> usize {
+    // TODO do something like https://github.com/ninja-build/ninja/commit/1bcc689324bdee090eed035353724abc3fa7c909
+    // But libc crate doesn't have cpu_set_t on Mac?
+    unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) as usize }
+}
+
+#[cfg(not(unix))]
+fn get_default_parallelism() -> usize {
+    println!("TODO guess parallelism; using 8 for now");
+    8
+}
+
 fn run() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
     let fake_ninja_compat =
         Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
 
+    let mut parallelism = get_default_parallelism();
+
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");
     opts.optopt("d", "debug", "debugging tools", "TOOL");
-    opts.optopt("j", "", "parallelism (has good default)", "NUM");
+    opts.optopt(
+        "j",
+        "",
+        &format!("parallelism [default from system={}]", parallelism),
+        "NUM",
+    );
     opts.optflag("h", "help", "");
     opts.optflag("v", "verbose", "print executed command lines");
     if fake_ninja_compat {
@@ -134,7 +154,6 @@ fn run() -> anyhow::Result<i32> {
         }
     }
 
-    let mut parallelism: usize = 8;
     if let Some(parallelism_flag) = matches.opt_str("j") {
         match parallelism_flag.parse::<usize>() {
             Ok(n) => parallelism = n,
