@@ -71,13 +71,13 @@ fn is_ident_char(c: u8) -> bool {
 #[cfg(test)]
 fn is_path_char_baseline(c: u8) -> bool {
     match c as char {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' => true,
+        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' | '@' => true,
         _ => false,
     }
 }
 
 fn is_path_char(c: u8) -> bool {
-    let lookup: [u64; 4] = [0x3fff80000000000, 0x7fffffe87fffffe, 0x0, 0x0];
+    let lookup: [u64; 4] = [0x3fff80000000000, 0x7fffffe87ffffff, 0x0, 0x0];
     (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
 }
 

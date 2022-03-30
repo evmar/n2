@@ -3,7 +3,7 @@
 # See parse.rs: is_ident_char().
 
 ident_chars = ['az', 'AZ', '09', '_', '-', '.']
-path_chars = ['az', 'AZ', '09', '_', '-', '.', '/', ',', '+']
+path_chars = ['az', 'AZ', '09', '_', '-', '.', '/', ',', '+', '@']
 chars = path_chars
 
 tab = [0 for _ in range(256)]
