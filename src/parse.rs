@@ -51,25 +51,7 @@ pub struct Parser<'text> {
     path_buf: String,
 }
 
-/// Baseline implementation of is_ident_char.
-#[cfg(test)]
-fn is_ident_char_baseline(c: u8) -> bool {
-    match c as char {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' => true,
-        _ => false,
-    }
-}
-
-/// Lookup table implementation of is_ident_char.  Produces same output as
-/// _baseline version.  256-entry table is encoded as 4 64-bit integers.
-/// See gen_lookup_table.py for how it was generated.
 fn is_ident_char(c: u8) -> bool {
-    let lookup: [u64; 4] = [0x3ff600000000000, 0x7fffffe87fffffe, 0x0, 0x0];
-    (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
-}
-
-#[cfg(test)]
-fn is_path_char_baseline(c: u8) -> bool {
     match c as char {
         'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' | '@' => true,
         _ => false,
@@ -77,8 +59,11 @@ fn is_path_char_baseline(c: u8) -> bool {
 }
 
 fn is_path_char(c: u8) -> bool {
-    let lookup: [u64; 4] = [0x3fff80000000000, 0x7fffffe87ffffff, 0x0, 0x0];
-    (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
+    // Basically any character is allowed in paths, but we want to parse e.g.
+    //   build foo: bar | baz
+    // such that the colon is not part of the 'foo' path and such that '|' is
+    // not read as a path.
+    !matches!(c as char, '\0' | ' ' | '\n' | ':' | '|' | '$')
 }
 
 pub trait Loader {
@@ -421,24 +406,5 @@ default a b$var c
         };
         assert_eq!(default, vec!["a", "b3", "c"]);
         println!("{:?}", default);
-    }
-
-    #[test]
-    fn lookup_tables_match_baseline() {
-        for i in (0 as u8)..=255 {
-            assert_eq!(
-                is_ident_char(i),
-                is_ident_char_baseline(i),
-                "mismatch at {}",
-                i
-            );
-
-            assert_eq!(
-                is_path_char(i),
-                is_path_char_baseline(i),
-                "mismatch at {}",
-                i
-            );
-        }
     }
 }
