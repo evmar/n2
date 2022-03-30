@@ -49,7 +49,7 @@ impl IdMap {
 /// Buffer that accumulates a single record's worth of writes.
 /// Caller calls various .write_*() methods and then flush()es it to a Write.
 struct WriteBuf {
-    buf: [u8; 8192],
+    buf: [u8; 16 << 10],
     len: usize,
 }
 
