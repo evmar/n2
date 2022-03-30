@@ -51,34 +51,74 @@ pub struct Parser<'text> {
     path_buf: String,
 }
 
+// 256-entry lookup table bitmap encoded as 4 64-bit integers.
+type Bitmap = [u64; 4];
+
+/// Returns a (index, mask) tuple for testing/setting the n-th bit in a bitmap.
+#[inline(always)]
+const fn bitmap_index_and_mask(c: u8) -> (usize, u64) {
+    let index = c as usize >> 6;
+    let mask = 1u64 << (c & 63);
+    (index, mask)
+}
+
 /// Baseline implementation of is_ident_char.
-#[cfg(test)]
-fn is_ident_char_baseline(c: u8) -> bool {
-    match c as char {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' => true,
-        _ => false,
-    }
+const fn is_ident_char_baseline(c: u8) -> bool {
+    matches!(c as char, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.')
 }
 
-/// Lookup table implementation of is_ident_char.  Produces same output as
-/// _baseline version.  256-entry table is encoded as 4 64-bit integers.
-/// See gen_lookup_table.py for how it was generated.
+/// Generates a character matching lookup table at compile time.
+const fn ident_char_bitmap() -> Bitmap {
+    let mut bitmap = [0u64; 4];
+    let mut c = 0u8;
+    loop {
+        if is_ident_char_baseline(c) {
+            let (index, mask) = bitmap_index_and_mask(c);
+            bitmap[index] |= mask;
+        }
+        match c {
+            u8::MAX => break,
+            _ => c += 1,
+        }
+    }
+    bitmap
+}
+
+/// Lookup table implementation of is_ident_char. Produces same output as
+/// _baseline version.
 fn is_ident_char(c: u8) -> bool {
-    let lookup: [u64; 4] = [0x3ff600000000000, 0x7fffffe87fffffe, 0x0, 0x0];
-    (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
+    const BITMAP: Bitmap = ident_char_bitmap();
+    let (index, mask) = bitmap_index_and_mask(c);
+    (BITMAP[index] & mask) != 0
 }
 
-#[cfg(test)]
-fn is_path_char_baseline(c: u8) -> bool {
-    match c as char {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' | '@' => true,
-        _ => false,
+const fn is_path_char_baseline(c: u8) -> bool {
+    matches!(
+      c as char,
+      'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' | '@'
+    )
+}
+
+const fn path_char_bitmap() -> Bitmap {
+    let mut bitmap = [0u64; 4];
+    let mut c = 0u8;
+    loop {
+        if is_path_char_baseline(c) {
+            let (index, mask) = bitmap_index_and_mask(c);
+            bitmap[index] |= mask;
+        }
+        match c {
+            u8::MAX => break,
+            _ => c += 1,
+        }
     }
+    bitmap
 }
 
 fn is_path_char(c: u8) -> bool {
-    let lookup: [u64; 4] = [0x3fff80000000000, 0x7fffffe87ffffff, 0x0, 0x0];
-    (lookup[(c >> 6) as usize] & ((1 as u64) << (c & 63))) != 0
+    const BITMAP: Bitmap = path_char_bitmap();
+    let (index, mask) = bitmap_index_and_mask(c);
+    (BITMAP[index] & mask) != 0
 }
 
 pub trait Loader {
@@ -425,7 +465,7 @@ default a b$var c
 
     #[test]
     fn lookup_tables_match_baseline() {
-        for i in (0 as u8)..=255 {
+        for i in 0u8..=255 {
             assert_eq!(
                 is_ident_char(i),
                 is_ident_char_baseline(i),
