@@ -1,3 +1,11 @@
+## Git hook
+
+On a new checkout, run this to install the formatting check hook:
+
+```
+$ ln -s ../../git-pre-commit .git/hooks/pre-commit
+```
+
 ## Path handling and Unicode safety
 
 Currently we use Rust `String` for all paths and file contents, but
