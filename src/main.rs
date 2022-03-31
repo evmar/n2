@@ -92,16 +92,36 @@ fn use_fancy_terminal() -> bool {
 }
 
 #[cfg(unix)]
-fn get_default_parallelism() -> usize {
-    // TODO do something like https://github.com/ninja-build/ninja/commit/1bcc689324bdee090eed035353724abc3fa7c909
-    // But libc crate doesn't have cpu_set_t on Mac?
+fn get_processors() -> usize {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        // https://github.com/ninja-build/ninja/commit/1bcc689324bdee090eed035353724abc3fa7c909
+        let mut cpu_set: libc::cpu_set_t = std::mem::zeroed();
+        if (libc::sched_getaffinity(
+            /* current pid */ 0,
+            std::mem::size_of::<libc::cpu_set_t>() as libc::size_t,
+            &mut cpu_set,
+        )) == 0
+        {
+            return libc::CPU_COUNT(&cpu_set) as usize;
+        }
+    }
+
     unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) as usize }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn get_processors() -> usize {
+    // TODO: consider all of https://github.com/ninja-build/ninja/blob/25cdbae0ee1270a5c8dd6ba67696e29ad8076919/src/util.cc#L502
+    unsafe {
+        winapi::um::winbase::GetActiveProcessorCount(winapi::um::winnt::ALL_PROCESSOR_GROUPS)
+            as usize
+    }
+}
+
 fn get_default_parallelism() -> usize {
-    println!("TODO guess parallelism; using 8 for now");
-    8
+    // TODO: Ninja has logic around adding extra tasks with a high processor count.
+    get_processors()
 }
 
 fn run() -> anyhow::Result<i32> {
