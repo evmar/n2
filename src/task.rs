@@ -260,7 +260,7 @@ impl Runner {
             finished_recv: rx,
             running: 0,
             tids: ThreadIds::new(),
-            parallelism: parallelism,
+            parallelism,
         }
     }
 

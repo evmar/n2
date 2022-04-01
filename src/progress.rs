@@ -162,12 +162,12 @@ impl Progress for ConsoleProgress {
         if !success {
             self.clear_progress();
             println!("failed: {}", message);
-        } else if self.verbose || !self.fancy_terminal || output.len() > 0 {
+        } else if self.verbose || !self.fancy_terminal || !output.is_empty() {
             self.clear_progress();
             println!("{}", message);
         }
 
-        if output.len() > 0 {
+        if !output.is_empty() {
             std::io::stdout().write_all(output).unwrap();
         }
     }

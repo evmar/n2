@@ -70,7 +70,7 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
 mod tests {
     use super::*;
 
-    fn must_parse<'a>(buf: &'a mut Vec<u8>) -> Deps<'a> {
+    fn must_parse(buf: &mut Vec<u8>) -> Deps {
         let mut scanner = Scanner::new(buf);
         match parse(&mut scanner) {
             Err(err) => {
