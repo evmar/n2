@@ -13,9 +13,9 @@ mod task;
 pub mod trace;
 pub mod work;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(windows))]
 use jemallocator::Jemalloc;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(windows))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
