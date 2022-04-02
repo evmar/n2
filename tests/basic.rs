@@ -26,7 +26,10 @@ fn print_output(out: &std::process::Output) {
 fn assert_output_contains(out: &std::process::Output, text: &str) {
     let out = std::str::from_utf8(&out.stdout).unwrap();
     if !out.contains(text) {
-        panic!("assertion failed; expected output to contain {:?}", text);
+        panic!(
+            "assertion failed; expected output to contain {:?} but got {}",
+            text, out
+        );
     }
 }
 

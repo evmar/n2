@@ -18,6 +18,9 @@ use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
+#[cfg(unix)]
+use std::sync::Mutex;
+
 #[cfg(windows)]
 extern crate winapi;
 
@@ -84,11 +87,23 @@ fn run_task(
 }
 
 #[cfg(unix)]
+lazy_static! {
+    static ref TASK_MUTEX: Mutex<i32> = Mutex::new(0);
+}
+
+#[cfg(unix)]
 fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
-    let mut cmd = std::process::Command::new("/bin/sh")
+    // Command::spawn() can leak FSs when run concurrently, see #14.
+    let just_one = TASK_MUTEX.lock().unwrap();
+    let p = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(cmdline)
-        .output()?;
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    drop(just_one);
+
+    let mut cmd = p.wait_with_output()?;
     let mut output = Vec::new();
     output.append(&mut cmd.stdout);
     output.append(&mut cmd.stderr);

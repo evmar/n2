@@ -13,6 +13,10 @@ mod task;
 pub mod trace;
 pub mod work;
 
+#[cfg(unix)]
+#[macro_use]
+extern crate lazy_static;
+
 #[cfg(not(target_env = "msvc"))]
 use jemallocator::Jemalloc;
 
