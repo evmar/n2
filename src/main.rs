@@ -103,6 +103,7 @@ fn run() -> anyhow::Result<i32> {
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");
     opts.optopt("d", "debug", "debugging tools", "TOOL");
+    opts.optopt("t", "tool", "subcommands", "TOOL");
     opts.optopt(
         "j",
         "",
@@ -112,7 +113,6 @@ fn run() -> anyhow::Result<i32> {
     opts.optflag("h", "help", "");
     opts.optflag("v", "verbose", "print executed command lines");
     if fake_ninja_compat {
-        opts.optopt("t", "", "tool", "TOOL");
         opts.optflag("", "version", "print fake ninja version");
     }
     let matches = opts.parse(&args[1..])?;
@@ -126,9 +126,6 @@ fn run() -> anyhow::Result<i32> {
             println!("1.10.2");
             return Ok(0);
         }
-        if matches.opt_present("t") {
-            return Ok(0);
-        }
     }
 
     if let Some(debug) = matches.opt_str("d") {
@@ -140,6 +137,22 @@ fn run() -> anyhow::Result<i32> {
             }
             "trace" => trace::open("trace.json")?,
             _ => anyhow::bail!("unknown -d {:?}, use -d list to list", debug),
+        }
+    }
+
+    if let Some(tool) = matches.opt_str("t") {
+        match tool.as_str() {
+            "list" => {
+                println!("subcommands:");
+                println!("  (none yet, but see README if you're looking here trying to get CMake to work)");
+                return Ok(1);
+            }
+            _ => {
+                if fake_ninja_compat {
+                    return Ok(0);
+                }
+                anyhow::bail!("unknown -t {:?}, use -t list to list", tool);
+            }
         }
     }
 
