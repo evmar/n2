@@ -346,7 +346,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn want_file(&mut self, name: &str) -> anyhow::Result<()> {
-        let target = match self.graph.lookup_file_id(&name) {
+        let target = match self.graph.lookup_file_id(name) {
             None => anyhow::bail!("unknown path requested: {:?}", name),
             Some(id) => id,
         };
@@ -619,7 +619,7 @@ impl<'a> Work<'a> {
         let mut dirs: Vec<&std::path::Path> = Vec::new();
         for &out in ids {
             if let Some(parent) = std::path::Path::new(&self.graph.file(out).name).parent() {
-                if dirs.iter().find(|&&p| p == parent).is_some() {
+                if dirs.iter().any(|&p| p == parent) {
                     continue;
                 }
                 std::fs::create_dir_all(parent)?;

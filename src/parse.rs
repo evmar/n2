@@ -52,10 +52,7 @@ pub struct Parser<'text> {
 }
 
 fn is_ident_char(c: u8) -> bool {
-    match c as char {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' | '@' => true,
-        _ => false,
-    }
+    matches!(c as char, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '/' | ',' | '+' | '@')
 }
 
 fn is_path_char(c: u8) -> bool {

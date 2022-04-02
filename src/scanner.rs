@@ -82,7 +82,7 @@ impl<'a> Scanner<'a> {
 
     pub fn format_parse_error(&self, filename: &str, err: ParseError) -> String {
         let mut ofs = 0;
-        let lines = self.buf.split(|&c| c == '\n' as u8);
+        let lines = self.buf.split(|&c| c == b'\n');
         for (line_number, line) in lines.enumerate() {
             if ofs + line.len() >= err.ofs {
                 let mut msg = "parse error: ".to_string();

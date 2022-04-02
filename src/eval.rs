@@ -76,10 +76,7 @@ impl<'text> Vars<'text> {
 }
 impl<'a> Env for Vars<'a> {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
-        match self.0.get(var) {
-            Some(str) => Some(Cow::Borrowed(str.as_str())),
-            None => None,
-        }
+        self.0.get(var).map(|str| Cow::Borrowed(str.as_str()))
     }
 }
 
