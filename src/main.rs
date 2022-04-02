@@ -91,45 +91,14 @@ fn use_fancy_terminal() -> bool {
     }
 }
 
-#[cfg(unix)]
-fn get_processors() -> usize {
-    #[cfg(target_os = "linux")]
-    unsafe {
-        // https://github.com/ninja-build/ninja/commit/1bcc689324bdee090eed035353724abc3fa7c909
-        let mut cpu_set: libc::cpu_set_t = std::mem::zeroed();
-        if (libc::sched_getaffinity(
-            /* current pid */ 0,
-            std::mem::size_of::<libc::cpu_set_t>() as libc::size_t,
-            &mut cpu_set,
-        )) == 0
-        {
-            return libc::CPU_COUNT(&cpu_set) as usize;
-        }
-    }
-
-    unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) as usize }
-}
-
-#[cfg(windows)]
-fn get_processors() -> usize {
-    // TODO: consider all of https://github.com/ninja-build/ninja/blob/25cdbae0ee1270a5c8dd6ba67696e29ad8076919/src/util.cc#L502
-    unsafe {
-        winapi::um::winbase::GetActiveProcessorCount(winapi::um::winnt::ALL_PROCESSOR_GROUPS)
-            as usize
-    }
-}
-
-fn get_default_parallelism() -> usize {
-    // TODO: Ninja has logic around adding extra tasks with a high processor count.
-    get_processors()
-}
-
 fn run() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
     let fake_ninja_compat =
         Path::new(&args[0]).file_name().unwrap() == std::ffi::OsStr::new("ninja");
 
-    let mut parallelism = get_default_parallelism();
+    // Ninja uses available processors + a constant, but I don't think the
+    // difference matters too much.
+    let mut parallelism = usize::from(std::thread::available_parallelism()?);
 
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");

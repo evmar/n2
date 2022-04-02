@@ -17,9 +17,9 @@ pub mod work;
 #[macro_use]
 extern crate lazy_static;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(windows))]
 use jemallocator::Jemalloc;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(windows))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
