@@ -104,7 +104,7 @@ fn basic_build() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-        &[TOUCH_RULE, "build out: touch in"].join("\n"),
+        &[TOUCH_RULE, "build out: touch in", ""].join("\n"),
     )?;
     space.write("in", "")?;
     space.run_expect(&mut n2_command(vec!["out"]))?;
@@ -118,7 +118,7 @@ fn create_subdir() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-        &[TOUCH_RULE, "build subdir/out: touch in"].join("\n"),
+        &[TOUCH_RULE, "build subdir/out: touch in", ""].join("\n"),
     )?;
     space.write("in", "")?;
     space.run_expect(&mut n2_command(vec!["subdir/out"]))?;
