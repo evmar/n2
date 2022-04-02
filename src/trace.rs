@@ -56,6 +56,9 @@ impl Trace {
         result
     }
 
+    /*
+    These functions were useful when developing, but are currently unused.
+
     pub fn write_instant(&mut self, name: &str) {
         self.write_event_prefix(name, Instant::now());
         writeln!(self.w, "\"ph\":\"i\"}}").unwrap();
@@ -76,6 +79,7 @@ impl Trace {
         }
         writeln!(self.w, "}}}}").unwrap();
     }
+    */
 
     fn close(&mut self) {
         self.write_complete("main", 0, self.start, Instant::now());

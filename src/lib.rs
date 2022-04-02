@@ -4,14 +4,15 @@ mod densemap;
 mod depfile;
 mod eval;
 mod graph;
-pub mod load;
-pub mod parse;
-pub mod progress;
+mod load;
+mod parse;
+mod progress;
+pub mod run;
 mod scanner;
 mod signal;
 mod task;
-pub mod trace;
-pub mod work;
+mod trace;
+mod work;
 
 #[cfg(unix)]
 #[macro_use]

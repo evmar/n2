@@ -185,14 +185,6 @@ impl Build {
     pub fn outs(&self) -> &[FileId] {
         &self.outs.ids
     }
-
-    pub fn debug_name(&self, graph: &Graph) -> String {
-        format!(
-            "{} ({}, ...)",
-            self.location,
-            graph.file(self.outs()[0]).name
-        )
-    }
 }
 
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them,
