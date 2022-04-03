@@ -671,7 +671,7 @@ impl<'a> Work<'a> {
                     build.depfile.clone(),
                     build.rspfile.clone(),
                 );
-                self.progress.task_state(id, build, BuildState::Running);
+                self.progress.task_state(id, build, None);
                 made_progress = true;
             }
 
@@ -711,20 +711,8 @@ impl<'a> Work<'a> {
                 t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
             });
 
-            self.progress.task_state(
-                task.buildid,
-                build,
-                if task.result.termination == task::Termination::Success {
-                    BuildState::Done
-                } else {
-                    BuildState::Failed
-                },
-            );
-            self.progress.completed(
-                build,
-                task.result.termination == task::Termination::Success,
-                &task.result.output,
-            );
+            self.progress
+                .task_state(task.buildid, build, Some(&task.result));
             match task.result.termination {
                 task::Termination::Failure => {
                     if self.keep_going > 0 {
