@@ -8,6 +8,8 @@ use std::time::Instant;
 
 use crate::graph::Build;
 use crate::graph::BuildId;
+use crate::task::TaskResult;
+use crate::task::Termination;
 use crate::work::BuildState;
 use crate::work::StateCounts;
 
@@ -58,15 +60,8 @@ pub trait Progress {
     /// Called when we expect to be waiting for a while before another update.
     fn flush(&mut self);
 
-    /// Called when a task starts.
-    /// Not called for every BuildId, just the ones that start and complete.
-    fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState);
-
-    /// Called when a build has completed.
-    /// TODO: maybe this should just be part of task_state?
-    /// In particular, consider the case where builds output progress as they run,
-    /// as well as the case where multiple build steps are allowed to fail.
-    fn completed(&mut self, build: &Build, success: bool, output: &[u8]);
+    /// Called when a task starts or completes.
+    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>);
 
     /// Called when the overall build has completed (success or failure), to allow
     /// cleaning up the display.
@@ -123,9 +118,10 @@ impl Progress for ConsoleProgress {
         self.maybe_print_progress();
     }
 
-    fn task_state(&mut self, id: BuildId, build: &Build, state: BuildState) {
-        match state {
-            BuildState::Running => {
+    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
+        match result {
+            None => {
+                // Task starting.
                 let message = build_message(build);
                 self.tasks.push_back(Task {
                     id,
@@ -133,43 +129,18 @@ impl Progress for ConsoleProgress {
                     message: message.to_string(),
                 });
             }
-            BuildState::Done | BuildState::Failed => {
+            Some(result) => {
+                // Task completed.
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
+                self.print_result(build, result);
             }
-            _ => {}
         }
         self.maybe_print_progress();
     }
 
     fn flush(&mut self) {
         self.print_progress();
-    }
-
-    fn completed(&mut self, build: &Build, success: bool, output: &[u8]) {
-        // By default we don't want to print anything when a task completes,
-        // but we do want to print the completed task when:
-        // - failed tasks
-        // - when we opted in to verbose output
-        // - when we aren't doing fancy terminal progress display
-        // - when the task had output (even in non-failing cases)
-
-        let message = if self.verbose {
-            build.cmdline.as_ref().unwrap()
-        } else {
-            build_message(build)
-        };
-        if !success {
-            self.clear_progress();
-            println!("failed: {}", message);
-        } else if self.verbose || !self.fancy_terminal || !output.is_empty() {
-            self.clear_progress();
-            println!("{}", message);
-        }
-
-        if !output.is_empty() {
-            std::io::stdout().write_all(output).unwrap();
-        }
     }
 
     fn finish(&mut self) {
@@ -266,5 +237,39 @@ impl ConsoleProgress {
         }
         self.print_progress();
         self.last_update = now;
+    }
+
+    fn print_result(&mut self, build: &Build, result: &TaskResult) {
+        // By default we don't want to print anything when a task completes,
+        // but we do want to print the completed task when:
+        // - failed tasks
+        // - when we opted in to verbose output
+        // - when we aren't doing fancy terminal progress display
+        // - when the task had output (even in non-failing cases)
+
+        if result.termination == Termination::Success
+            && !self.verbose
+            && self.fancy_terminal
+            && result.output.is_empty()
+        {
+            return;
+        }
+
+        self.clear_progress();
+        let status = match result.termination {
+            Termination::Success => "",
+            Termination::Interrupted => "interrupted: ",
+            Termination::Failure => "failed: ",
+        };
+        let message = if self.verbose {
+            build.cmdline.as_ref().unwrap()
+        } else {
+            build_message(build)
+        };
+        println!("{}{}", status, message);
+
+        if !result.output.is_empty() {
+            std::io::stdout().write_all(&result.output).unwrap();
+        }
     }
 }
