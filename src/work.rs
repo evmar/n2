@@ -331,8 +331,8 @@ impl<'a> Work<'a> {
 
     /// If there's a build rule that generates build.ninja, return the FileId
     /// to pass to want_fileid that will rebuild it.
-    pub fn build_ninja_fileid(&mut self) -> Option<FileId> {
-        if let Some(id) = self.graph.lookup_file_id("build.ninja") {
+    pub fn build_ninja_fileid(&mut self, build_filename: &str) -> Option<FileId> {
+        if let Some(id) = self.graph.lookup_file_id(build_filename) {
             if self.graph.file(id).input.is_some() {
                 return Some(id);
             }

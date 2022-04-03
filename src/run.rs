@@ -39,7 +39,7 @@ fn build(
     );
 
     if regen {
-        if let Some(target) = work.build_ninja_fileid() {
+        if let Some(target) = work.build_ninja_fileid(build_filename) {
             // Attempt to rebuild build.ninja.
             work.want_fileid(target)?;
             match trace::scope("work.run", || work.run())? {
