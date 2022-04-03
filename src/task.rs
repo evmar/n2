@@ -239,7 +239,7 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     let termination = match exit_code {
         0 => Termination::Success,
         0xC000013A => Termination::Interrupted,
-        _ => Termination::Failed,
+        _ => Termination::Failure,
     };
 
     Ok(TaskResult {
