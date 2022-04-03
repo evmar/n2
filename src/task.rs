@@ -227,7 +227,7 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
         winapi::um::handleapi::CloseHandle(process_info.hProcess);
     }
 
-    let mut output = Vec::new();
+    let output = Vec::new();
     // TODO: Set up pipes so that we can print the process's output.
     //output.append(&mut cmd.stdout);
     //output.append(&mut cmd.stderr);

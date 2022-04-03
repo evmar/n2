@@ -135,11 +135,9 @@ fn run_impl() -> anyhow::Result<i32> {
         return Ok(1);
     }
 
-    if fake_ninja_compat {
-        if matches.opt_present("version") {
-            println!("1.10.2");
-            return Ok(0);
-        }
+    if fake_ninja_compat && matches.opt_present("version") {
+        println!("1.10.2");
+        return Ok(0);
     }
 
     if let Some(debug) = matches.opt_str("d") {
