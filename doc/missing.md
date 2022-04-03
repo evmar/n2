@@ -9,7 +9,6 @@
 
 ## Missing flags
 
-- `-k`, keep going until N jobs fail
 - `-l`, load average throttling
 - `-n`, dry run
 
