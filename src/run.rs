@@ -133,7 +133,6 @@ fn run_impl() -> anyhow::Result<i32> {
     if fake_ninja_compat {
         opts.optflag("", "version", "print fake ninja version");
     }
-    opts.optopt("", "progress", "write JSON progress status to FILE", "FILE");
     let matches = opts.parse(&args[1..])?;
     if matches.opt_present("h") {
         println!("{}", opts.usage("usage: n2 [target]"));
@@ -203,7 +202,7 @@ fn run_impl() -> anyhow::Result<i32> {
         use_fancy_terminal(),
     ));
 
-    if let Some(stream) = matches.opt_str("progress") {
+    if let Ok(stream) = std::env::var("N2_PROGRESS_STREAM") {
         let json_progress = Box::new(JSONProgress::new(&stream)?);
         progress = Box::new(MultiProgress::new(vec![progress, json_progress]));
     }
