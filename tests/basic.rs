@@ -243,3 +243,17 @@ quiet c
     );
     Ok(())
 }
+
+#[test]
+fn basic_specify_build_file() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build_specified.ninja",
+        &[TOUCH_RULE, "build out: touch in", ""].join("\n"),
+    )?;
+    space.write("in", "")?;
+    space.run_expect(&mut n2_command(vec!["-f", "build_specified.ninja", "out"]))?;
+    assert!(space.read("out").is_ok());
+
+    Ok(())
+}

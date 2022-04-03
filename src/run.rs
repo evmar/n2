@@ -9,8 +9,8 @@ use crate::{load, progress::ConsoleProgress, trace, work};
 enum BuildResult {
     /// A build task failed.
     Failed,
-    /// Renerated build.ninja rather than the requested build.  The caller must
-    /// reload build.ninja to continue with building.
+    /// Regenerated build.ninja rather than the requested build.  The caller
+    /// must reload build.ninja to continue with building.
     Regen,
     /// Build succeeded, and the number is the count of executed tasks.
     Success(usize),
@@ -23,10 +23,11 @@ enum BuildResult {
 fn build(
     progress: &mut ConsoleProgress,
     parallelism: usize,
+    build_filename: &str,
     regen: bool,
     target_names: &[String],
 ) -> anyhow::Result<BuildResult> {
-    let mut state = trace::scope("load::read", load::read)?;
+    let mut state = trace::scope_str("load::read", load::read, build_filename)?;
 
     let mut work = work::Work::new(
         &mut state.graph,
@@ -98,8 +99,16 @@ fn run_impl() -> anyhow::Result<i32> {
     // difference matters too much.
     let mut parallelism = usize::from(std::thread::available_parallelism()?);
 
+    let mut build_filename = "build.ninja".to_string();
+
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");
+    opts.optopt(
+        "f",
+        "",
+        "specify input build file [default=build.ninja]",
+        "FILE",
+    );
     opts.optopt("d", "debug", "debugging tools", "TOOL");
     opts.optopt("t", "tool", "subcommands", "TOOL");
     opts.optopt(
@@ -119,11 +128,9 @@ fn run_impl() -> anyhow::Result<i32> {
         return Ok(1);
     }
 
-    if fake_ninja_compat {
-        if matches.opt_present("version") {
-            println!("1.10.2");
-            return Ok(0);
-        }
+    if fake_ninja_compat && matches.opt_present("version") {
+        println!("1.10.2");
+        return Ok(0);
     }
 
     if let Some(debug) = matches.opt_str("d") {
@@ -166,13 +173,29 @@ fn run_impl() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
+    if let Some(name) = matches.opt_str("f") {
+        build_filename = name;
+    }
+
     let mut progress = ConsoleProgress::new(matches.opt_present("v"), use_fancy_terminal());
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
-    let mut result = build(&mut progress, parallelism, true, &matches.free)?;
+    let mut result = build(
+        &mut progress,
+        parallelism,
+        &build_filename,
+        true,
+        &matches.free,
+    )?;
     if let BuildResult::Regen = result {
-        result = build(&mut progress, parallelism, false, &matches.free)?;
+        result = build(
+            &mut progress,
+            parallelism,
+            &build_filename,
+            false,
+            &matches.free,
+        )?;
     }
 
     match result {
@@ -190,7 +213,7 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    return Ok(0);
+    Ok(0)
 }
 
 pub fn run() -> anyhow::Result<i32> {

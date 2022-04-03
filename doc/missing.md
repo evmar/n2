@@ -9,7 +9,6 @@
 
 ## Missing flags
 
-- `-f`, specify build file
 - `-k`, keep going until N jobs fail
 - `-l`, load average throttling
 - `-n`, dry run
