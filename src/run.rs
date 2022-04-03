@@ -27,7 +27,7 @@ fn build(
     regen: bool,
     target_names: &[String],
 ) -> anyhow::Result<BuildResult> {
-    let mut state = trace::scope_str("load::read", load::read, build_filename)?;
+    let mut state = trace::scope("load::read", || load::read(build_filename))?;
 
     let mut work = work::Work::new(
         &mut state.graph,
@@ -99,8 +99,6 @@ fn run_impl() -> anyhow::Result<i32> {
     // difference matters too much.
     let mut parallelism = usize::from(std::thread::available_parallelism()?);
 
-    let mut build_filename = "build.ninja".to_string();
-
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");
     opts.optopt(
@@ -128,9 +126,11 @@ fn run_impl() -> anyhow::Result<i32> {
         return Ok(1);
     }
 
-    if fake_ninja_compat && matches.opt_present("version") {
-        println!("1.10.2");
-        return Ok(0);
+    if fake_ninja_compat {
+        if matches.opt_present("version") {
+            println!("1.10.2");
+            return Ok(0);
+        }
     }
 
     if let Some(debug) = matches.opt_str("d") {
@@ -173,6 +173,7 @@ fn run_impl() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
+    let mut build_filename = "build.ninja".to_string();
     if let Some(name) = matches.opt_str("f") {
         build_filename = name;
     }

@@ -56,14 +56,6 @@ impl Trace {
         result
     }
 
-    fn scope_str<T>(&mut self, name: &str, f: impl FnOnce(&str) -> T, str: &str) -> T {
-        let start = Instant::now();
-        let result = f(str);
-        let end = Instant::now();
-        self.write_complete(name, 0, start, end);
-        result
-    }
-
     /*
     These functions were useful when developing, but are currently unused.
 
@@ -123,17 +115,6 @@ pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
         match &mut TRACE {
             None => f(),
             Some(t) => t.scope(name, f),
-        }
-    }
-}
-
-#[inline]
-pub fn scope_str<T>(name: &'static str, f: impl FnOnce(&str) -> T, str: &str) -> T {
-    // Safety: accessing global mut, not threadsafe.
-    unsafe {
-        match &mut TRACE {
-            None => f(str),
-            Some(t) => t.scope_str(name, f, str),
         }
     }
 }
