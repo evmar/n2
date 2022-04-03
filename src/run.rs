@@ -9,8 +9,8 @@ use crate::{load, progress::ConsoleProgress, trace, work};
 enum BuildResult {
     /// A build task failed.
     Failed,
-    /// Renerated build.ninja rather than the requested build.  The caller must
-    /// reload build.ninja to continue with building.
+    /// Regenerated build.ninja rather than the requested build.  The caller
+    /// must reload build.ninja to continue with building.
     Regen,
     /// Build succeeded, and the number is the count of executed tasks.
     Success(usize),
@@ -21,6 +21,7 @@ struct BuildParams<'a> {
     regen: bool,
     keep_going: usize,
     target_names: &'a [String],
+    build_filename: &'a String,
 }
 
 // Build a given set of targets.  If regen is true, build "build.ninja" first if
@@ -28,7 +29,7 @@ struct BuildParams<'a> {
 // BuildResult::Regen to signal to the caller that we need to start the whole
 // build over.
 fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result<BuildResult> {
-    let mut state = trace::scope("load::read", load::read)?;
+    let mut state = trace::scope("load::read", || load::read(params.build_filename))?;
 
     let mut work = work::Work::new(
         &mut state.graph,
@@ -41,7 +42,7 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
     );
 
     if params.regen {
-        if let Some(target) = work.build_ninja_fileid() {
+        if let Some(target) = work.build_ninja_fileid(params.build_filename) {
             // Attempt to rebuild build.ninja.
             work.want_fileid(target)?;
             match trace::scope("work.run", || work.run())? {
@@ -103,6 +104,12 @@ fn run_impl() -> anyhow::Result<i32> {
 
     let mut opts = getopts::Options::new();
     opts.optopt("C", "", "chdir before running", "DIR");
+    opts.optopt(
+        "f",
+        "",
+        "specify input build file [default=build.ninja]",
+        "FILE",
+    );
     opts.optopt("d", "debug", "debugging tools", "TOOL");
     opts.optopt("t", "tool", "subcommands", "TOOL");
     opts.optopt(
@@ -183,15 +190,22 @@ fn run_impl() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
+    let mut build_filename = "build.ninja".to_string();
+    if let Some(name) = matches.opt_str("f") {
+        build_filename = name;
+    }
+
     let mut progress = ConsoleProgress::new(matches.opt_present("v"), use_fancy_terminal());
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
+
     let mut params = BuildParams {
         parallelism,
         regen: true,
         keep_going,
         target_names: &matches.free,
+        build_filename: &build_filename,
     };
     let mut result = build(&mut progress, &params)?;
     if let BuildResult::Regen = result {
@@ -214,7 +228,7 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    return Ok(0);
+    Ok(0)
 }
 
 pub fn run() -> anyhow::Result<i32> {

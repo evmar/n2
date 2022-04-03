@@ -9,7 +9,6 @@
 
 ## Missing flags
 
-- `-f`, specify build file
 - `-l`, load average throttling
 - `-n`, dry run
 

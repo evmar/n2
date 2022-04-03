@@ -166,6 +166,40 @@ EOT
 
 #[cfg(unix)]
 #[test]
+fn generate_specified_build_file() -> anyhow::Result<()> {
+    // Run a project where a build rule generates specified_build.ninja.
+    let space = TestSpace::new()?;
+    space.write(
+        "gen.sh",
+        "
+cat >specified_build.ninja <<EOT
+rule regen
+  command = sh ./gen.sh
+  generator = 1
+build specified_build.ninja: regen gen.sh
+rule touch
+  command = touch \\$out
+build out: touch
+EOT
+",
+    )?;
+
+    // Generate the initial specified_build.ninja.
+    space.run_expect(std::process::Command::new("sh").args(vec!["./gen.sh"]))?;
+
+    // Run: expect to regenerate because we don't know how the file was made.
+    let out = space.run_expect(&mut n2_command(vec!["-f", "specified_build.ninja", "out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+
+    // Run: everything should be up to date.
+    let out = space.run_expect(&mut n2_command(vec!["-f", "specified_build.ninja", "out"]))?;
+    assert_output_contains(&out, "no work");
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn generate_rsp_file() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
@@ -241,5 +275,19 @@ greetz from b
 quiet c
 ",
     );
+    Ok(())
+}
+
+#[test]
+fn basic_specify_build_file() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build_specified.ninja",
+        &[TOUCH_RULE, "build out: touch in", ""].join("\n"),
+    )?;
+    space.write("in", "")?;
+    space.run_expect(&mut n2_command(vec!["-f", "build_specified.ninja", "out"]))?;
+    assert!(space.read("out").is_ok());
+
     Ok(())
 }
