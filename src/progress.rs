@@ -68,6 +68,40 @@ pub trait Progress {
     fn finish(&mut self);
 }
 
+pub struct MultiProgress {
+    progress: Vec<Box<dyn Progress>>,
+}
+impl MultiProgress {
+    pub fn new(progress: Vec<Box<dyn Progress>>) -> Self {
+        MultiProgress { progress }
+    }
+}
+impl Progress for MultiProgress {
+    fn update(&mut self, counts: &StateCounts) {
+        for p in self.progress.iter_mut() {
+            p.update(counts);
+        }
+    }
+
+    fn flush(&mut self) {
+        for p in self.progress.iter_mut() {
+            p.flush();
+        }
+    }
+
+    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
+        for p in self.progress.iter_mut() {
+            p.task_state(id, build, result);
+        }
+    }
+
+    fn finish(&mut self) {
+        for p in self.progress.iter_mut() {
+            p.finish();
+        }
+    }
+}
+
 /// Currently running build task, as tracked for progress updates.
 struct Task {
     id: BuildId,

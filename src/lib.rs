@@ -4,6 +4,7 @@ mod densemap;
 mod depfile;
 mod eval;
 mod graph;
+mod json_progress;
 mod load;
 mod parse;
 mod progress;
