@@ -133,7 +133,7 @@ impl Progress for ConsoleProgress {
                     message: message.to_string(),
                 });
             }
-            BuildState::Done => {
+            BuildState::Done | BuildState::Failed => {
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
             }
@@ -184,7 +184,10 @@ impl ConsoleProgress {
         let mut sum: usize = 0;
         let total = self.counts.total();
         for (count, ch) in [
-            (self.counts.get(BuildState::Done), '='),
+            (
+                self.counts.get(BuildState::Done) + self.counts.get(BuildState::Failed),
+                '=',
+            ),
             (
                 self.counts.get(BuildState::Queued)
                     + self.counts.get(BuildState::Running)
@@ -215,14 +218,22 @@ impl ConsoleProgress {
             return;
         }
         self.clear_progress();
-        println!(
-            "[{}] {}/{} done, {}/{} running",
+        let failed = self.counts.get(BuildState::Failed);
+        let mut progress_line = format!(
+            "[{}] {}/{} done, ",
             self.progress_bar(),
-            self.counts.get(BuildState::Done),
-            self.counts.total(),
+            self.counts.get(BuildState::Done) + failed,
+            self.counts.total()
+        );
+        if failed > 0 {
+            progress_line.push_str(&format!("{} failed, ", failed));
+        }
+        progress_line.push_str(&format!(
+            "{}/{} running",
             self.tasks.len(),
             self.counts.get(BuildState::Queued) + self.tasks.len(),
-        );
+        ));
+        println!("{}", progress_line);
 
         let max_cols = get_terminal_cols().unwrap_or(80);
         let mut lines = 1;

@@ -36,18 +36,20 @@ pub enum BuildState {
     Queued,
     /// Currently executing.
     Running,
-    /// Finished executing.
+    /// Finished executing successfully.
     Done,
+    /// Finished executing but failed.
+    Failed,
 }
 
 // Counters that track number of builds in each state.
 // Only covers builds not in the "unknown" state, which means it's only builds
 // that are considered part of the current build.
 #[derive(Clone, Debug)]
-pub struct StateCounts([usize; 5]);
+pub struct StateCounts([usize; 6]);
 impl StateCounts {
     pub fn new() -> Self {
-        StateCounts([0; 5])
+        StateCounts([0; 6])
     }
     fn idx(state: BuildState) -> usize {
         match state {
@@ -57,6 +59,7 @@ impl StateCounts {
             BuildState::Queued => 2,
             BuildState::Running => 3,
             BuildState::Done => 4,
+            BuildState::Failed => 5,
         }
     }
     fn add(&mut self, state: BuildState, delta: isize) {
@@ -67,7 +70,7 @@ impl StateCounts {
         self.0[StateCounts::idx(state)]
     }
     pub fn total(&self) -> usize {
-        self.0[0] + self.0[1] + self.0[2] + self.0[3] + self.0[4]
+        self.0[0] + self.0[1] + self.0[2] + self.0[3] + self.0[4] + self.0[5]
     }
 }
 
@@ -639,6 +642,7 @@ impl<'a> Work<'a> {
         #[cfg(unix)]
         signal::register_sigint();
         let mut tasks_done = 0;
+        let mut tasks_failed = 0;
         while self.build_states.unfinished() {
             self.progress.update(&self.build_states.counts);
 
@@ -686,7 +690,11 @@ impl<'a> Work<'a> {
             }
 
             if !self.runner.is_running() {
-                panic!("no work to do and runner not running?");
+                if tasks_failed > 0 {
+                    // No more progress can be made, hopefully due to tasks that failed.
+                    break;
+                }
+                panic!("BUG: no work to do and runner not running");
             }
 
             // Flush progress here, to ensure that the progress is the most up
@@ -703,6 +711,15 @@ impl<'a> Work<'a> {
                 t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
             });
 
+            self.progress.task_state(
+                task.buildid,
+                build,
+                if task.result.termination == task::Termination::Success {
+                    BuildState::Done
+                } else {
+                    BuildState::Failed
+                },
+            );
             self.progress.completed(
                 build,
                 task.result.termination == task::Termination::Success,
@@ -710,34 +727,36 @@ impl<'a> Work<'a> {
             );
             match task.result.termination {
                 task::Termination::Failure => {
-                    // Uh-oh! Check whether we should carry on.
                     if self.keep_going > 0 {
                         self.keep_going -= 1;
                         if self.keep_going == 0 {
                             return Ok(None);
                         }
                     }
+                    tasks_failed += 1;
+                    self.build_states
+                        .set(task.buildid, build, BuildState::Failed);
                 }
                 task::Termination::Interrupted => {
                     // If the task was interrupted bail immediately.
                     return Ok(None);
                 }
-                task::Termination::Success => {}
+                task::Termination::Success => {
+                    tasks_done += 1;
+                    self.record_finished(task.buildid, task.result)?;
+                    self.ready_dependents(task.buildid);
+                }
             };
-
-            tasks_done += 1;
-            self.record_finished(task.buildid, task.result)?;
-            self.progress.task_state(
-                task.buildid,
-                self.graph.build(task.buildid),
-                BuildState::Done,
-            );
-            self.ready_dependents(task.buildid);
         }
 
-        Ok(Some(tasks_done))
+        Ok(if tasks_failed > 0 {
+            None
+        } else {
+            Some(tasks_done)
+        })
     }
 
+    /// Returns the number of tasks executed on successful builds, or None on failed builds.
     pub fn run(&mut self) -> anyhow::Result<Option<usize>> {
         let result = self.run_without_cleanup();
         // Clean up progress before returning.

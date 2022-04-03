@@ -114,15 +114,10 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     let mut output = Vec::new();
     output.append(&mut cmd.stdout);
     output.append(&mut cmd.stderr);
-    let success = cmd.status.success();
 
-    let mut termination;
-
-    if success {
-        termination = Termination::Success;
-    } else {
+    let mut termination = Termination::Success;
+    if !cmd.status.success() {
         termination = Termination::Failure;
-        // Command failed.
         if let Some(sig) = cmd.status.signal() {
             match sig {
                 libc::SIGINT => {
