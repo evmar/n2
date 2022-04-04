@@ -57,7 +57,7 @@ fn is_path_char(c: u8) -> bool {
     //   build foo: bar | baz
     // such that the colon is not part of the 'foo' path and such that '|' is
     // not read as a path.
-    !matches!(c as char, '\0' | ' ' | '\n' | ':' | '|' | '$')
+    !matches!(c as char, '\0' | ' ' | '\n' | '\r' | ':' | '|' | '$')
 }
 
 pub trait Loader {
@@ -85,7 +85,7 @@ impl<'text> Parser<'text> {
         loop {
             match self.scanner.peek() {
                 '\0' => return Ok(None),
-                '\n' => self.scanner.next(),
+                '\n' | '\r' => self.scanner.next(),
                 '#' => self.skip_comment()?,
                 ' ' | '\t' => return self.scanner.parse_error("unexpected whitespace"),
                 _ => {
@@ -143,6 +143,7 @@ impl<'text> Parser<'text> {
 
     fn read_rule(&mut self) -> ParseResult<Rule<'text>> {
         let name = self.read_ident()?;
+        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Rule { name, vars })
@@ -150,6 +151,7 @@ impl<'text> Parser<'text> {
 
     fn read_pool(&mut self) -> ParseResult<Pool<'text>> {
         let name = self.read_ident()?;
+        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         let mut depth = 0;
@@ -223,6 +225,7 @@ impl<'text> Parser<'text> {
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
 
+        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         Ok(Build {
@@ -247,6 +250,7 @@ impl<'text> Parser<'text> {
         if defaults.is_empty() {
             return self.scanner.parse_error("expected path");
         }
+        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         Ok(defaults)
     }
@@ -279,10 +283,14 @@ impl<'text> Parser<'text> {
         // Guaranteed at least one part.
         let mut parts = Vec::with_capacity(1);
         let mut ofs = self.scanner.ofs;
-        loop {
+        let end = loop {
             match self.scanner.read() {
                 '\0' => return self.scanner.parse_error("unexpected EOF"),
-                '\n' => break,
+                '\n' => break self.scanner.ofs - 1,
+                '\r' if self.scanner.peek() == '\n' => {
+                    self.scanner.next();
+                    break self.scanner.ofs - 2;
+                }
                 '$' => {
                     let end = self.scanner.ofs - 1;
                     if end > ofs {
@@ -293,8 +301,7 @@ impl<'text> Parser<'text> {
                 }
                 _ => {}
             }
-        }
-        let end = self.scanner.ofs - 1;
+        };
         if end > ofs {
             parts.push(EvalPart::Literal(self.scanner.slice(ofs, end)));
         }
@@ -324,7 +331,7 @@ impl<'text> Parser<'text> {
                             }
                         }
                     }
-                    ':' | '|' | ' ' | '\n' => {
+                    ':' | '|' | ' ' | '\n' | '\r' => {
                         self.scanner.back();
                         break;
                     }
@@ -345,7 +352,7 @@ impl<'text> Parser<'text> {
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'text str>> {
         Ok(match self.scanner.read() {
-            '\n' => {
+            '\n' | '\r' => {
                 self.scanner.skip_spaces();
                 EvalPart::Literal(self.scanner.slice(0, 0))
             }
@@ -385,20 +392,24 @@ impl Loader for StringLoader {
 mod tests {
     use super::*;
 
+    fn test_for_line_endings(input: &[&str], test: fn(&str)) {
+        let test_case_lf = input.join("\n");
+        let test_case_crlf = input.join("\r\n");
+        for test_case in [test_case_lf, test_case_crlf] {
+            test(&test_case);
+        }
+    }
+
     #[test]
     fn parse_defaults() {
-        let mut buf = "
-var = 3
-default a b$var c
-        "
-        .as_bytes()
-        .to_vec();
-        let mut parser = Parser::new(&mut buf);
-        let default = match parser.read(&mut StringLoader {}).unwrap().unwrap() {
-            Statement::Default(d) => d,
-            _ => panic!("expected default"),
-        };
-        assert_eq!(default, vec!["a", "b3", "c"]);
-        println!("{:?}", default);
+        test_for_line_endings(&["var = 3", "default a b$var c", ""], |test_case| {
+            let mut buf = test_case.as_bytes().to_vec();
+            let mut parser = Parser::new(&mut buf);
+            let default = match parser.read(&mut StringLoader {}).unwrap().unwrap() {
+                Statement::Default(d) => d,
+                _ => panic!("expected default"),
+            };
+            assert_eq!(default, vec!["a", "b3", "c"]);
+        });
     }
 }
