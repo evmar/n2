@@ -5,6 +5,7 @@ use crate::densemap::DenseMap;
 use crate::graph::*;
 use crate::progress;
 use crate::progress::Progress;
+use crate::smallmap::SmallMap;
 use crate::task;
 use crate::trace;
 use std::collections::HashSet;
@@ -108,24 +109,19 @@ struct BuildStates {
 
     /// Named pools of queued and running builds.
     /// Builds otherwise default to using an unnamed infinite pool.
-    /// We expect a relatively small number of pools, such that a Vec is more
-    /// efficient than a HashMap.
-    pools: Vec<(String, PoolState)>,
+    pools: SmallMap<String, PoolState>,
 }
 
 impl BuildStates {
-    fn new(size: BuildId, depths: Vec<(String, usize)>) -> Self {
-        let mut pools: Vec<(String, PoolState)> = vec![
-            // The implied default pool.
-            (String::from(""), PoolState::new(0)),
-            // TODO: the console pool is just a depth-1 pool for now.
-            (String::from("console"), PoolState::new(1)),
-        ];
-        pools.extend(
-            depths
-                .into_iter()
-                .map(|(name, depth)| (name, PoolState::new(depth))),
-        );
+    fn new(size: BuildId, depths: SmallMap<String, usize>) -> Self {
+        let mut pools = SmallMap::new();
+        // The implied default pool.
+        pools.insert(String::from(""), PoolState::new(0));
+        // TODO: the console pool is just a depth-1 pool for now.
+        pools.insert(String::from("console"), PoolState::new(1));
+        for (name, depth) in depths.into_iter() {
+            pools.insert(name, PoolState::new(depth));
+        }
         BuildStates {
             states: DenseMap::new_sized(size, BuildState::Unknown),
             counts: StateCounts::new(),
@@ -318,7 +314,7 @@ impl<'a> Work<'a> {
         db: &'a mut db::Writer,
         progress: &'a mut dyn Progress,
         keep_going: usize,
-        pools: Vec<(String, usize)>,
+        pools: SmallMap<String, usize>,
         parallelism: usize,
     ) -> Self {
         let file_state = FileState::new(graph);
@@ -756,6 +752,8 @@ impl<'a> Work<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn build_cycle() -> Result<(), anyhow::Error> {
         let file = "
@@ -765,7 +763,7 @@ build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja".to_string(), file.as_bytes().to_vec())?;
         let a_id = graph.file_id(&mut "a".to_string());
-        let mut states = crate::work::BuildStates::new(graph.builds.next_id(), vec![]);
+        let mut states = crate::work::BuildStates::new(graph.builds.next_id(), SmallMap::new());
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {
             Ok(_) => panic!("expected build cycle error"),

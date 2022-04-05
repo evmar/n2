@@ -2,6 +2,7 @@
 
 use crate::graph::{FileId, RspFile};
 use crate::parse::Statement;
+use crate::smallmap::SmallMap;
 use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
 use std::borrow::Cow;
@@ -41,7 +42,7 @@ struct Loader {
     graph: graph::Graph,
     default: Vec<FileId>,
     rules: HashMap<String, eval::LazyVars>,
-    pools: Vec<(String, usize)>,
+    pools: SmallMap<String, usize>,
 }
 
 impl parse::Loader for Loader {
@@ -57,7 +58,7 @@ impl Loader {
             graph: graph::Graph::new(),
             default: Vec::new(),
             rules: HashMap::new(),
-            pools: Vec::new(),
+            pools: SmallMap::new(),
         };
 
         loader
@@ -170,7 +171,7 @@ impl Loader {
                 }
                 Statement::Build(build) => self.add_build(filename.clone(), &parser.vars, build)?,
                 Statement::Pool(pool) => {
-                    self.pools.push((pool.name.to_string(), pool.depth));
+                    self.pools.insert(pool.name.to_string(), pool.depth);
                 }
             };
         }
@@ -184,7 +185,7 @@ pub struct State {
     pub db: db::Writer,
     pub hashes: graph::Hashes,
     pub default: Vec<FileId>,
-    pub pools: Vec<(String, usize)>,
+    pub pools: SmallMap<String, usize>,
 }
 
 /// Load build.ninja/.n2_db and return the loaded build graph and state.

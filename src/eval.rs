@@ -3,6 +3,8 @@
 
 use std::{borrow::Cow, collections::HashMap};
 
+use crate::smallmap::SmallMap;
+
 /// An environment providing a mapping of variable name to variable value.
 /// A given EvalString may be expanded with multiple environments as possible
 /// context.
@@ -84,27 +86,7 @@ impl<'a> Env for Vars<'a> {
 /// For variables attached to a rule we keep them unexpanded in memory because
 /// they may be expanded in multiple different ways depending on which rule uses
 /// them.
-pub struct LazyVars(Vec<(String, EvalString<String>)>);
-#[allow(clippy::new_without_default)]
-impl LazyVars {
-    pub fn new() -> Self {
-        LazyVars(Vec::new())
-    }
-    pub fn insert(&mut self, key: String, val: EvalString<String>) {
-        self.0.push((key, val));
-    }
-    pub fn get(&self, key: &str) -> Option<&EvalString<String>> {
-        for (k, v) in &self.0 {
-            if k == key {
-                return Some(v);
-            }
-        }
-        None
-    }
-    pub fn keyvals(&self) -> &Vec<(String, EvalString<String>)> {
-        &self.0
-    }
-}
+pub type LazyVars = SmallMap<String, EvalString<String>>;
 impl<'a> Env for LazyVars {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
         self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
