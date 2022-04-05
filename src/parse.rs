@@ -153,7 +153,7 @@ impl<'text> Parser<'text> {
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         let mut depth = 0;
-        for (key, val) in vars.keyvals() {
+        for (key, val) in vars.iter() {
             match key.as_str() {
                 "depth" => {
                     let val = val.evaluate(&[]);

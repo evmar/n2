@@ -10,6 +10,7 @@ mod progress;
 pub mod run;
 mod scanner;
 mod signal;
+mod smallmap;
 mod task;
 mod trace;
 mod work;
