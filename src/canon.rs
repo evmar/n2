@@ -54,7 +54,7 @@ pub fn canon_path_in_place(path: &mut String) {
         if src == end {
             return;
         }
-        if *src == b'/' {
+        if *src == b'/' || *src == b'\\' {
             src = src.add(1);
             dst = dst.add(1);
         }
@@ -63,7 +63,7 @@ pub fn canon_path_in_place(path: &mut String) {
         while src < end {
             // Peek ahead for special path components: "/", ".", and "..".
             match *src {
-                b'/' => {
+                b'/' | b'\\' => {
                     src = src.add(1);
                     continue;
                 }
@@ -73,7 +73,7 @@ pub fn canon_path_in_place(path: &mut String) {
                         break; // Trailing '.', trim.
                     }
                     match *peek {
-                        b'/' => {
+                        b'/' | b'\\' => {
                             // "./", skip.
                             src = src.add(2);
                             continue;
@@ -81,7 +81,7 @@ pub fn canon_path_in_place(path: &mut String) {
                         b'.' => {
                             // ".."
                             peek = peek.add(1);
-                            if !(peek == end || *peek == b'/') {
+                            if !(peek == end || *peek == b'/' || *peek == b'\\') {
                                 // Componet that happens to start with "..".
                                 // Handle as an ordinary component.
                                 break;
@@ -95,7 +95,7 @@ pub fn canon_path_in_place(path: &mut String) {
                                 *dst = b'.';
                                 dst = dst.add(1);
                                 if peek != end {
-                                    *dst = b'/';
+                                    *dst = *peek;
                                     dst = dst.add(1);
                                 }
                             }
@@ -116,7 +116,7 @@ pub fn canon_path_in_place(path: &mut String) {
                 *dst = *src;
                 src = src.add(1);
                 dst = dst.add(1);
-                if *src.offset(-1) == b'/' {
+                if *src.offset(-1) == b'/' || *src.offset(-1) == b'\\' {
                     break;
                 }
             }
@@ -136,33 +136,42 @@ pub fn canon_path<T: Into<String>>(inpath: T) -> String {
 mod tests {
     use super::*;
 
+    // Assert that canon path equals expected path with different path separators
+    fn assert_canon_path_eq(left: &str, right: &str) {
+        assert_eq!(canon_path(left), right);
+        assert_eq!(
+            canon_path(left.replace('/', "\\")),
+            right.replace('/', "\\")
+        );
+    }
+
     #[test]
     fn noop() {
-        assert_eq!(canon_path("foo"), "foo");
+        assert_canon_path_eq("foo", "foo");
 
-        assert_eq!(canon_path("foo/bar"), "foo/bar");
+        assert_canon_path_eq("foo/bar", "foo/bar");
     }
 
     #[test]
     fn dot() {
-        assert_eq!(canon_path("./foo"), "foo");
-        assert_eq!(canon_path("foo/."), "foo/");
-        assert_eq!(canon_path("foo/./bar"), "foo/bar");
+        assert_canon_path_eq("./foo", "foo");
+        assert_canon_path_eq("foo/.", "foo/");
+        assert_canon_path_eq("foo/./bar", "foo/bar");
     }
 
     #[test]
     fn slash() {
-        assert_eq!(canon_path("/foo"), "/foo");
-        assert_eq!(canon_path("foo//bar"), "foo/bar");
+        assert_canon_path_eq("/foo", "/foo");
+        assert_canon_path_eq("foo//bar", "foo/bar");
     }
 
     #[test]
     fn parent() {
-        assert_eq!(canon_path("foo/../bar"), "bar");
+        assert_canon_path_eq("foo/../bar", "bar");
 
-        assert_eq!(canon_path("/foo/../bar"), "/bar");
-        assert_eq!(canon_path("../foo"), "../foo");
-        assert_eq!(canon_path("../foo/../bar"), "../bar");
-        assert_eq!(canon_path("../../bar"), "../../bar");
+        assert_canon_path_eq("/foo/../bar", "/bar");
+        assert_canon_path_eq("../foo", "../foo");
+        assert_canon_path_eq("../foo/../bar", "../bar");
+        assert_canon_path_eq("../../bar", "../../bar");
     }
 }
