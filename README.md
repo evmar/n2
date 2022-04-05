@@ -18,10 +18,14 @@ $ cargo build --release
 $ ./target/release/n2 -C some/build/dir
 ```
 
-When CMake executes Ninja it expects some particular Ninja behaviors.  n2
-emulates these behaviors when invoked as `ninja`, so to use it with CMake
-you can `ln -s path/to/n2 ninja` to create a symlink named `ninja` somewhere in
-your `$PATH` such that CMake can discover it.
+When CMake executes Ninja it expects some particular Ninja behaviors. n2
+emulates these behaviors when invoked as `ninja`. To use n2 with CMake you can
+create a symlink:
+- UNIX: `ln -s path/to/n2 ninja`
+- Windows(cmd): `mklink ninja.exe path\to\n2`
+- Windows(PowerShell): `New-Item -Type Symlink ninja.exe -Target path\to\n2`
+
+somewhere in your `$PATH`, such that CMake can discover it.
 
 ## More reading
 
