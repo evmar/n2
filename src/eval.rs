@@ -84,7 +84,6 @@ impl<'a> Env for Vars<'a> {
 /// For variables attached to a rule we keep them unexpanded in memory because
 /// they may be expanded in multiple different ways depending on which rule uses
 /// them.
-#[derive(Debug)]
 pub struct LazyVars(Vec<(String, EvalString<String>)>);
 #[allow(clippy::new_without_default)]
 impl LazyVars {

@@ -8,13 +8,11 @@
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
-#[derive(Debug)]
 pub struct Rule<'text> {
     pub name: &'text str,
     pub vars: LazyVars,
 }
 
-#[derive(Debug)]
 pub struct Build<'text, Path> {
     pub rule: &'text str,
     pub line: usize,
@@ -33,7 +31,6 @@ pub struct Pool<'text> {
     pub depth: usize,
 }
 
-#[derive(Debug)]
 pub enum Statement<'text, Path> {
     Rule(Rule<'text>),
     Build(Build<'text, Path>),
@@ -399,7 +396,7 @@ default a b$var c
         let mut parser = Parser::new(&mut buf);
         let default = match parser.read(&mut StringLoader {}).unwrap().unwrap() {
             Statement::Default(d) => d,
-            s => panic!("expected default, got {:?}", s),
+            _ => panic!("expected default"),
         };
         assert_eq!(default, vec!["a", "b3", "c"]);
         println!("{:?}", default);
