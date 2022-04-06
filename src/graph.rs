@@ -240,7 +240,7 @@ impl Graph {
     }
 
     /// Add a new Build, generating a BuildId for it.
-    pub fn add_build(&mut self, build: Build) {
+    pub fn add_build(&mut self, build: Build) -> anyhow::Result<()> {
         let id = self.builds.next_id();
         for &inf in &build.ins.ids {
             self.files.get_mut(inf).dependents.push(id);
@@ -249,15 +249,18 @@ impl Graph {
             let f = self.files.get_mut(out);
             match f.input {
                 Some(b) => {
-                    // TODO this occurs when two builds claim the same output
-                    // file, which is an ordinary user error and which should
-                    // be pretty-printed to the user as such.
-                    panic!("double link {:?}", b);
+                    anyhow::bail!(
+                        "{}: {:?} is already an output at {}",
+                        build.location,
+                        f.name,
+                        self.builds.get(b).location
+                    );
                 }
                 None => f.input = Some(id),
             }
         }
         self.builds.push(build);
+        Ok(())
     }
 
     /// Look up a Build by BuildId.
