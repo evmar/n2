@@ -10,7 +10,6 @@ use crate::graph::Hash;
 use crate::graph::Hashes;
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
@@ -250,13 +249,43 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
         } else {
             len &= !mask;
 
-            // Map each output to the associated build.
-            // In the common case, there is only one.
-            let mut bids = HashSet::new();
+            // This record logs a build.  We expect all the outputs to be
+            // outputs of the same build id; if not, that means the graph has
+            // changed since this log, in which case we just ignore it.
+            //
+            // It's possible we log a build that generates files A B, then
+            // change the build file such that it only generates file A; this
+            // logic will still attach the old dependencies to A, but it
+            // shouldn't matter because the changed command line will cause us
+            // to rebuild A regardless, and these dependencies are only used
+            // to affect dirty checking, not build order.
+
+            let mut unique_bid = None;
+            let mut obsolete = false;
             for _ in 0..len {
-                let id = r.read_id()?;
-                if let Some(bid) = graph.file(*ids.fileids.get(id)).input {
-                    bids.insert(bid);
+                let fileid = r.read_id()?;
+                if obsolete {
+                    // Even though we know we don't want this record, we must
+                    // keep reading to parse through it.
+                    continue;
+                }
+                match graph.file(*ids.fileids.get(fileid)).input {
+                    None => {
+                        obsolete = true;
+                    }
+                    Some(bid) => {
+                        match unique_bid {
+                            None => unique_bid = Some(bid),
+                            Some(unique_bid) if unique_bid == bid => {
+                                // Ok, matches the existing id.
+                            }
+                            Some(_) => {
+                                // Mismatch.
+                                unique_bid = None;
+                                obsolete = true;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -268,14 +297,12 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
             }
 
             let hash = Hash(r.read_u64()?);
-            if bids.len() == 1 {
+
+            // unique_bid is set here if this record is valid.
+            if let Some(id) = unique_bid {
                 // Common case: only one associated build.
-                let &id = bids.iter().next().unwrap();
                 graph.build_mut(id).set_discovered_ins(deps);
                 hashes.set(id, hash);
-            } else {
-                // The graph layout has changed since this build was recorded.
-                // The hashes won't line up anyway so it will be treated as dirty.
             }
         }
     }
