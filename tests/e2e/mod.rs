@@ -66,10 +66,11 @@ impl TestSpace {
     pub fn run_expect(
         &self,
         cmd: &mut std::process::Command,
-    ) -> std::io::Result<std::process::Output> {
+    ) -> anyhow::Result<std::process::Output> {
         let out = self.run(cmd)?;
         if !out.status.success() {
             print_output(&out);
+            anyhow::bail!("build failed");
         }
         Ok(out)
     }
