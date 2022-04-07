@@ -153,11 +153,45 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     // TODO: Set this to true  console pool jobs once support for that is implemented.
     let is_in_console_pool = false;
 
-    let process_flags = if is_in_console_pool { 0 } else { winapi::um::winbase::CREATE_NEW_PROCESS_GROUP};
+    let mut child_pipe_write = winapi::um::handleapi::INVALID_HANDLE_VALUE;
+    let mut child_pipe_read = winapi::um::handleapi::INVALID_HANDLE_VALUE;
+    if !is_in_console_pool {
+        let mut security_attrs = winapi::um::minwinbase::SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<winapi::um::minwinbase::SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: winapi::shared::ntdef::TRUE.into(),
+        };
+        if unsafe {
+            winapi::um::namedpipeapi::CreatePipe(
+                &mut child_pipe_read,
+                &mut child_pipe_write,
+                &mut security_attrs,
+                /* size = */ 0,
+            )
+        } == 0
+        {
+            let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
+            bail!("CreatePipe failed: {}", error);
+        }
+        // Clearing HANDLE_FLAG_INHERIT on child_pipe_read is racy, so instead pass
+        // a list to CreateProcessA with handles to inherit:
+        // https://devblogs.microsoft.com/oldnewthing/20111216-00/?p=8873
+        // TODO: Actually do that.
+    }
+
+    let process_flags = if is_in_console_pool {
+        0
+    } else {
+        winapi::um::winbase::CREATE_NEW_PROCESS_GROUP
+    };
 
     let mut startup_info = zeroed_startupinfo();
     startup_info.cb = std::mem::size_of::<winapi::um::processthreadsapi::STARTUPINFOA>() as u32;
-    startup_info.dwFlags = winapi::um::winbase::STARTF_USESTDHANDLES;
+    if !is_in_console_pool {
+        startup_info.dwFlags |= winapi::um::winbase::STARTF_USESTDHANDLES;
+        startup_info.hStdError = child_pipe_write;
+        startup_info.hStdOutput = child_pipe_write;
+    }
 
     let mut process_info = zeroed_process_information();
 
@@ -186,12 +220,24 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     unsafe {
         winapi::um::handleapi::CloseHandle(process_info.hThread);
     }
-
-    unsafe {
-        winapi::um::synchapi::WaitForSingleObject(
-            process_info.hProcess,
-            winapi::um::winbase::INFINITE,
-        );
+    if is_in_console_pool {
+        unsafe {
+            winapi::um::synchapi::WaitForSingleObject(
+                process_info.hProcess,
+                winapi::um::winbase::INFINITE,
+            );
+        }
+    } else {
+        unsafe {
+            winapi::um::handleapi::CloseHandle(child_pipe_write);
+        }
+        // File::from_raw_handle takes ownership of the HANDLE passed to it.
+        let mut output = String::new();
+        use std::fs::File;
+        use std::os::windows::io::FromRawHandle;
+        use std::io::Read;
+        let mut reader = unsafe { File::from_raw_handle(child_pipe_read) };
+        reader.read_to_string(&mut output)?;
     }
 
     let mut exit_code: u32 = 0;
