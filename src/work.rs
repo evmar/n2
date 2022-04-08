@@ -105,7 +105,7 @@ struct BuildStates {
     counts: StateCounts,
 
     /// Builds in the ready state, stored redundantly for quick access.
-    ready: HashSet<BuildId>,
+    ready: VecDeque<BuildId>,
 
     /// Named pools of queued and running builds.
     /// Builds otherwise default to using an unnamed infinite pool.
@@ -125,7 +125,7 @@ impl BuildStates {
         BuildStates {
             states: DenseMap::new_sized(size, BuildState::Unknown),
             counts: StateCounts::new(),
-            ready: HashSet::new(),
+            ready: VecDeque::new(),
             pools,
         }
     }
@@ -140,9 +140,6 @@ impl BuildStates {
         // println!("{:?} {:?}=>{:?}", id, prev, state);
         *mprev = state;
         match prev {
-            BuildState::Ready => {
-                self.ready.remove(&id);
-            }
             BuildState::Running => {
                 self.get_pool(build).unwrap().running -= 1;
             }
@@ -153,7 +150,7 @@ impl BuildStates {
         }
         match state {
             BuildState::Ready => {
-                self.ready.insert(id);
+                self.ready.push_back(id);
             }
             BuildState::Running => {
                 // Trace instants render poorly in the old Chrome UI, and
@@ -247,11 +244,7 @@ impl BuildStates {
     pub fn pop_ready(&mut self) -> Option<BuildId> {
         // Here is where we might consider prioritizing from among the available
         // ready set.
-        let id = match self.ready.iter().next() {
-            Some(&id) => id,
-            None => return None,
-        };
-        Some(id)
+        self.ready.pop_front()
     }
 
     /// Look up a PoolState by name.
