@@ -43,3 +43,26 @@ parser that break abstraction to this end:
   this type directly.)  This (and the previous bullet) allows the parser to
   reuse a single `String` buffer when parsing paths, which is the bulk of what
   the parser does.
+
+## Tracking build state
+
+While building, we have a bunch of `Build` objects that represent individual
+build steps that go through a series of states.  To represent these well I
+went through a few patterns and eventually came up with a design I'm pretty
+happy with.
+
+First, for each `Build` we store its current state.  This lets us quickly answer
+questions like "is the build id X ready or not?"  (You could imagine storing
+this directly in the `Build` or in a side HashMap from id to state, but that's
+an implementation detail.)  We use this for things like tracking whether we've
+already visited a given `Build` when doing a traveral of the graph while
+loading.  This also has the benefit of ensuring a given `Build` is always in
+exactly one known state.
+
+Second, we store data structures on the side for states where we care about
+having quicker views onto this state.  The idea here is that depending on the
+particular needs of a given state we can model those needs specially.  For
+example, we need to be able to grab the next `Ready` build to work on it, so
+there's a `VecDeque` holding those, while builds that go into the `Queued` state
+queue into separate run pools, and builds that are `Running` are just tracked
+with an integer counter on the run pool.

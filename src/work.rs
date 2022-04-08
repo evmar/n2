@@ -78,6 +78,7 @@ impl StateCounts {
 /// Pools gather collections of running builds.
 /// Each running build is running "in" a pool; there's a default unbounded
 /// pool for builds that don't specify one.
+/// See "Tracking build state" in the design notes.
 struct PoolState {
     /// A queue of builds that are ready to be executed in this pool.
     queued: VecDeque<BuildId>,
@@ -98,6 +99,7 @@ impl PoolState {
 }
 
 /// BuildStates tracks progress of each Build step through the build.
+/// See "Tracking build state" in the design notes.
 struct BuildStates {
     states: DenseMap<BuildId, BuildState>,
 
