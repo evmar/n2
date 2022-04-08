@@ -6,7 +6,9 @@ n2 (pronounced "into") implements enough of [ninja](https://ninja-build.org/)
 to successfully build some projects that build with ninja.
 
 I wrote it to [explore some alternative ideas](http://neugierig.org/software/blog/2022/03/n2.html)
-I had around how to structure a build system.
+I had around how to structure a build system.  In a very real sense the exploration is more
+important than the actual software itself, so you can view the [doc/design_notes.md](design notes)
+as one of the primary artifacts of this.
 
 [Here's a small demo](https://asciinema.org/a/480446) of n2 building some of
 Clang.
