@@ -1,5 +1,61 @@
 # Design notes
 
+## Build states
+
+While building, we have a bunch of `Build` objects that represent individual
+build steps that go through a series of states. Here I give a picture about
+how those states work.
+
+Imagine a hypothetical build, represented here by a series of boxes with arrows
+representing outputs. n2 models both builds and files in its graph because
+build steps may produce more than one output, so it's more complex than this,
+but it will do for this discussion. Builds start in the
+`Unknown` state, just a default state shown here in gray.
+
+<img src='build1.png' width='267'>
+
+The user requests bringing some build up to date which we mark by the `Want`
+state, and traverse the dependencies backwards to mark all inputs also as
+`Want`.
+
+<img src='build2.png' width='267'>
+
+Any build that doesn't depend on another build is marked `Ready`.
+
+<img src='build3.png' width='267'>
+
+The main loop pops a `Ready` build and examines its inputs/output to judge
+whether it needs to be brought up to date. Here, we examined the upper left
+build and determined it was already up to date and marked it `Done`.
+
+For each downstream output of that build, we check whether all the inputs to
+that output are `Done` and if so, we mark it `Ready`. This makes the build to
+the right `Ready`. Note that `Ready` means "ready to be checked for
+up-to-date-ness", and is purely a function of which builds we've checked off
+and not any on-disk file state.
+
+<img src='build4.png' width='267'>
+
+In the next iteration of the loop we pop the lower left `Ready` and determine
+it is out of date. It then moves to state `Queued` and added to the relevant
+pool.
+
+<img src='build5.png' width='267'>
+
+Concurrently with visiting `Ready` builds, if we have available execution
+parallelism, we examine all the pools that have spare depth for any `Queued`
+builds and start executing those tasks, moving the build to the `Running` state.
+For example, this build might be in the `console` pool, which has `depth=1`
+meaning that pool can only run one build step at a time, which means it might
+remain `Queued` if we're already running a build in that pool.
+
+And similarly, if any running builds complete, we move them to the `Done` state
+and repeat the same logic done above to mark downstream builds `Ready`.
+
+There is more to this. For example there's a `Failed` state, which is used in
+builds with the `-k` flag, that lets us keep running even when some build
+steps fail. But the above is most of the picture.
+
 ## Missing files
 
 What happens if a file referenced in a build rule isn't present?
@@ -14,7 +70,7 @@ a marker for build rules that want to always run.
 Finally, all the checking happens when deciding whether a ready build is dirty:
 
 - A missing dirtying input is an error.
-- A missing order-only input is an error unless it's a generated file.  (This
+- A missing order-only input is an error unless it's a generated file. (This
   handles the case where there are build rules used for order-only purposes
   that don't write their outputs.)
 - A missing discovered input is allowed. (This is the case where you deleted a
@@ -29,39 +85,39 @@ files.
 ## Parsing
 
 Parsing .ninja files is part of the critical path for n2, because it must
-be complete before any other work can be done.  Some properties of the n2
+be complete before any other work can be done. Some properties of the n2
 parser that break abstraction to this end:
 
-- There is no separate lexer.  Ninja syntax is not really lexer friendly
+- There is no separate lexer. Ninja syntax is not really lexer friendly
   in the first place.
 - When possible, `$variable` expansions happen as they're encountered, so
   that we don't need to build up a parsed representation of strings and
   carry around variable environments.
 - Parsed entities that deal with paths are generic over a `Path` type, and
-  path strings are converted to Paths as they are parsed.  (In practice
+  path strings are converted to Paths as they are parsed. (In practice
   the `Path` type is `graph::FileId`, but the parsing code isn't aware of
-  this type directly.)  This (and the previous bullet) allows the parser to
+  this type directly.) This (and the previous bullet) allows the parser to
   reuse a single `String` buffer when parsing paths, which is the bulk of what
   the parser does.
 
 ## Tracking build state
 
 While building, we have a bunch of `Build` objects that represent individual
-build steps that go through a series of states.  To represent these well I
+build steps that go through a series of states. To represent these well I
 went through a few patterns and eventually came up with a design I'm pretty
 happy with.
 
-First, for each `Build` we store its current state.  This lets us quickly answer
-questions like "is the build id X ready or not?"  (You could imagine storing
+First, for each `Build` we store its current state. This lets us quickly answer
+questions like "is the build id X ready or not?" (You could imagine storing
 this directly in the `Build` or in a side HashMap from id to state, but that's
-an implementation detail.)  We use this for things like tracking whether we've
+an implementation detail.) We use this for things like tracking whether we've
 already visited a given `Build` when doing a traveral of the graph while
-loading.  This also has the benefit of ensuring a given `Build` is always in
+loading. This also has the benefit of ensuring a given `Build` is always in
 exactly one known state.
 
 Second, we store data structures on the side for states where we care about
-having quicker views onto this state.  The idea here is that depending on the
-particular needs of a given state we can model those needs specially.  For
+having quicker views onto this state. The idea here is that depending on the
+particular needs of a given state we can model those needs specially. For
 example, we need to be able to grab the next `Ready` build to work on it, so
 there's a `VecDeque` holding those, while builds that go into the `Queued` state
 queue into separate run pools, and builds that are `Running` are just tracked

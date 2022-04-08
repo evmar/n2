@@ -16,6 +16,7 @@ use std::time::Duration;
 use crate::signal;
 
 /// Build steps go through this sequence of states.
+/// See "Build states" in the design notes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BuildState {
     /// Default initial state, for Builds unneeded by the current build.
