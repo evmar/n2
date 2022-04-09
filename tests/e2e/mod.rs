@@ -28,7 +28,7 @@ pub fn assert_output_contains(out: &std::process::Output, text: &str) {
     let out = std::str::from_utf8(&out.stdout).unwrap();
     if !out.contains(text) {
         panic!(
-            "assertion failed; expected output to contain {:?} but got {}",
+            "assertion failed; expected output to contain {:?} but got:\n{}",
             text, out
         );
     }

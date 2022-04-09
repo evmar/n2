@@ -241,22 +241,30 @@ impl Graph {
 
     /// Add a new Build, generating a BuildId for it.
     pub fn add_build(&mut self, build: Build) -> anyhow::Result<()> {
-        let id = self.builds.next_id();
-        for &inf in &build.ins.ids {
-            self.files.get_mut(inf).dependents.push(id);
+        let new_id = self.builds.next_id();
+        for &id in &build.ins.ids {
+            self.files.get_mut(id).dependents.push(new_id);
         }
-        for &out in &build.outs.ids {
-            let f = self.files.get_mut(out);
+        for &id in &build.outs.ids {
+            let f = self.files.get_mut(id);
             match f.input {
-                Some(b) => {
+                Some(prev) if prev == new_id => {
+                    // We could attempt to fix the list, but it's a little
+                    // complex given both explicit and implicit ins...
+                    println!(
+                        "n2: warn: {}: {:?} is repeated in output list",
+                        build.location, f.name,
+                    );
+                }
+                Some(prev) => {
                     anyhow::bail!(
                         "{}: {:?} is already an output at {}",
                         build.location,
                         f.name,
-                        self.builds.get(b).location
+                        self.builds.get(prev).location
                     );
                 }
-                None => f.input = Some(id),
+                None => f.input = Some(new_id),
             }
         }
         self.builds.push(build);
