@@ -21,6 +21,7 @@ fn print_output(out: &std::process::Output) {
     // Gross: use print! instead of writing to stdout so Rust test
     // framework can capture it.
     print!("{}", std::str::from_utf8(&out.stdout).unwrap());
+    print!("{}", std::str::from_utf8(&out.stderr).unwrap());
 }
 
 pub fn assert_output_contains(out: &std::process::Output, text: &str) {
@@ -70,7 +71,7 @@ impl TestSpace {
         let out = self.run(cmd)?;
         if !out.status.success() {
             print_output(&out);
-            anyhow::bail!("build failed");
+            anyhow::bail!("build failed, status {}", out.status);
         }
         Ok(out)
     }
