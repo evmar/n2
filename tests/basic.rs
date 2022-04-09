@@ -220,7 +220,7 @@ fn repeated_out() -> anyhow::Result<()> {
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "is repeated in output list");
     // Both 'out's end up in the command line.
-    assert_output_contains(&out, "touch out out");
+    assert_output_contains(&out, "out out");
 
     Ok(())
 }
