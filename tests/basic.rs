@@ -208,19 +208,25 @@ fn basic_specify_build_file() -> anyhow::Result<()> {
 }
 
 /// Regression test for https://github.com/evmar/n2/issues/44
-/// build with the same output multiple times.
+/// and https://github.com/evmar/n2/issues/46 .
+/// Build with the same output listed multiple times.
 #[test]
 fn repeated_out() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
-        &[TOUCH_RULE, "build out out: touch in", ""].join("\n"),
+        &[
+            TOUCH_RULE,
+            "build dup dup: touch in",
+            "build out: touch dup",
+            "",
+        ]
+        .join("\n"),
     )?;
     space.write("in", "")?;
+    space.write("dup", "")?;
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "is repeated in output list");
-    // Both 'out's end up in the command line.
-    assert_output_contains(&out, "out out");
 
     Ok(())
 }

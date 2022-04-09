@@ -88,6 +88,55 @@ pub struct BuildOuts {
     pub explicit: usize,
 }
 
+impl BuildOuts {
+    /// CMake seems to generate build files with the same output mentioned
+    /// multiple times in the outputs list.  Given that Ninja accepts these,
+    /// this function removes duplicates from the output list.
+    pub fn remove_duplicates(&mut self) {
+        let mut ids = Vec::new();
+        for (i, &id) in self.ids.iter().enumerate() {
+            if !self.ids[0..i].iter().any(|&prev| prev == id) {
+                ids.push(id);
+            } else {
+                if i < self.explicit {
+                    self.explicit -= 1;
+                }
+            }
+        }
+        self.ids = ids;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn fileids(ids: Vec<usize>) -> Vec<FileId> {
+        ids.into_iter().map(FileId::from).collect()
+    }
+
+    use super::*;
+    #[test]
+    fn remove_dups_explicit() {
+        let mut outs = BuildOuts {
+            ids: fileids(vec![1, 1, 2]),
+            explicit: 2,
+        };
+        outs.remove_duplicates();
+        assert_eq!(outs.ids, fileids(vec![1, 2]));
+        assert_eq!(outs.explicit, 1);
+    }
+
+    #[test]
+    fn remove_dups_implicit() {
+        let mut outs = BuildOuts {
+            ids: fileids(vec![1, 2, 1]),
+            explicit: 2,
+        };
+        outs.remove_duplicates();
+        assert_eq!(outs.ids, fileids(vec![1, 2]));
+        assert_eq!(outs.explicit, 2);
+    }
+}
+
 /// A single build action, generating File outputs from File inputs with a command.
 pub struct Build {
     /// Source location this Build was declared.
@@ -240,17 +289,17 @@ impl Graph {
     }
 
     /// Add a new Build, generating a BuildId for it.
-    pub fn add_build(&mut self, build: Build) -> anyhow::Result<()> {
+    pub fn add_build(&mut self, mut build: Build) -> anyhow::Result<()> {
         let new_id = self.builds.next_id();
         for &id in &build.ins.ids {
             self.files.get_mut(id).dependents.push(new_id);
         }
+        let mut fixup_dups = false;
         for &id in &build.outs.ids {
             let f = self.files.get_mut(id);
             match f.input {
                 Some(prev) if prev == new_id => {
-                    // We could attempt to fix the list, but it's a little
-                    // complex given both explicit and implicit ins...
+                    fixup_dups = true;
                     println!(
                         "n2: warn: {}: {:?} is repeated in output list",
                         build.location, f.name,
@@ -266,6 +315,9 @@ impl Graph {
                 }
                 None => f.input = Some(new_id),
             }
+        }
+        if fixup_dups {
+            build.outs.remove_duplicates();
         }
         self.builds.push(build);
         Ok(())
