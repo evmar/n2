@@ -2,6 +2,8 @@
 name = "n2"
 version = "0.1.0"
 edition = "2018"
+# std::thread::available_parallelism
+rust-version = "1.59"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
