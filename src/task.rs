@@ -245,7 +245,7 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
 }
 
 /// Tracks faked "thread ids" -- integers assigned to build tasks to track
-/// paralllelism in perf trace output.
+/// parallelism in perf trace output.
 struct ThreadIds {
     /// An entry is true when claimed, false or nonexistent otherwise.
     slots: Vec<bool>,
@@ -263,7 +263,7 @@ impl ThreadIds {
             }
             None => {
                 let idx = self.slots.len();
-                self.slots.push(false);
+                self.slots.push(true);
                 idx
             }
         }
