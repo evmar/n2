@@ -49,7 +49,7 @@ pub struct Parser<'text> {
 }
 
 fn is_ident_char(c: u8) -> bool {
-    matches!(c as char, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.')
+    matches!(c as char, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-')
 }
 
 fn is_path_char(c: u8) -> bool {
@@ -411,5 +411,14 @@ mod tests {
             };
             assert_eq!(default, vec!["a", "b3", "c"]);
         });
+    }
+
+    #[test]
+    fn parse_dot() {
+        let mut buf = "x = $y.z\n".as_bytes().to_vec();
+        let mut parser = Parser::new(&mut buf);
+        parser.read(&mut StringLoader {}).unwrap();
+        let x = parser.vars.get("x").unwrap();
+        assert_eq!(x, ".z");
     }
 }
