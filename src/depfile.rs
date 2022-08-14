@@ -61,6 +61,7 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
         None => return scanner.parse_error("expected file"),
         Some(o) => o,
     };
+    scanner.skip_spaces();
     scanner.expect(':')?;
     let mut deps = Vec::new();
     while let Some(p) = read_path(scanner)? {
