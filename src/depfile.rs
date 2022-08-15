@@ -121,4 +121,12 @@ mod tests {
         assert_eq!(deps.target, "build/browse.o");
         assert_eq!(deps.deps.len(), 1);
     }
+
+    #[test]
+    fn test_parse_spaces_before_colon() {
+        let mut file = b"build/browse.o   : src/browse.cc".to_vec();
+        let deps = must_parse(&mut file);
+        assert_eq!(deps.target, "build/browse.o");
+        assert_eq!(deps.deps.len(), 1);
+    }
 }
