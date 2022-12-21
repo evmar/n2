@@ -1,5 +1,9 @@
 # Design notes
 
+(I wrote some high-level design observations in
+[a blog post](https://neugierig.org/software/blog/2022/03/n2.html), whose
+contents maybe ought to migrate here.)
+
 ## Build states
 
 While building, we have a bunch of `Build` objects that represent individual
