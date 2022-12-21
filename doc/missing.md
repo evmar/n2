@@ -5,7 +5,7 @@
     which means n2 currently gets header dependencies wrong when you use the
     MSVC compiler.
 - Dynamic dependencies.
-- `console` pool.  n2 currently just treats `console` as an ordinary pool of
+- `console` pool. n2 currently just treats `console` as an ordinary pool of
   depth 1, and only shows console output after the task completes.
 - `subninja` is only partially implemented.
 
