@@ -1,7 +1,7 @@
 # Missing features from Ninja
 
 - Windows is only partially implemented.
-  - `deps = msvc` (parsing of `/showincludes` output) isn't implemented at all,
+  - `deps = msvc` (parsing of `/showIncludes` output) isn't implemented at all,
     which means n2 currently gets header dependencies wrong when you use the
     MSVC compiler.
 - Dynamic dependencies.

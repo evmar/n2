@@ -230,3 +230,30 @@ fn repeated_out() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Regression test for https://github.com/evmar/n2/issues/55
+/// UTF-8 filename.
+#[cfg(unix)]
+#[test]
+fn utf8_filename() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            "
+rule echo
+  description = unicode variable: $in
+  command = echo unicode command line: $in && touch $out
+",
+            "build out: echo reykjavík.md",
+            "",
+        ]
+        .join("\n"),
+    )?;
+    space.write("reykjavík.md", "")?;
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "unicode variable: reykjavík.md");
+    assert_output_contains(&out, "unicode command line: reykjavík.md");
+
+    Ok(())
+}

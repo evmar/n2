@@ -45,7 +45,7 @@ pub struct Parser<'text> {
     pub vars: Vars<'text>,
     /// Reading paths is very hot when parsing, so we always read into this buffer
     /// and then immediately pass in to Loader::path() to canonicalize it in-place.
-    path_buf: String,
+    path_buf: Vec<u8>,
 }
 
 fn is_ident_char(c: u8) -> bool {
@@ -60,8 +60,16 @@ fn is_path_char(c: u8) -> bool {
     !matches!(c as char, '\0' | ' ' | '\n' | '\r' | ':' | '|' | '$')
 }
 
+/// Loader maps path strings (as found in build.ninja files) into an arbitrary
+/// "Path" type.  This allows us to canonicalize and convert path strings to
+/// more efficient integer identifiers while we parse, rather than needing to
+/// buffer up many intermediate strings; in fact, parsing uses a single buffer
+/// for all of these.
 pub trait Loader {
     type Path;
+    /// Convert a path string to a Self::Path type.  Note there are safety
+    /// related restrictions on what this function may do; see notes at the call
+    /// site.
     fn path(&mut self, path: &mut String) -> Self::Path;
 }
 
@@ -70,7 +78,7 @@ impl<'text> Parser<'text> {
         Parser {
             scanner: Scanner::new(buf),
             vars: Vars::new(),
-            path_buf: String::with_capacity(64),
+            path_buf: Vec::with_capacity(64),
         }
     }
 
@@ -313,7 +321,7 @@ impl<'text> Parser<'text> {
         loop {
             let c = self.scanner.read();
             if is_path_char(c as u8) {
-                self.path_buf.push(c);
+                self.path_buf.push(c as u8);
             } else {
                 match c {
                     '\0' => {
@@ -323,10 +331,10 @@ impl<'text> Parser<'text> {
                     '$' => {
                         let part = self.read_escape()?;
                         match part {
-                            EvalPart::Literal(l) => self.path_buf.push_str(l),
+                            EvalPart::Literal(l) => self.path_buf.extend_from_slice(l.as_bytes()),
                             EvalPart::VarRef(v) => {
                                 if let Some(v) = self.vars.get(v) {
-                                    self.path_buf.push_str(v);
+                                    self.path_buf.extend_from_slice(v.as_bytes());
                                 }
                             }
                         }
@@ -347,7 +355,28 @@ impl<'text> Parser<'text> {
         if self.path_buf.is_empty() {
             return Ok(None);
         }
-        Ok(Some(loader.path(&mut self.path_buf)))
+        // Performance: we want to pass self.path_buf directly to loader to
+        // have it canonicalize the path in-place, without allocating any
+        // additional buffers.  This is some of the hottest code in n2 so
+        // we cut some corners to achieve this.
+        // Safety: see discussion of unicode safety in doc/development.md.
+        // I looked into switching this to BStr but it would require changing
+        // a lot of other code to BStr too.
+        // Safety: this assumes loader.path will never attempt to grow the
+        // passed-in string (causing a reallocation), and instead only will
+        // monkey with the contents within the passed-in buffer.  We also know
+        // that this buffer will not be used immediately after loader.path() is
+        // called so it's fine for loader.path to scribble on it.
+        let mut path_str = unsafe {
+            String::from_raw_parts(
+                self.path_buf.as_mut_ptr(),
+                self.path_buf.len(),
+                self.path_buf.capacity(),
+            )
+        };
+        let path = loader.path(&mut path_str);
+        std::mem::forget(path_str); // path_buf owns it.
+        Ok(Some(path))
     }
 
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'text str>> {
