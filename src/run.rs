@@ -4,7 +4,11 @@ use anyhow::anyhow;
 use std::env;
 use std::path::Path;
 
-use crate::{load, progress::ConsoleProgress, trace, work};
+use crate::json_progress::JSONProgress;
+use crate::load;
+use crate::progress::{ConsoleProgress, MultiProgress, Progress};
+use crate::trace;
+use crate::work;
 
 // The result of starting a build.
 enum BuildResult {
@@ -29,7 +33,7 @@ struct BuildParams<'a> {
 // possible, and if that build changes build.ninja, then return
 // BuildResult::Regen to signal to the caller that we need to start the whole
 // build over.
-fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result<BuildResult> {
+fn build(progress: &mut dyn Progress, params: &BuildParams) -> anyhow::Result<BuildResult> {
     let mut state = trace::scope("load::read", || load::read(params.build_filename))?;
 
     let mut work = work::Work::new(
@@ -194,7 +198,15 @@ fn run_impl() -> anyhow::Result<i32> {
         build_filename = name;
     }
 
-    let mut progress = ConsoleProgress::new(matches.opt_present("v"), use_fancy_terminal());
+    let mut progress: Box<dyn Progress> = Box::new(ConsoleProgress::new(
+        matches.opt_present("v"),
+        use_fancy_terminal(),
+    ));
+
+    if let Ok(stream) = std::env::var("N2_PROGRESS_STREAM") {
+        let json_progress = Box::new(JSONProgress::new(&stream)?);
+        progress = Box::new(MultiProgress::new(vec![progress, json_progress]));
+    }
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
@@ -206,10 +218,10 @@ fn run_impl() -> anyhow::Result<i32> {
         target_names: &matches.free,
         build_filename: &build_filename,
     };
-    let mut result = build(&mut progress, &params)?;
+    let mut result = build(progress.as_mut(), &params)?;
     if let BuildResult::Regen = result {
         params.regen = false;
-        result = build(&mut progress, &params)?;
+        result = build(progress.as_mut(), &params)?;
     }
 
     match result {
