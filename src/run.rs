@@ -1,5 +1,3 @@
-extern crate getopts;
-
 use anyhow::anyhow;
 use std::path::Path;
 
@@ -76,54 +74,66 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
     })
 }
 
+fn default_parallelism() -> anyhow::Result<usize> {
+    // Ninja uses available processors + a constant, but I don't think the
+    // difference matters too much.
+    let par = std::thread::available_parallelism()?;
+    Ok(usize::from(par))
+}
+
+#[derive(argh::FromArgs)] // this struct generates the flags and --help output
+/// n2, a ninja compatible build system
+struct Opts {
+    /// chdir before running
+    #[argh(option, short = 'C')]
+    chdir: Option<String>,
+
+    /// input build file [default=build.ninja]
+    #[argh(option, short = 'f', default = "(\"build.ninja\".into())")]
+    build_file: String,
+
+    /// debugging tools
+    #[argh(option, short = 'd')]
+    debug: Option<String>,
+
+    /// subcommands
+    #[argh(option, short = 't')]
+    tool: Option<String>,
+
+    /// parallelism [default uses system thread count]
+    #[argh(option, short = 'j')] // tododefault_parallelism()")]
+    parallelism: Option<usize>,
+
+    /// keep going until at least N failures (0 means infinity) [default=1]
+    #[argh(option, short = 'k', default = "1")]
+    keep_going: usize,
+
+    /// print version (required by cmake)
+    #[argh(switch, hidden_help)]
+    version: bool,
+
+    /// print executed command lines
+    #[argh(switch, short = 'v')]
+    verbose: bool,
+
+    /// targets to build
+    #[argh(positional)]
+    targets: Vec<String>,
+}
+
 fn run_impl() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
     let fake_ninja_compat = Path::new(&args[0]).file_name().unwrap()
         == std::ffi::OsStr::new(&format!("ninja{}", std::env::consts::EXE_SUFFIX));
 
-    // Ninja uses available processors + a constant, but I don't think the
-    // difference matters too much.
-    let mut parallelism = usize::from(std::thread::available_parallelism()?);
+    let opts: Opts = argh::from_env();
 
-    let mut opts = getopts::Options::new();
-    opts.optopt("C", "", "chdir before running", "DIR");
-    opts.optopt(
-        "f",
-        "",
-        "specify input build file [default=build.ninja]",
-        "FILE",
-    );
-    opts.optopt("d", "debug", "debugging tools", "TOOL");
-    opts.optopt("t", "tool", "subcommands", "TOOL");
-    opts.optopt(
-        "j",
-        "",
-        &format!("parallelism [default from system={}]", parallelism),
-        "NUM",
-    );
-    opts.optopt(
-        "k",
-        "",
-        "keep going until at least N failures (0 means infinity) [default=1]",
-        "N",
-    );
-    opts.optflag("h", "help", "");
-    opts.optflag("v", "verbose", "print executed command lines");
-    if fake_ninja_compat {
-        opts.optflag("", "version", "print fake ninja version");
-    }
-    let matches = opts.parse(&args[1..])?;
-    if matches.opt_present("h") {
-        println!("{}", opts.usage("usage: n2 [target]"));
-        return Ok(1);
-    }
-
-    if fake_ninja_compat && matches.opt_present("version") {
+    if fake_ninja_compat && opts.version {
         println!("1.10.2");
         return Ok(0);
     }
 
-    if let Some(debug) = matches.opt_str("d") {
+    if let Some(debug) = opts.debug {
         match debug.as_str() {
             "list" => {
                 println!("debug tools:");
@@ -135,7 +145,7 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    if let Some(tool) = matches.opt_str("t") {
+    if let Some(tool) = opts.tool {
         match tool.as_str() {
             "list" => {
                 println!("subcommands:");
@@ -151,32 +161,17 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    if let Some(parallelism_flag) = matches.opt_str("j") {
-        match parallelism_flag.parse::<usize>() {
-            Ok(n) => parallelism = n,
-            Err(e) => anyhow::bail!("invalid -j {:?}: {:?}", parallelism, e),
-        }
-    }
-
-    let keep_going = match matches.opt_str("k") {
-        Some(val) => match val.parse::<usize>() {
-            Ok(n) => n,
-            Err(e) => anyhow::bail!("invalid -k {:?}: {:?}", val, e),
-        },
-        None => 1,
+    let parallelism = match opts.parallelism {
+        Some(p) => p,
+        None => default_parallelism()?,
     };
 
-    if let Some(dir) = matches.opt_str("C") {
+    if let Some(dir) = opts.chdir {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
-    let mut build_filename = "build.ninja".to_string();
-    if let Some(name) = matches.opt_str("f") {
-        build_filename = name;
-    }
-
-    let mut progress = ConsoleProgress::new(matches.opt_present("v"), terminal::use_fancy());
+    let mut progress = ConsoleProgress::new(opts.verbose, terminal::use_fancy());
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
@@ -184,9 +179,9 @@ fn run_impl() -> anyhow::Result<i32> {
     let mut params = BuildParams {
         parallelism,
         regen: true,
-        keep_going,
-        target_names: &matches.free,
-        build_filename: &build_filename,
+        keep_going: opts.keep_going,
+        target_names: &opts.targets,
+        build_filename: &opts.build_file,
     };
     let mut result = build(&mut progress, &params)?;
     if let BuildResult::Regen = result {
