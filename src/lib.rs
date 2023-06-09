@@ -20,9 +20,9 @@ mod work;
 #[macro_use]
 extern crate lazy_static;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_arch = "wasm32")))]
 use jemallocator::Jemalloc;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;

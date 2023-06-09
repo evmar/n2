@@ -54,3 +54,17 @@ mod windows {
 
 #[cfg(windows)]
 pub use windows::*;
+
+#[cfg(target_arch = "wasm32")]
+mod wasm {
+    pub fn use_fancy() -> bool {
+        false
+    }
+
+    pub fn get_cols() -> Option<usize> {
+        None
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub use wasm::*;

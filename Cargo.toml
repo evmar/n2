@@ -17,7 +17,7 @@ lazy_static = "1.4.0"
 kernel32-sys = "0.2.2"
 winapi = { version = "0.3.6", features = [ "processenv", "consoleapi", "synchapi" ] }
 
-[target.'cfg(not(windows))'.dependencies]
+[target.'cfg(not(any(windows, target_arch = "wasm32")))'.dependencies]
 jemallocator = "0.3.2"
 
 [dev-dependencies]

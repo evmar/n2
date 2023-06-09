@@ -244,6 +244,11 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
     })
 }
 
+#[cfg(target_arch = "wasm32")]
+fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
+    bail!("wasm cannot run commands");
+}
+
 /// Tracks faked "thread ids" -- integers assigned to build tasks to track
 /// parallelism in perf trace output.
 struct ThreadIds {
