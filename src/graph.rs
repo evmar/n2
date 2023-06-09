@@ -238,20 +238,11 @@ impl Build {
 
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them,
 /// as well as mapping string filenames to the underlying Files.
+#[derive(Default)]
 pub struct Graph {
     files: DenseMap<FileId, File>,
     pub builds: DenseMap<BuildId, Build>,
     file_to_id: HashMap<String, FileId>,
-}
-
-impl Default for Graph {
-    fn default() -> Self {
-        Graph {
-            files: DenseMap::default(),
-            builds: DenseMap::default(),
-            file_to_id: HashMap::default(),
-        }
-    }
 }
 
 impl Graph {
