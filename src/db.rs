@@ -43,6 +43,8 @@ pub struct IdMap {
 
 /// Buffer that accumulates a single record's worth of writes.
 /// Caller calls various .write_*() methods and then flush()es it to a Write.
+/// We use this instead of a BufWrite because we want to write one full record
+/// at a time if possible.
 struct WriteBuf {
     buf: [u8; 16 << 10],
     len: usize,
@@ -61,22 +63,25 @@ impl WriteBuf {
         }
     }
 
+    // Perf note: I tinkered with these writes in godbolt and using
+    // copy_from_slice generated better code than alternatives that did
+    // different kinds of indexing.
+
+    fn write(&mut self, buf: &[u8]) {
+        self.buf[self.len..(self.len + buf.len())].copy_from_slice(&buf);
+        self.len += buf.len();
+    }
+
     fn write_u16(&mut self, n: u16) {
-        self.buf[self.len..(self.len + 2)].copy_from_slice(&n.to_be_bytes());
-        self.len += 2;
+        self.write(&n.to_be_bytes());
     }
 
     fn write_u24(&mut self, n: u32) {
-        self.buf[self.len..(self.len + 3)].copy_from_slice(&n.to_be_bytes()[1..]);
-        self.len += 3;
+        self.write(&n.to_be_bytes()[1..]);
     }
 
     fn write_u64(&mut self, n: u64) {
-        // Perf note: I tinkered with this in godbolt and using this form of
-        // copy_from_slice generated much better code than alternatives that did
-        // different kinds of indexing.
-        self.buf[self.len..(self.len + 8)].copy_from_slice(&n.to_be_bytes());
-        self.len += 8;
+        self.write(&n.to_be_bytes());
     }
 
     fn write_str(&mut self, s: &str) {
