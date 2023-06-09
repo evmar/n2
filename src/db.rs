@@ -51,8 +51,6 @@ struct WriteBuf {
     len: usize,
 }
 
-#[allow(clippy::erasing_op)]
-#[allow(clippy::identity_op)]
 impl WriteBuf {
     fn new() -> Self {
         WriteBuf {
@@ -68,7 +66,7 @@ impl WriteBuf {
     fn write(&mut self, buf: &[u8]) {
         // Safety: self.buf and buf are non-overlapping; bounds checks.
         unsafe {
-            let ptr = self.buf.as_mut_ptr().offset(self.len as isize);
+            let ptr = self.buf.as_mut_ptr().add(self.len);
             self.len += buf.len();
             if self.len > self.buf.len() {
                 panic!("oversized WriteBuf");
@@ -98,7 +96,7 @@ impl WriteBuf {
         if id.0 > (1 << 24) {
             panic!("too many fileids");
         }
-        self.write_u24(id.0 as u32);
+        self.write_u24(id.0);
     }
 
     fn flush<W: Write>(self, w: &mut W) -> std::io::Result<()> {
@@ -195,16 +193,12 @@ impl<'a> Reader<'a> {
         Ok(u16::from_be_bytes(buf))
     }
 
-    #[allow(clippy::erasing_op)]
-    #[allow(clippy::identity_op)]
     fn read_u24(&mut self) -> std::io::Result<u32> {
         let mut buf: [u8; 4] = [0; 4];
         self.r.read_exact(&mut buf[1..])?;
         Ok(u32::from_be_bytes(buf))
     }
 
-    #[allow(clippy::erasing_op)]
-    #[allow(clippy::identity_op)]
     fn read_u64(&mut self) -> std::io::Result<u64> {
         let mut buf: [u8; 8] = [0; 8];
         self.r.read_exact(&mut buf)?;
@@ -212,7 +206,7 @@ impl<'a> Reader<'a> {
     }
 
     fn read_id(&mut self) -> std::io::Result<Id> {
-        self.read_u24().map(|n| Id(n as u32))
+        self.read_u24().map(Id)
     }
 
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {

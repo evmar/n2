@@ -68,10 +68,10 @@ impl Loader {
         loader
     }
 
-    fn add_build<'a>(
+    fn add_build(
         &mut self,
         filename: std::rc::Rc<String>,
-        env: &eval::Vars<'a>,
+        env: &eval::Vars,
         b: parse::Build<FileId>,
     ) -> anyhow::Result<()> {
         let ins = graph::BuildIns {
@@ -153,7 +153,7 @@ impl Loader {
         loop {
             let stmt = match parser
                 .read(self)
-                .map_err(|err| anyhow!(parser.format_parse_error(&*filename, err)))?
+                .map_err(|err| anyhow!(parser.format_parse_error(&filename, err)))?
             {
                 None => break,
                 Some(s) => s,

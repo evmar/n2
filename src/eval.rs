@@ -87,7 +87,7 @@ impl<'a> Env for Vars<'a> {
 /// they may be expanded in multiple different ways depending on which rule uses
 /// them.
 pub type LazyVars = SmallMap<String, EvalString<String>>;
-impl<'a> Env for LazyVars {
+impl Env for LazyVars {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
         self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
     }
