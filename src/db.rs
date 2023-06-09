@@ -62,34 +62,20 @@ impl WriteBuf {
     }
 
     fn write_u16(&mut self, n: u16) {
-        self.buf[self.len..(self.len + 2)]
-            .copy_from_slice(&[((n >> (8 * 1)) & 0xFF) as u8, ((n >> (8 * 0)) & 0xFF) as u8]);
+        self.buf[self.len..(self.len + 2)].copy_from_slice(&n.to_be_bytes());
         self.len += 2;
     }
 
     fn write_u24(&mut self, n: u32) {
-        self.buf[self.len..(self.len + 3)].copy_from_slice(&[
-            ((n >> (8 * 2)) & 0xFF) as u8,
-            ((n >> (8 * 1)) & 0xFF) as u8,
-            ((n >> (8 * 0)) & 0xFF) as u8,
-        ]);
+        self.buf[self.len..(self.len + 3)].copy_from_slice(&n.to_be_bytes()[1..]);
         self.len += 3;
     }
 
     fn write_u64(&mut self, n: u64) {
         // Perf note: I tinkered with this in godbolt and using this form of
-        // copy_from_slice generated much better code (generating a bswap
-        // instruction!) than alternatives that did different kinds of indexing.
-        self.buf[self.len..(self.len + 8)].copy_from_slice(&[
-            ((n >> (8 * 7)) & 0xFF) as u8,
-            ((n >> (8 * 6)) & 0xFF) as u8,
-            ((n >> (8 * 5)) & 0xFF) as u8,
-            ((n >> (8 * 4)) & 0xFF) as u8,
-            ((n >> (8 * 3)) & 0xFF) as u8,
-            ((n >> (8 * 2)) & 0xFF) as u8,
-            ((n >> (8 * 1)) & 0xFF) as u8,
-            ((n >> (8 * 0)) & 0xFF) as u8,
-        ]);
+        // copy_from_slice generated much better code than alternatives that did
+        // different kinds of indexing.
+        self.buf[self.len..(self.len + 8)].copy_from_slice(&n.to_be_bytes());
         self.len += 8;
     }
 
