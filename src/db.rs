@@ -15,6 +15,8 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 
+const VERSION: u32 = 1;
+
 /// Files are identified by integers that are stable across n2 executions.
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Id(u32);
@@ -120,14 +122,21 @@ pub struct Writer {
 impl Writer {
     fn create(path: &str) -> std::io::Result<Self> {
         let f = std::fs::File::create(path)?;
-        Ok(Writer {
+        let mut w = Writer {
             ids: IdMap::default(),
             w: f,
-        })
+        };
+        w.write_signature()?;
+        Ok(w)
     }
 
     fn from_opened(ids: IdMap, w: File) -> Self {
         Writer { ids, w }
+    }
+
+    fn write_signature(&mut self) -> std::io::Result<()> {
+        write!(&mut self.w, "n2db")?;
+        self.w.write_all(&u32::to_le_bytes(VERSION))
     }
 
     fn write_file(&mut self, name: &str) -> std::io::Result<()> {
@@ -304,7 +313,22 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
+    fn read_signature(&mut self) -> anyhow::Result<()> {
+        let mut buf: [u8; 4] = [0; 4];
+        self.r.r.read_exact(&mut buf[..])?;
+        if buf.as_slice() != "n2db".as_bytes() {
+            bail!("invalid db signature");
+        }
+        self.r.r.read_exact(&mut buf[..])?;
+        let version = u32::from_le_bytes(buf);
+        if version != VERSION {
+            bail!("db version mismatch: got {version}, expected {VERSION}; TODO: db upgrades etc");
+        }
+        Ok(())
+    }
+
     fn read_file(&mut self) -> anyhow::Result<()> {
+        self.read_signature()?;
         loop {
             let mut len = match self.r.read_u16() {
                 Ok(r) => r,
