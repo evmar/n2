@@ -76,15 +76,15 @@ impl WriteBuf {
     }
 
     fn write_u16(&mut self, n: u16) {
-        self.write(&n.to_be_bytes());
+        self.write(&n.to_le_bytes());
     }
 
     fn write_u24(&mut self, n: u32) {
-        self.write(&n.to_be_bytes()[1..]);
+        self.write(&n.to_le_bytes()[..3]);
     }
 
     fn write_u64(&mut self, n: u64) {
-        self.write(&n.to_be_bytes());
+        self.write(&n.to_le_bytes());
     }
 
     fn write_str(&mut self, s: &str) {
@@ -190,19 +190,19 @@ impl<'a> Reader<'a> {
     fn read_u16(&mut self) -> std::io::Result<u16> {
         let mut buf: [u8; 2] = [0; 2];
         self.r.read_exact(&mut buf[..])?;
-        Ok(u16::from_be_bytes(buf))
+        Ok(u16::from_le_bytes(buf))
     }
 
     fn read_u24(&mut self) -> std::io::Result<u32> {
         let mut buf: [u8; 4] = [0; 4];
-        self.r.read_exact(&mut buf[1..])?;
-        Ok(u32::from_be_bytes(buf))
+        self.r.read_exact(&mut buf[..3])?;
+        Ok(u32::from_le_bytes(buf))
     }
 
     fn read_u64(&mut self) -> std::io::Result<u64> {
         let mut buf: [u8; 8] = [0; 8];
         self.r.read_exact(&mut buf)?;
-        Ok(u64::from_be_bytes(buf))
+        Ok(u64::from_le_bytes(buf))
     }
 
     fn read_id(&mut self) -> std::io::Result<Id> {
