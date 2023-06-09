@@ -8,6 +8,7 @@ pub trait Index: From<usize> {
 
 /// A map of a dense integer key to value, implemented as a vector.
 /// Effectively wraps Vec<V> to provided typed keys.
+#[derive(Default)]
 pub struct DenseMap<K, V> {
     vec: Vec<V>,
     key_type: std::marker::PhantomData<K>,

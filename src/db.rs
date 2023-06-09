@@ -16,7 +16,7 @@ use std::io::Read;
 use std::io::Write;
 
 /// Files are identified by integers that are stable across n2 executions.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Id(u32);
 impl densemap::Index for Id {
     fn index(&self) -> usize {
@@ -28,21 +28,15 @@ impl From<usize> for Id {
         Id(u as u32)
     }
 }
+
 /// The loaded state of a database, as needed to make updates to the stored
 /// state.  Other state is directly loaded into the build graph.
+#[derive(Default)]
 pub struct IdMap {
     /// Maps db::Id to FileId.
     fileids: DenseMap<Id, FileId>,
     /// Maps FileId to db::Id.
     db_ids: HashMap<FileId, Id>,
-}
-impl IdMap {
-    pub fn new() -> Self {
-        IdMap {
-            fileids: DenseMap::new(),
-            db_ids: HashMap::new(),
-        }
-    }
 }
 
 /// Buffer that accumulates a single record's worth of writes.
@@ -232,7 +226,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
     let mut r = BReader {
         r: std::io::BufReader::new(&mut f),
     };
-    let mut ids = IdMap::new();
+    let mut ids = IdMap::default();
 
     loop {
         let mut len = match r.read_u16() {
@@ -320,7 +314,7 @@ pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Resul
         Ok(f) => read(f, graph, hashes),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let f = std::fs::File::create(path)?;
-            Ok(Writer::new(IdMap::new(), f))
+            Ok(Writer::new(IdMap::default(), f))
         }
         Err(err) => Err(anyhow!(err)),
     }

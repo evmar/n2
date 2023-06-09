@@ -12,7 +12,7 @@ use std::time::SystemTime;
 pub struct Hash(pub u64);
 
 /// Id for File nodes in the Graph.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FileId(u32);
 impl densemap::Index for FileId {
     fn index(&self) -> usize {
