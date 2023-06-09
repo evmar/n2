@@ -74,7 +74,7 @@ impl<'text> Parser<'text> {
     pub fn new(buf: &'text mut Vec<u8>) -> Parser<'text> {
         Parser {
             scanner: Scanner::new(buf),
-            vars: Vars::new(),
+            vars: Vars::default(),
             path_buf: Vec::with_capacity(64),
         }
     }
@@ -135,7 +135,7 @@ impl<'text> Parser<'text> {
     }
 
     fn read_scoped_vars(&mut self) -> ParseResult<LazyVars> {
-        let mut vars = LazyVars::new();
+        let mut vars = LazyVars::default();
         while self.scanner.peek() == ' ' {
             self.scanner.skip_spaces();
             let name = self.read_ident()?;

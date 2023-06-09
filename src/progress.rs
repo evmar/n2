@@ -66,7 +66,6 @@ pub struct ConsoleProgress {
     fancy_terminal: bool,
 }
 
-#[allow(clippy::new_without_default)]
 impl ConsoleProgress {
     pub fn new(verbose: bool, fancy_terminal: bool) -> Self {
         ConsoleProgress {
@@ -74,7 +73,7 @@ impl ConsoleProgress {
             // before our first print.  This reduces flicker in the case where
             // the work immediately completes.
             last_update: Instant::now(),
-            counts: StateCounts::new(),
+            counts: StateCounts::default(),
             tasks: VecDeque::new(),
             verbose,
             fancy_terminal,

@@ -12,7 +12,7 @@ use std::time::SystemTime;
 pub struct Hash(pub u64);
 
 /// Id for File nodes in the Graph.
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FileId(u32);
 impl densemap::Index for FileId {
     fn index(&self) -> usize {
@@ -244,16 +244,17 @@ pub struct Graph {
     file_to_id: HashMap<String, FileId>,
 }
 
-impl Graph {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+impl Default for Graph {
+    fn default() -> Self {
         Graph {
-            files: DenseMap::new(),
-            builds: DenseMap::new(),
-            file_to_id: HashMap::new(),
+            files: DenseMap::default(),
+            builds: DenseMap::default(),
+            file_to_id: HashMap::default(),
         }
     }
+}
 
+impl Graph {
     /// Add a new file, generating a new FileId for it.
     fn add_file(&mut self, name: String) -> FileId {
         self.files.push(File {
@@ -424,13 +425,10 @@ pub fn hash_build(
     Ok(Hash(hasher.finish()))
 }
 
+#[derive(Default)]
 pub struct Hashes(HashMap<BuildId, Hash>);
 
 impl Hashes {
-    pub fn new() -> Hashes {
-        Hashes(HashMap::new())
-    }
-
     pub fn set(&mut self, id: BuildId, hash: Hash) {
         self.0.insert(id, hash);
     }

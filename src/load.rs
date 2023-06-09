@@ -38,6 +38,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 }
 
 /// Internal state used while loading.
+#[derive(Default)]
 struct Loader {
     graph: graph::Graph,
     default: Vec<FileId>,
@@ -54,16 +55,11 @@ impl parse::Loader for Loader {
 
 impl Loader {
     fn new() -> Self {
-        let mut loader = Loader {
-            graph: graph::Graph::new(),
-            default: Vec::new(),
-            rules: HashMap::new(),
-            pools: SmallMap::new(),
-        };
+        let mut loader = Loader::default();
 
         loader
             .rules
-            .insert("phony".to_owned(), eval::LazyVars::new());
+            .insert("phony".to_owned(), eval::LazyVars::default());
 
         loader
     }
@@ -194,7 +190,7 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
         let id = loader.graph.file_id(&mut build_filename.to_string());
         loader.read_file(id)
     })?;
-    let mut hashes = graph::Hashes::new();
+    let mut hashes = graph::Hashes::default();
     let db = trace::scope("db::open", || {
         db::open(".n2_db", &mut loader.graph, &mut hashes)
     })

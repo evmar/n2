@@ -7,11 +7,14 @@ use std::borrow::Borrow;
 /// A map-like object implemented as a list of pairs, for cases where the
 /// number of entries in the map is small.
 pub struct SmallMap<K, V>(Vec<(K, V)>);
-impl<K: PartialEq, V> SmallMap<K, V> {
-    pub fn new() -> Self {
-        SmallMap(Vec::new())
-    }
 
+impl<K, V> Default for SmallMap<K, V> {
+    fn default() -> Self {
+        SmallMap(Vec::default())
+    }
+}
+
+impl<K: PartialEq, V> SmallMap<K, V> {
     pub fn insert(&mut self, k: K, v: V) {
         for (ik, iv) in self.0.iter_mut() {
             if *ik == k {

@@ -8,20 +8,21 @@ pub trait Index: From<usize> {
 
 /// A map of a dense integer key to value, implemented as a vector.
 /// Effectively wraps Vec<V> to provided typed keys.
-#[derive(Default)]
 pub struct DenseMap<K, V> {
     vec: Vec<V>,
     key_type: std::marker::PhantomData<K>,
 }
 
-impl<K: Index, V> DenseMap<K, V> {
-    pub fn new() -> Self {
+impl<K, V> Default for DenseMap<K, V> {
+    fn default() -> Self {
         DenseMap {
-            vec: Vec::new(),
+            vec: Vec::default(),
             key_type: PhantomData::default(),
         }
     }
+}
 
+impl<K: Index, V> DenseMap<K, V> {
     pub fn get(&self, k: K) -> &V {
         &self.vec[k.index()]
     }
@@ -47,7 +48,7 @@ impl<K: Index, V> DenseMap<K, V> {
 
 impl<K: Index, V: Clone> DenseMap<K, V> {
     pub fn new_sized(n: K, default: V) -> Self {
-        let mut m = Self::new();
+        let mut m = Self::default();
         m.vec.resize(n.index(), default);
         m
     }

@@ -47,12 +47,9 @@ pub enum BuildState {
 // Counters that track number of builds in each state.
 // Only covers builds not in the "unknown" state, which means it's only builds
 // that are considered part of the current build.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StateCounts([usize; 6]);
 impl StateCounts {
-    pub fn new() -> Self {
-        StateCounts([0; 6])
-    }
     fn idx(state: BuildState) -> usize {
         match state {
             BuildState::Unknown => panic!("unexpected state"),
@@ -117,7 +114,7 @@ struct BuildStates {
 
 impl BuildStates {
     fn new(size: BuildId, depths: SmallMap<String, usize>) -> Self {
-        let mut pools = SmallMap::new();
+        let mut pools = SmallMap::default();
         // The implied default pool.
         pools.insert(String::from(""), PoolState::new(0));
         // TODO: the console pool is just a depth-1 pool for now.
@@ -127,7 +124,7 @@ impl BuildStates {
         }
         BuildStates {
             states: DenseMap::new_sized(size, BuildState::Unknown),
-            counts: StateCounts::new(),
+            counts: StateCounts::default(),
             ready: VecDeque::new(),
             pools,
         }
@@ -759,7 +756,7 @@ build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja".to_string(), file.as_bytes().to_vec())?;
         let a_id = graph.file_id(&mut "a".to_string());
-        let mut states = crate::work::BuildStates::new(graph.builds.next_id(), SmallMap::new());
+        let mut states = crate::work::BuildStates::new(graph.builds.next_id(), SmallMap::default());
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {
             Ok(_) => panic!("expected build cycle error"),

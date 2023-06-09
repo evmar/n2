@@ -251,15 +251,12 @@ fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
 
 /// Tracks faked "thread ids" -- integers assigned to build tasks to track
 /// parallelism in perf trace output.
+#[derive(Default)]
 struct ThreadIds {
     /// An entry is true when claimed, false or nonexistent otherwise.
     slots: Vec<bool>,
 }
 impl ThreadIds {
-    fn new() -> Self {
-        ThreadIds { slots: Vec::new() }
-    }
-
     fn claim(&mut self) -> usize {
         match self.slots.iter().position(|&used| !used) {
             Some(idx) => {
@@ -294,7 +291,7 @@ impl Runner {
             finished_send: tx,
             finished_recv: rx,
             running: 0,
-            tids: ThreadIds::new(),
+            tids: ThreadIds::default(),
             parallelism,
         }
     }
