@@ -10,39 +10,9 @@ use crate::graph::Build;
 use crate::graph::BuildId;
 use crate::task::TaskResult;
 use crate::task::Termination;
+use crate::terminal;
 use crate::work::BuildState;
 use crate::work::StateCounts;
-
-#[cfg(unix)]
-pub fn get_terminal_cols() -> Option<usize> {
-    unsafe {
-        let mut winsize = std::mem::MaybeUninit::<libc::winsize>::uninit();
-        if libc::ioctl(0, libc::TIOCGWINSZ, &mut winsize) < 0 {
-            return None;
-        }
-        let winsize = winsize.assume_init();
-        Some(winsize.ws_col as usize)
-    }
-}
-
-#[cfg(windows)]
-#[allow(clippy::uninit_assumed_init)]
-pub fn get_terminal_cols() -> Option<usize> {
-    extern crate winapi;
-    extern crate kernel32;
-    use kernel32::{GetConsoleScreenBufferInfo, GetStdHandle};
-    let console = unsafe { GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE) };
-    if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
-        return None;
-    }
-    unsafe {
-        let mut csbi = ::std::mem::MaybeUninit::uninit().assume_init();
-        if GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
-            return None;
-        }
-        Some(csbi.dwSize.X as usize)
-    }
-}
 
 /// Compute the message to display on the console for a given build.
 pub fn build_message(build: &Build) -> &str {
@@ -206,7 +176,7 @@ impl ConsoleProgress {
         ));
         println!("{}", progress_line);
 
-        let max_cols = get_terminal_cols().unwrap_or(80);
+        let max_cols = terminal::get_cols().unwrap_or(80);
         let mut lines = 1;
         let max_lines = 8;
         let now = Instant::now();

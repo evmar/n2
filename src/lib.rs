@@ -12,6 +12,7 @@ mod scanner;
 mod signal;
 mod smallmap;
 mod task;
+mod terminal;
 mod trace;
 mod work;
 

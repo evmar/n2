@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use std::env;
 use std::path::Path;
 
-use crate::{load, progress::ConsoleProgress, trace, work};
+use crate::{load, progress::ConsoleProgress, terminal, trace, work};
 
 // The result of starting a build.
 enum BuildResult {
@@ -75,23 +75,6 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
         None => BuildResult::Failed,
         Some(n) => BuildResult::Success(n),
     })
-}
-
-#[cfg(unix)]
-fn use_fancy_terminal() -> bool {
-    unsafe {
-        libc::isatty(/* stdout */ 1) == 1
-    }
-}
-
-#[cfg(windows)]
-fn use_fancy_terminal() -> bool {
-    unsafe {
-        let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
-        let mut out = 0;
-        // Note: GetConsoleMode itself fails when not attached to a console.
-        winapi::um::consoleapi::GetConsoleMode(handle, &mut out) != 0
-    }
 }
 
 fn run_impl() -> anyhow::Result<i32> {
@@ -194,7 +177,7 @@ fn run_impl() -> anyhow::Result<i32> {
         build_filename = name;
     }
 
-    let mut progress = ConsoleProgress::new(matches.opt_present("v"), use_fancy_terminal());
+    let mut progress = ConsoleProgress::new(matches.opt_present("v"), terminal::use_fancy());
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
