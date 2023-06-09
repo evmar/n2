@@ -190,37 +190,25 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn read_u16(&mut self) -> std::io::Result<u16> {
-        let mut arr: [u8; 2] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
-        self.r.read_exact(buf)?;
-        Ok(((buf[0] as u16) << 8) | (buf[1] as u16))
+        let mut buf: [u8; 2] = [0; 2];
+        self.r.read_exact(&mut buf[..])?;
+        Ok(u16::from_be_bytes(buf))
     }
 
     #[allow(clippy::erasing_op)]
     #[allow(clippy::identity_op)]
     fn read_u24(&mut self) -> std::io::Result<u32> {
-        let mut arr: [u8; 3] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
-        self.r.read_exact(buf)?;
-        Ok(((buf[0] as u32) << (8 * 2))
-            | ((buf[1] as u32) << (8 * 1))
-            | ((buf[2] as u32) << (8 * 0)))
+        let mut buf: [u8; 4] = [0; 4];
+        self.r.read_exact(&mut buf[1..])?;
+        Ok(u32::from_be_bytes(buf))
     }
 
     #[allow(clippy::erasing_op)]
     #[allow(clippy::identity_op)]
     fn read_u64(&mut self) -> std::io::Result<u64> {
-        let mut arr: [u8; 8] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
-        self.r.read_exact(buf)?;
-        Ok(((buf[0] as u64) << (8 * 7))
-            | ((buf[1] as u64) << (8 * 6))
-            | ((buf[2] as u64) << (8 * 5))
-            | ((buf[3] as u64) << (8 * 4))
-            | ((buf[4] as u64) << (8 * 3))
-            | ((buf[5] as u64) << (8 * 2))
-            | ((buf[6] as u64) << (8 * 1))
-            | ((buf[7] as u64) << (8 * 0)))
+        let mut buf: [u8; 8] = [0; 8];
+        self.r.read_exact(&mut buf)?;
+        Ok(u64::from_be_bytes(buf))
     }
 
     fn read_id(&mut self) -> std::io::Result<Id> {
