@@ -118,7 +118,15 @@ pub struct Writer {
 }
 
 impl Writer {
-    fn new(ids: IdMap, w: File) -> Self {
+    fn create(path: &str) -> std::io::Result<Self> {
+        let f = std::fs::File::create(path)?;
+        Ok(Writer {
+            ids: IdMap::default(),
+            w: f,
+        })
+    }
+
+    fn from_opened(ids: IdMap, w: File) -> Self {
         Writer { ids, w }
     }
 
@@ -301,7 +309,7 @@ fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<W
         }
     }
 
-    Ok(Writer::new(ids, f))
+    Ok(Writer::from_opened(ids, f))
 }
 
 /// Opens or creates an on-disk database, loading its state into the provided Graph.
@@ -313,8 +321,8 @@ pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Resul
     {
         Ok(f) => read(f, graph, hashes),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            let f = std::fs::File::create(path)?;
-            Ok(Writer::new(IdMap::default(), f))
+            let w = Writer::create(path)?;
+            Ok(w)
         }
         Err(err) => Err(anyhow!(err)),
     }
