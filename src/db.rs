@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
+use std::mem::MaybeUninit;
 
 const VERSION: u32 = 1;
 
@@ -46,20 +47,17 @@ pub struct IdMap {
 /// We use this instead of a BufWrite because we want to write one full record
 /// at a time if possible.
 struct WriteBuf {
-    buf: [u8; 16 << 10],
+    buf: [MaybeUninit<u8>; 16 << 10],
     len: usize,
 }
 
 #[allow(clippy::erasing_op)]
 #[allow(clippy::identity_op)]
 impl WriteBuf {
-    #[allow(deprecated)]
     fn new() -> Self {
-        unsafe {
-            WriteBuf {
-                buf: std::mem::uninitialized(),
-                len: 0,
-            }
+        WriteBuf {
+            buf: unsafe { MaybeUninit::uninit().assume_init() },
+            len: 0,
         }
     }
 
@@ -68,8 +66,15 @@ impl WriteBuf {
     // different kinds of indexing.
 
     fn write(&mut self, buf: &[u8]) {
-        self.buf[self.len..(self.len + buf.len())].copy_from_slice(&buf);
-        self.len += buf.len();
+        // Safety: self.buf and buf are non-overlapping; bounds checks.
+        unsafe {
+            let ptr = self.buf.as_mut_ptr().offset(self.len as isize);
+            self.len += buf.len();
+            if self.len > self.buf.len() {
+                panic!("oversized WriteBuf");
+            }
+            std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr as *mut u8, buf.len());
+        }
     }
 
     fn write_u16(&mut self, n: u16) {
@@ -86,8 +91,7 @@ impl WriteBuf {
 
     fn write_str(&mut self, s: &str) {
         self.write_u16(s.len() as u16);
-        self.buf[self.len..self.len + s.len()].copy_from_slice(s.as_bytes());
-        self.len += s.len();
+        self.write(s.as_bytes());
     }
 
     fn write_id(&mut self, id: Id) {
@@ -97,9 +101,10 @@ impl WriteBuf {
         self.write_u24(id.0 as u32);
     }
 
-    fn flush<W: Write>(&mut self, w: &mut W) -> std::io::Result<()> {
-        w.write_all(&self.buf[0..self.len])?;
-        self.len = 0;
+    fn flush<W: Write>(self, w: &mut W) -> std::io::Result<()> {
+        // Safety: invariant is that self.buf up to self.len is initialized.
+        let buf: &[u8] = unsafe { std::mem::transmute(&self.buf[..self.len]) };
+        w.write_all(buf)?;
         Ok(())
     }
 }
