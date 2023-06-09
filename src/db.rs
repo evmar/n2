@@ -229,87 +229,113 @@ impl<'a> BReader<'a> {
     }
 }
 
-/// Reads an on-disk database, loading its state into the provided Graph/Hashes.
-fn read(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
-    let mut r = BReader {
-        r: std::io::BufReader::new(&mut f),
-    };
-    let mut ids = IdMap::default();
+struct Reader<'a> {
+    r: BReader<'a>,
+    ids: IdMap,
+    graph: &'a mut Graph,
+    hashes: &'a mut Hashes,
+}
 
-    loop {
-        let mut len = match r.read_u16() {
-            Ok(r) => r,
-            Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(err) => bail!(err),
-        };
-        let mask = 0b1000_0000_0000_0000;
-        if len & mask == 0 {
-            let mut name = r.read_str(len as usize)?;
-            let fileid = graph.file_id(&mut name);
-            let dbid = ids.fileids.push(fileid);
-            ids.db_ids.insert(fileid, dbid);
-        } else {
-            len &= !mask;
+impl<'a> Reader<'a> {
+    fn read_path(&mut self, len: usize) -> std::io::Result<()> {
+        let mut name = self.r.read_str(len)?;
+        let fileid = self.graph.file_id(&mut name);
+        let dbid = self.ids.fileids.push(fileid);
+        self.ids.db_ids.insert(fileid, dbid);
+        Ok(())
+    }
 
-            // This record logs a build.  We expect all the outputs to be
-            // outputs of the same build id; if not, that means the graph has
-            // changed since this log, in which case we just ignore it.
-            //
-            // It's possible we log a build that generates files A B, then
-            // change the build file such that it only generates file A; this
-            // logic will still attach the old dependencies to A, but it
-            // shouldn't matter because the changed command line will cause us
-            // to rebuild A regardless, and these dependencies are only used
-            // to affect dirty checking, not build order.
+    fn read_build(&mut self, len: usize) -> std::io::Result<()> {
+        // This record logs a build.  We expect all the outputs to be
+        // outputs of the same build id; if not, that means the graph has
+        // changed since this log, in which case we just ignore it.
+        //
+        // It's possible we log a build that generates files A B, then
+        // change the build file such that it only generates file A; this
+        // logic will still attach the old dependencies to A, but it
+        // shouldn't matter because the changed command line will cause us
+        // to rebuild A regardless, and these dependencies are only used
+        // to affect dirty checking, not build order.
 
-            let mut unique_bid = None;
-            let mut obsolete = false;
-            for _ in 0..len {
-                let fileid = r.read_id()?;
-                if obsolete {
-                    // Even though we know we don't want this record, we must
-                    // keep reading to parse through it.
-                    continue;
+        let mut unique_bid = None;
+        let mut obsolete = false;
+        for _ in 0..len {
+            let fileid = self.r.read_id()?;
+            if obsolete {
+                // Even though we know we don't want this record, we must
+                // keep reading to parse through it.
+                continue;
+            }
+            match self.graph.file(*self.ids.fileids.get(fileid)).input {
+                None => {
+                    obsolete = true;
                 }
-                match graph.file(*ids.fileids.get(fileid)).input {
-                    None => {
-                        obsolete = true;
-                    }
-                    Some(bid) => {
-                        match unique_bid {
-                            None => unique_bid = Some(bid),
-                            Some(unique_bid) if unique_bid == bid => {
-                                // Ok, matches the existing id.
-                            }
-                            Some(_) => {
-                                // Mismatch.
-                                unique_bid = None;
-                                obsolete = true;
-                            }
+                Some(bid) => {
+                    match unique_bid {
+                        None => unique_bid = Some(bid),
+                        Some(unique_bid) if unique_bid == bid => {
+                            // Ok, matches the existing id.
+                        }
+                        Some(_) => {
+                            // Mismatch.
+                            unique_bid = None;
+                            obsolete = true;
                         }
                     }
                 }
             }
-
-            let len = r.read_u16()?;
-            let mut deps = Vec::new();
-            for _ in 0..len {
-                let id = r.read_id()?;
-                deps.push(*ids.fileids.get(id));
-            }
-
-            let hash = Hash(r.read_u64()?);
-
-            // unique_bid is set here if this record is valid.
-            if let Some(id) = unique_bid {
-                // Common case: only one associated build.
-                graph.build_mut(id).set_discovered_ins(deps);
-                hashes.set(id, hash);
-            }
         }
+
+        let len = self.r.read_u16()?;
+        let mut deps = Vec::new();
+        for _ in 0..len {
+            let id = self.r.read_id()?;
+            deps.push(*self.ids.fileids.get(id));
+        }
+
+        let hash = Hash(self.r.read_u64()?);
+
+        // unique_bid is set here if this record is valid.
+        if let Some(id) = unique_bid {
+            // Common case: only one associated build.
+            self.graph.build_mut(id).set_discovered_ins(deps);
+            self.hashes.set(id, hash);
+        }
+        Ok(())
     }
 
-    Ok(Writer::from_opened(ids, f))
+    fn read_file(&mut self) -> anyhow::Result<()> {
+        loop {
+            let mut len = match self.r.read_u16() {
+                Ok(r) => r,
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => bail!(err),
+            };
+            let mask = 0b1000_0000_0000_0000;
+            if len & mask == 0 {
+                self.read_path(len as usize)?;
+            } else {
+                len &= !mask;
+                self.read_build(len as usize)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads an on-disk database, loading its state into the provided Graph/Hashes.
+    fn read(f: &mut File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<IdMap> {
+        let mut r = Reader {
+            r: BReader {
+                r: std::io::BufReader::new(f),
+            },
+            ids: IdMap::default(),
+            graph,
+            hashes,
+        };
+        r.read_file()?;
+
+        Ok(r.ids)
+    }
 }
 
 /// Opens or creates an on-disk database, loading its state into the provided Graph.
@@ -319,7 +345,10 @@ pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Resul
         .append(true)
         .open(path)
     {
-        Ok(f) => read(f, graph, hashes),
+        Ok(mut f) => {
+            let ids = Reader::read(&mut f, graph, hashes)?;
+            Ok(Writer::from_opened(ids, f))
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let w = Writer::create(path)?;
             Ok(w)
