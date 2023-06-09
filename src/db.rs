@@ -185,11 +185,14 @@ impl Writer {
     }
 }
 
-/// Provides lower-level methods for reading serialized data.
-struct BReader<'a> {
+struct Reader<'a> {
     r: BufReader<&'a mut File>,
+    ids: IdMap,
+    graph: &'a mut Graph,
+    hashes: &'a mut Hashes,
 }
-impl<'a> BReader<'a> {
+
+impl<'a> Reader<'a> {
     fn read_u16(&mut self) -> std::io::Result<u16> {
         let mut arr: [u8; 2] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
         let buf: &mut [u8] = unsafe { std::mem::transmute(&mut arr[..]) };
@@ -236,18 +239,9 @@ impl<'a> BReader<'a> {
         self.r.read_exact(buf.as_mut_slice())?;
         Ok(unsafe { String::from_utf8_unchecked(buf) })
     }
-}
 
-struct Reader<'a> {
-    r: BReader<'a>,
-    ids: IdMap,
-    graph: &'a mut Graph,
-    hashes: &'a mut Hashes,
-}
-
-impl<'a> Reader<'a> {
     fn read_path(&mut self, len: usize) -> std::io::Result<()> {
-        let mut name = self.r.read_str(len)?;
+        let mut name = self.read_str(len)?;
         let fileid = self.graph.file_id(&mut name);
         let dbid = self.ids.fileids.push(fileid);
         self.ids.db_ids.insert(fileid, dbid);
@@ -269,7 +263,7 @@ impl<'a> Reader<'a> {
         let mut unique_bid = None;
         let mut obsolete = false;
         for _ in 0..len {
-            let fileid = self.r.read_id()?;
+            let fileid = self.read_id()?;
             if obsolete {
                 // Even though we know we don't want this record, we must
                 // keep reading to parse through it.
@@ -295,14 +289,14 @@ impl<'a> Reader<'a> {
             }
         }
 
-        let len = self.r.read_u16()?;
+        let len = self.read_u16()?;
         let mut deps = Vec::new();
         for _ in 0..len {
-            let id = self.r.read_id()?;
+            let id = self.read_id()?;
             deps.push(*self.ids.fileids.get(id));
         }
 
-        let hash = Hash(self.r.read_u64()?);
+        let hash = Hash(self.read_u64()?);
 
         // unique_bid is set here if this record is valid.
         if let Some(id) = unique_bid {
@@ -315,11 +309,11 @@ impl<'a> Reader<'a> {
 
     fn read_signature(&mut self) -> anyhow::Result<()> {
         let mut buf: [u8; 4] = [0; 4];
-        self.r.r.read_exact(&mut buf[..])?;
+        self.r.read_exact(&mut buf[..])?;
         if buf.as_slice() != "n2db".as_bytes() {
             bail!("invalid db signature");
         }
-        self.r.r.read_exact(&mut buf[..])?;
+        self.r.read_exact(&mut buf[..])?;
         let version = u32::from_le_bytes(buf);
         if version != VERSION {
             bail!("db version mismatch: got {version}, expected {VERSION}; TODO: db upgrades etc");
@@ -330,7 +324,7 @@ impl<'a> Reader<'a> {
     fn read_file(&mut self) -> anyhow::Result<()> {
         self.read_signature()?;
         loop {
-            let mut len = match self.r.read_u16() {
+            let mut len = match self.read_u16() {
                 Ok(r) => r,
                 Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(err) => bail!(err),
@@ -349,9 +343,7 @@ impl<'a> Reader<'a> {
     /// Reads an on-disk database, loading its state into the provided Graph/Hashes.
     fn read(f: &mut File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<IdMap> {
         let mut r = Reader {
-            r: BReader {
-                r: std::io::BufReader::new(f),
-            },
+            r: std::io::BufReader::new(f),
             ids: IdMap::default(),
             graph,
             hashes,
