@@ -14,13 +14,13 @@ use crate::work::BuildState;
 use crate::work::StateCounts;
 
 #[cfg(unix)]
-#[allow(clippy::uninit_assumed_init)]
 pub fn get_terminal_cols() -> Option<usize> {
     unsafe {
-        let mut winsize: libc::winsize = std::mem::MaybeUninit::uninit().assume_init();
+        let mut winsize = std::mem::MaybeUninit::<libc::winsize>::uninit();
         if libc::ioctl(0, libc::TIOCGWINSZ, &mut winsize) < 0 {
             return None;
         }
+        let winsize = winsize.assume_init();
         Some(winsize.ws_col as usize)
     }
 }
