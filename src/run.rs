@@ -1,7 +1,6 @@
 extern crate getopts;
 
 use anyhow::anyhow;
-use std::env;
 use std::path::Path;
 
 use crate::{load, progress::ConsoleProgress, terminal, trace, work};
@@ -80,7 +79,7 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
 fn run_impl() -> anyhow::Result<i32> {
     let args: Vec<_> = std::env::args().collect();
     let fake_ninja_compat = Path::new(&args[0]).file_name().unwrap()
-        == std::ffi::OsStr::new(&format!("ninja{}", env::consts::EXE_SUFFIX));
+        == std::ffi::OsStr::new(&format!("ninja{}", std::env::consts::EXE_SUFFIX));
 
     // Ninja uses available processors + a constant, but I don't think the
     // difference matters too much.
