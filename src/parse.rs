@@ -48,15 +48,12 @@ pub struct Parser<'text> {
     path_buf: Vec<u8>,
 }
 
-fn is_ident_char(c: u8) -> bool {
-    matches!(c as char, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-')
-}
-
 fn is_path_char(c: u8) -> bool {
     // Basically any character is allowed in paths, but we want to parse e.g.
     //   build foo: bar | baz
     // such that the colon is not part of the 'foo' path and such that '|' is
     // not read as a path.
+    // Those characters can be embedded by escaping, e.g. "$:".
     !matches!(c as char, '\0' | ' ' | '\n' | '\r' | ':' | '|' | '$')
 }
 
@@ -276,9 +273,13 @@ impl<'text> Parser<'text> {
         }
     }
 
+    /// Read an identifier -- rule name, pool name, variable name, etc.
     fn read_ident(&mut self) -> ParseResult<&'text str> {
         let start = self.scanner.ofs;
-        while is_ident_char(self.scanner.read() as u8) {}
+        while matches!(
+            self.scanner.read(),
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.'
+        ) {}
         self.scanner.back();
         let end = self.scanner.ofs;
         if end == start {
@@ -379,6 +380,23 @@ impl<'text> Parser<'text> {
         Ok(Some(path))
     }
 
+    /// Read a variable name as found after a '$' in an eval.
+    /// Ninja calls this a "simple" varname and it is the same as read_ident without
+    /// period allowed(!), I guess because we expect things like
+    ///   foo = $bar.d
+    /// to parse as a reference to $bar.
+    fn read_simple_varname(&mut self) -> ParseResult<&'text str> {
+        let start = self.scanner.ofs;
+        while matches!(self.scanner.read(), 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-') {}
+        self.scanner.back();
+        let end = self.scanner.ofs;
+        if end == start {
+            return self.scanner.parse_error("failed to scan variable name");
+        }
+        Ok(self.scanner.slice(start, end))
+    }
+
+    /// Read and interpret the text following a '$' escape character.
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'text str>> {
         Ok(match self.scanner.read() {
             '\n' | '\r' => {
@@ -401,9 +419,10 @@ impl<'text> Parser<'text> {
                 EvalPart::VarRef(self.scanner.slice(start, end))
             }
             _ => {
+                // '$' followed by some other text.
                 self.scanner.back();
-                let ident = self.read_ident()?;
-                EvalPart::VarRef(ident)
+                let var = self.read_simple_varname()?;
+                EvalPart::VarRef(var)
             }
         })
     }
@@ -443,11 +462,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_dot() {
+    fn parse_dot_in_eval() {
         let mut buf = "x = $y.z\n".as_bytes().to_vec();
         let mut parser = Parser::new(&mut buf);
         parser.read(&mut StringLoader {}).unwrap();
         let x = parser.vars.get("x").unwrap();
         assert_eq!(x, ".z");
+    }
+
+    #[test]
+    fn parse_dot_in_rule() {
+        let mut buf = "rule x.y\n  command = x\n".as_bytes().to_vec();
+        let mut parser = Parser::new(&mut buf);
+        let stmt = parser.read(&mut StringLoader {}).unwrap().unwrap();
+        assert!(matches!(
+            stmt,
+            Statement::Rule(Rule {
+                name: "x.y",
+                vars: _
+            })
+        ));
     }
 }
