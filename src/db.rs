@@ -19,7 +19,7 @@ use std::mem::MaybeUninit;
 const VERSION: u32 = 1;
 
 /// Files are identified by integers that are stable across n2 executions.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct Id(u32);
 impl densemap::Index for Id {
     fn index(&self) -> usize {
