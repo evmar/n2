@@ -213,6 +213,7 @@ impl<'a> Reader<'a> {
         let mut buf = Vec::with_capacity(len);
         // Safety: buf contents are uninitialized here, but we never read them
         // before initialization.
+        // TODO: clippy says this is still UB, yuck.
         unsafe { buf.set_len(len) };
         self.r.read_exact(buf.as_mut_slice())?;
         Ok(unsafe { String::from_utf8_unchecked(buf) })
