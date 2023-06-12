@@ -389,7 +389,7 @@ fn hash_files(
             MTime::Stamp(mtime) => mtime,
             MTime::Missing => panic!("missing file: {:?}", name),
         };
-        hasher.write(graph.file(id).name.as_bytes());
+        hasher.write(name.as_bytes());
         std::hash::Hash::hash(&mtime, hasher);
         hasher.write_u8(UNIT_SEPARATOR);
     }
