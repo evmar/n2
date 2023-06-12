@@ -50,15 +50,6 @@ pub struct Parser<'text> {
     path_buf: Vec<u8>,
 }
 
-fn is_path_char(c: u8) -> bool {
-    // Basically any character is allowed in paths, but we want to parse e.g.
-    //   build foo: bar | baz
-    // such that the colon is not part of the 'foo' path and such that '|' is
-    // not read as a path.
-    // Those characters can be embedded by escaping, e.g. "$:".
-    !matches!(c as char, '\0' | ' ' | '\n' | '\r' | ':' | '|' | '$')
-}
-
 /// Loader maps path strings (as found in build.ninja files) into an arbitrary
 /// "Path" type.  This allows us to canonicalize and convert path strings to
 /// more efficient integer identifiers while we parse, rather than needing to
@@ -322,35 +313,33 @@ impl<'text> Parser<'text> {
         self.path_buf.clear();
         loop {
             let c = self.scanner.read();
-            if is_path_char(c as u8) {
-                self.path_buf.push(c as u8);
-            } else {
-                match c {
-                    '\0' => {
-                        self.scanner.back();
-                        return self.scanner.parse_error("unexpected EOF");
-                    }
-                    '$' => {
-                        let part = self.read_escape()?;
-                        match part {
-                            EvalPart::Literal(l) => self.path_buf.extend_from_slice(l.as_bytes()),
-                            EvalPart::VarRef(v) => {
-                                if let Some(v) = self.vars.get(v) {
-                                    self.path_buf.extend_from_slice(v.as_bytes());
-                                }
+            match c {
+                '\0' => {
+                    self.scanner.back();
+                    return self.scanner.parse_error("unexpected EOF");
+                }
+                '$' => {
+                    let part = self.read_escape()?;
+                    match part {
+                        EvalPart::Literal(l) => self.path_buf.extend_from_slice(l.as_bytes()),
+                        EvalPart::VarRef(v) => {
+                            if let Some(v) = self.vars.get(v) {
+                                self.path_buf.extend_from_slice(v.as_bytes());
                             }
                         }
                     }
-                    ':' | '|' | ' ' | '\n' | '\r' => {
-                        self.scanner.back();
-                        break;
-                    }
-                    c => {
-                        self.scanner.back();
-                        return self
-                            .scanner
-                            .parse_error(format!("unexpected character {:?}", c));
-                    }
+                }
+                ':' | '|' | ' ' | '\n' | '\r' => {
+                    // Basically any character is allowed in paths, but we want to parse e.g.
+                    //   build foo: bar | baz
+                    // such that the colon is not part of the 'foo' path and such that '|' is
+                    // not read as a path.
+                    // Those characters can be embedded by escaping, e.g. "$:".
+                    self.scanner.back();
+                    break;
+                }
+                c => {
+                    self.path_buf.push(c as u8);
                 }
             }
         }
