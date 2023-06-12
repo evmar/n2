@@ -50,12 +50,17 @@ $ pprof -http=:8080 ./target/release/n2 p
 The web server it brings up shows an interactive graph, top functions, annotated
 code, disassembly...
 
-### Other options
+### Mac
+
+```
+$ cargo instruments --release --template time --bin n2 -- -C ~/projects/llvm-project-16.0.0.src/build clang-format
+```
+
+TODO: notes on this vs `cargo flamegraph`.
+
+### Windows
 
 It appears `perf` profiling of Rust under WSL2 is not a thing(?).
-
-Some other options on Mac that seemed ok are `cargo flamegraph` and
-`cargo instruments`.
 
 ## Benchmarking
 
