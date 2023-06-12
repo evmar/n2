@@ -430,7 +430,9 @@ impl<'text> Parser<'text> {
     }
 }
 
+#[cfg(test)]
 struct StringLoader {}
+#[cfg(test)]
 impl Loader for StringLoader {
     type Path = String;
     fn path(&mut self, path: &mut String) -> Self::Path {
