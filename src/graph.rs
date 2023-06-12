@@ -4,7 +4,7 @@ use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::{self, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// Hash value used to identify a given instance of a Build's execution;
@@ -49,6 +49,12 @@ pub struct File {
     pub input: Option<BuildId>,
     /// The Builds that depend on this file as an input.
     pub dependents: Vec<BuildId>,
+}
+
+impl File {
+    pub fn path(&self) -> &Path {
+        Path::new(&self.name)
+    }
 }
 
 /// A textual location within a build.ninja file, used in error messages.
@@ -336,7 +342,7 @@ pub enum MTime {
 }
 
 /// stat() an on-disk path, producing its MTime.
-pub fn stat(path: &str) -> std::io::Result<MTime> {
+pub fn stat(path: &Path) -> std::io::Result<MTime> {
     // TODO: On Windows, use FindFirstFileEx()/FindNextFile() to get timestamps per
     //       directory, for better stat perf.
     Ok(match std::fs::metadata(path) {
@@ -364,7 +370,7 @@ impl FileState {
         *self.0.lookup(id).unwrap_or(&None)
     }
 
-    pub fn restat(&mut self, id: FileId, path: &str) -> std::io::Result<MTime> {
+    pub fn restat(&mut self, id: FileId, path: &Path) -> std::io::Result<MTime> {
         let mtime = stat(path)?;
         self.0.set_grow(id, Some(mtime), None);
         Ok(mtime)
@@ -440,23 +446,22 @@ fn stat_mtime_resolution() {
 
     let temp_dir = tempfile::tempdir().unwrap();
     let filename = temp_dir.path().join("dummy");
-    let filename = filename.to_str().unwrap();
 
     // Write once and stat.
-    std::fs::write(filename, "foo").unwrap();
-    let mtime1 = match stat(filename).unwrap() {
+    std::fs::write(&filename, "foo").unwrap();
+    let mtime1 = match stat(&filename).unwrap() {
         MTime::Stamp(mtime) => mtime,
-        _ => panic!("File not found: {}", filename),
+        _ => panic!("File not found: {}", filename.display()),
     };
 
     // Sleep for a short interval.
     std::thread::sleep(std::time::Duration::from_millis(10));
 
     // Write twice and stat.
-    std::fs::write(filename, "foo").unwrap();
-    let mtime2 = match stat(filename).unwrap() {
+    std::fs::write(&filename, "foo").unwrap();
+    let mtime2 = match stat(&filename).unwrap() {
         MTime::Stamp(mtime) => mtime,
-        _ => panic!("File not found: {}", filename),
+        _ => panic!("File not found: {}", filename.display()),
     };
 
     let diff = mtime2.duration_since(mtime1).unwrap();

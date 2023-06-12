@@ -135,7 +135,7 @@ impl Loader {
     }
 
     fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
-        let path = PathBuf::from(self.graph.file(id).name.clone());
+        let path = self.graph.file(id).path().to_path_buf();
         let bytes = match trace::scope("fs::read", || std::fs::read(&path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path.display(), e),

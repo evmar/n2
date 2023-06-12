@@ -133,7 +133,7 @@ impl Writer {
         self.w.write_all(&u32::to_le_bytes(VERSION))
     }
 
-    fn write_file(&mut self, name: &str) -> std::io::Result<()> {
+    fn write_path(&mut self, name: &str) -> std::io::Result<()> {
         if name.len() >= 0b1000_0000_0000_0000 {
             panic!("filename too long");
         }
@@ -148,7 +148,7 @@ impl Writer {
             None => {
                 let id = self.ids.fileids.push(fileid);
                 self.ids.db_ids.insert(fileid, id);
-                self.write_file(&graph.file(fileid).name)?;
+                self.write_path(&graph.file(fileid).name)?;
                 id
             }
         };

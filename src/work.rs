@@ -401,7 +401,7 @@ impl<'a> Work<'a> {
                             file.name
                         );
                     }
-                    self.file_state.restat(id, &file.name)?
+                    self.file_state.restat(id, file.path())?
                 }
             };
             if mtime == MTime::Missing {
@@ -441,7 +441,7 @@ impl<'a> Work<'a> {
         let mut output_missing = false;
         for &id in build.outs() {
             let file = self.graph.file(id);
-            let mtime = self.file_state.restat(id, &file.name)?;
+            let mtime = self.file_state.restat(id, file.path())?;
             if mtime == MTime::Missing {
                 output_missing = true;
             }
@@ -523,7 +523,7 @@ impl<'a> Work<'a> {
                                 build.location, &file.name
                             );
                         }
-                        self.file_state.restat(id, &file.name)?
+                        self.file_state.restat(id, file.path())?
                     }
                 };
                 if mtime == MTime::Missing {
@@ -544,7 +544,7 @@ impl<'a> Work<'a> {
                 }
                 let mtime = match self.file_state.get(id) {
                     Some(mtime) => mtime,
-                    None => self.file_state.restat(id, &file.name)?,
+                    None => self.file_state.restat(id, file.path())?,
                 };
                 if mtime == MTime::Missing {
                     if workaround_missing_phony_deps {
@@ -572,7 +572,7 @@ impl<'a> Work<'a> {
             if self.file_state.get(id).is_some() {
                 panic!("expected no file state for {}", file.name);
             }
-            let mtime = self.file_state.restat(id, &file.name)?;
+            let mtime = self.file_state.restat(id, file.path())?;
             if mtime == MTime::Missing {
                 return Ok(true);
             }
@@ -614,7 +614,7 @@ impl<'a> Work<'a> {
     fn create_parent_dirs(&self, ids: &[FileId]) -> anyhow::Result<()> {
         let mut dirs: Vec<&std::path::Path> = Vec::new();
         for &out in ids {
-            if let Some(parent) = std::path::Path::new(&self.graph.file(out).name).parent() {
+            if let Some(parent) = self.graph.file(out).path().parent() {
                 if dirs.iter().any(|&p| p == parent) {
                     continue;
                 }
