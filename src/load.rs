@@ -49,7 +49,7 @@ struct Loader {
 
 impl parse::Loader for Loader {
     type Path = FileId;
-    fn path(&mut self, path: &mut String) -> Self::Path {
+    fn path(&mut self, path: &mut str) -> Self::Path {
         self.graph.file_id(path)
     }
 }

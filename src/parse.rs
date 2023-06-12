@@ -66,10 +66,9 @@ fn is_path_char(c: u8) -> bool {
 /// for all of these.
 pub trait Loader {
     type Path;
-    /// Convert a path string to a Self::Path type.  Note there are safety
-    /// related restrictions on what this function may do; see notes at the call
-    /// site.
-    fn path(&mut self, path: &mut String) -> Self::Path;
+    /// Convert a path string to a Self::Path type.  For performance reasons
+    /// this may mutate the 'path' param.
+    fn path(&mut self, path: &mut str) -> Self::Path;
 }
 
 impl<'text> Parser<'text> {
@@ -358,27 +357,12 @@ impl<'text> Parser<'text> {
         if self.path_buf.is_empty() {
             return Ok(None);
         }
-        // Performance: we want to pass self.path_buf directly to loader to
-        // have it canonicalize the path in-place, without allocating any
-        // additional buffers.  This is some of the hottest code in n2 so
-        // we cut some corners to achieve this.
+        // Performance: this is some of the hottest code in n2 so we cut some corners.
         // Safety: see discussion of unicode safety in doc/development.md.
         // I looked into switching this to BStr but it would require changing
         // a lot of other code to BStr too.
-        // Safety: this assumes loader.path will never attempt to grow the
-        // passed-in string (causing a reallocation), and instead only will
-        // monkey with the contents within the passed-in buffer.  We also know
-        // that this buffer will not be used immediately after loader.path() is
-        // called so it's fine for loader.path to scribble on it.
-        let mut path_str = unsafe {
-            String::from_raw_parts(
-                self.path_buf.as_mut_ptr(),
-                self.path_buf.len(),
-                self.path_buf.capacity(),
-            )
-        };
-        let path = loader.path(&mut path_str);
-        std::mem::forget(path_str); // path_buf owns it.
+        let path_str = unsafe { std::str::from_utf8_unchecked_mut(&mut self.path_buf) };
+        let path = loader.path(path_str);
         Ok(Some(path))
     }
 
@@ -435,7 +419,7 @@ struct StringLoader {}
 #[cfg(test)]
 impl Loader for StringLoader {
     type Path = String;
-    fn path(&mut self, path: &mut String) -> Self::Path {
+    fn path(&mut self, path: &mut str) -> Self::Path {
         path.to_string()
     }
 }

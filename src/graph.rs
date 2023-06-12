@@ -268,14 +268,15 @@ impl Graph {
     }
 
     /// Canonicalize a path and get/generate its FileId.
-    pub fn file_id(&mut self, canon: &mut String) -> FileId {
-        canon_path_in_place(canon);
+    pub fn file_id(&mut self, canon: &mut str) -> FileId {
+        let len = canon_path_in_place(canon);
+        let canon = &canon[..len];
         match self.file_to_id.get(canon) {
             Some(id) => *id,
             None => {
                 // TODO: so many string copies :<
-                let id = self.add_file(canon.clone());
-                self.file_to_id.insert(canon.clone(), id);
+                let id = self.add_file(canon.to_string());
+                self.file_to_id.insert(canon.to_string(), id);
                 id
             }
         }
