@@ -25,3 +25,4 @@ tempfile = "3.3.0"
 
 [profile.release]
 debug = true
+lto = true
