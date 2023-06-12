@@ -5,6 +5,8 @@
 //! To avoid allocations parsing frequently uses references into the input
 //! text, marked with the lifetime `'text`.
 
+use std::path::Path;
+
 use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
 use crate::scanner::{ParseError, ParseResult, Scanner};
 
@@ -79,7 +81,7 @@ impl<'text> Parser<'text> {
         }
     }
 
-    pub fn format_parse_error(&self, filename: &str, err: ParseError) -> String {
+    pub fn format_parse_error(&self, filename: &Path, err: ParseError) -> String {
         self.scanner.format_parse_error(filename, err)
     }
 

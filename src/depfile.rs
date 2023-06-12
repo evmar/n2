@@ -76,13 +76,15 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     fn must_parse(buf: &mut Vec<u8>) -> Deps {
         let mut scanner = Scanner::new(buf);
         match parse(&mut scanner) {
             Err(err) => {
-                println!("{}", scanner.format_parse_error("test", err));
+                println!("{}", scanner.format_parse_error(Path::new("test"), err));
                 panic!("failed parse");
             }
             Ok(d) => d,

@@ -4,6 +4,7 @@ use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::{self, Hasher};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 /// Hash value used to identify a given instance of a Build's execution;
@@ -53,12 +54,12 @@ pub struct File {
 /// A textual location within a build.ninja file, used in error messages.
 #[derive(Debug)]
 pub struct FileLoc {
-    pub filename: std::rc::Rc<String>,
+    pub filename: std::rc::Rc<PathBuf>,
     pub line: usize,
 }
 impl std::fmt::Display for FileLoc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}:{}", self.filename, self.line)
+        write!(f, "{}:{}", self.filename.display(), self.line)
     }
 }
 

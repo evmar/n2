@@ -10,6 +10,7 @@ use crate::task;
 use crate::trace;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(unix)]
@@ -657,7 +658,7 @@ impl<'a> Work<'a> {
                 self.runner.start(
                     id,
                     build.cmdline.clone().unwrap(),
-                    build.depfile.clone(),
+                    build.depfile.clone().map(PathBuf::from),
                     build.rspfile.clone(),
                 );
                 self.progress.task_state(id, build, None);
@@ -754,7 +755,7 @@ build a: phony b
 build b: phony c
 build c: phony a
 ";
-        let mut graph = crate::load::parse("build.ninja".to_string(), file.as_bytes().to_vec())?;
+        let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
         let a_id = graph.file_id(&mut "a".to_string());
         let mut states = crate::work::BuildStates::new(graph.builds.next_id(), SmallMap::default());
         let mut stack = Vec::new();

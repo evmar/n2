@@ -1,5 +1,7 @@
 //! Scans an input string (source file) character by character.
 
+use std::path::Path;
+
 #[derive(Debug)]
 pub struct ParseError {
     msg: String,
@@ -80,7 +82,7 @@ impl<'a> Scanner<'a> {
         })
     }
 
-    pub fn format_parse_error(&self, filename: &str, err: ParseError) -> String {
+    pub fn format_parse_error(&self, filename: &Path, err: ParseError) -> String {
         let mut ofs = 0;
         let lines = self.buf.split(|&c| c == b'\n');
         for (line_number, line) in lines.enumerate() {
@@ -89,7 +91,7 @@ impl<'a> Scanner<'a> {
                 msg.push_str(&err.msg);
                 msg.push('\n');
 
-                let prefix = format!("{}:{}: ", filename, line_number + 1);
+                let prefix = format!("{}:{}: ", filename.display(), line_number + 1);
                 msg.push_str(&prefix);
 
                 let mut context = unsafe { std::str::from_utf8_unchecked(line) };

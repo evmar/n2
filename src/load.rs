@@ -7,6 +7,7 @@ use crate::{db, eval, graph, parse, trace};
 use anyhow::{anyhow, bail};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// A variable lookup environment for magic $in/$out variables.
 struct BuildImplicitVars<'a> {
@@ -66,7 +67,7 @@ impl Loader {
 
     fn add_build(
         &mut self,
-        filename: std::rc::Rc<String>,
+        filename: std::rc::Rc<PathBuf>,
         env: &eval::Vars,
         b: parse::Build<FileId>,
     ) -> anyhow::Result<()> {
@@ -134,15 +135,15 @@ impl Loader {
     }
 
     fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
-        let path = self.graph.file(id).name.clone();
+        let path = PathBuf::from(self.graph.file(id).name.clone());
         let bytes = match trace::scope("fs::read", || std::fs::read(&path)) {
             Ok(b) => b,
-            Err(e) => bail!("read {}: {}", path, e),
+            Err(e) => bail!("read {}: {}", path.display(), e),
         };
         self.parse(path, bytes)
     }
 
-    fn parse(&mut self, path: String, mut bytes: Vec<u8>) -> anyhow::Result<()> {
+    fn parse(&mut self, path: PathBuf, mut bytes: Vec<u8>) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
 
         let mut parser = parse::Parser::new(&mut bytes);
@@ -206,8 +207,10 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
 
 /// Parse a single file's content.
 #[cfg(test)]
-pub fn parse(name: String, content: Vec<u8>) -> anyhow::Result<graph::Graph> {
+pub fn parse(name: &str, content: Vec<u8>) -> anyhow::Result<graph::Graph> {
     let mut loader = Loader::new();
-    trace::scope("loader.read_file", || loader.parse(name, content))?;
+    trace::scope("loader.read_file", || {
+        loader.parse(PathBuf::from(name), content)
+    })?;
     Ok(loader.graph)
 }

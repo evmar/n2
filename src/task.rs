@@ -9,6 +9,7 @@ use crate::depfile;
 use crate::graph::{BuildId, RspFile};
 use crate::scanner::Scanner;
 use anyhow::{anyhow, bail};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -49,10 +50,10 @@ pub struct TaskResult {
 }
 
 /// Reads dependencies from a .d file path.
-fn read_depfile(path: &str) -> anyhow::Result<Vec<String>> {
+fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
     let mut bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) => bail!("read {}: {}", path, e),
+        Err(e) => bail!("read {}: {}", path.display(), e),
     };
     let mut scanner = Scanner::new(&mut bytes);
     let parsed_deps = depfile::parse(&mut scanner)
@@ -78,7 +79,7 @@ fn write_rspfile(rspfile: &RspFile) -> anyhow::Result<()> {
 /// Returns an Err() if we failed outside of the process itself.
 fn run_task(
     cmdline: &str,
-    depfile: Option<&str>,
+    depfile: Option<&Path>,
     rspfile: Option<&RspFile>,
 ) -> anyhow::Result<TaskResult> {
     if let Some(rspfile) = rspfile {
@@ -308,7 +309,7 @@ impl Runner {
         &mut self,
         id: BuildId,
         cmdline: String,
-        depfile: Option<String>,
+        depfile: Option<PathBuf>,
         rspfile: Option<RspFile>,
     ) {
         let tid = self.tids.claim();
