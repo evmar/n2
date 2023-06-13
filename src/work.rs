@@ -140,11 +140,8 @@ impl BuildStates {
         let prev = *mprev;
         // println!("{:?} {:?}=>{:?}", id, prev, state);
         *mprev = state;
-        match prev {
-            BuildState::Running => {
-                self.get_pool(build).unwrap().running -= 1;
-            }
-            _ => {}
+        if let BuildState::Running = prev {
+            self.get_pool(build).unwrap().running -= 1;
         };
         if prev != BuildState::Unknown {
             self.counts.add(prev, -1);

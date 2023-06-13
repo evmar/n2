@@ -17,7 +17,7 @@ impl<K, V> Default for DenseMap<K, V> {
     fn default() -> Self {
         DenseMap {
             vec: Vec::default(),
-            key_type: PhantomData::default(),
+            key_type: PhantomData,
         }
     }
 }

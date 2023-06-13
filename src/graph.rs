@@ -104,10 +104,8 @@ impl BuildOuts {
         for (i, &id) in self.ids.iter().enumerate() {
             if !self.ids[0..i].iter().any(|&prev| prev == id) {
                 ids.push(id);
-            } else {
-                if i < self.explicit {
-                    self.explicit -= 1;
-                }
+            } else if i < self.explicit {
+                self.explicit -= 1;
             }
         }
         self.ids = ids;
