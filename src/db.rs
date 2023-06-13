@@ -211,11 +211,11 @@ impl<'a> Reader<'a> {
 
     fn read_str(&mut self, len: usize) -> std::io::Result<String> {
         let mut buf = Vec::with_capacity(len);
-        // Safety: buf contents are uninitialized here, but we never read them
-        // before initialization.
-        // TODO: clippy says this is still UB, yuck.
-        unsafe { buf.set_len(len) };
-        self.r.read_exact(buf.as_mut_slice())?;
+        let bytes_read = Read::take(&mut self.r, len as u64).read_to_end(&mut buf)?;
+        if bytes_read < len {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        debug_assert_eq!(bytes_read, len);
         Ok(unsafe { String::from_utf8_unchecked(buf) })
     }
 
