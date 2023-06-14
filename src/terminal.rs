@@ -42,11 +42,7 @@ mod windows {
             }
             let mut csbi =
                 ::std::mem::MaybeUninit::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>::uninit();
-            if winapi::um::wincon::GetConsoleScreenBufferInfo(
-                console,
-                &mut csbi as *mut winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO,
-            ) == 0
-            {
+            if winapi::um::wincon::GetConsoleScreenBufferInfo(console, csbi.as_mut_ptr()) == 0 {
                 return None;
             }
             let csbi = csbi.assume_init();
