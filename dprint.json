@@ -3,10 +3,12 @@
         "textWrap": "always"
     },
     "includes": [
-        "**/*.{md}"
+        "**/*.{md}",
+        "**/*.{toml}"
     ],
     "excludes": [],
     "plugins": [
-        "https://plugins.dprint.dev/markdown-0.15.3.wasm"
+        "https://plugins.dprint.dev/markdown-0.15.3.wasm",
+        "https://plugins.dprint.dev/toml-0.5.4.wasm"
     ]
 }
