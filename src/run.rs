@@ -122,8 +122,12 @@ fn run_impl() -> anyhow::Result<i32> {
         explain: false,
     };
 
-    if fake_ninja_compat && args.version {
-        println!("1.10.2");
+    if args.version {
+        if fake_ninja_compat {
+            println!("1.10.2");
+        } else {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+        }
         return Ok(0);
     }
 

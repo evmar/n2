@@ -10,7 +10,7 @@ fn empty_file() -> anyhow::Result<()> {
     space.write("build.ninja", "")?;
     let out = space.run(&mut n2_command(vec![]))?;
     assert_eq!(
-        std::str::from_utf8(&out.stdout)?,
+        std::str::from_utf8(&out.stderr)?,
         "n2: error: no path specified and no default\n"
     );
     Ok(())
