@@ -4,9 +4,16 @@
 //! and let the parent properly print that progress.  This also lets us still
 //! write out pending debug traces, too.
 
+use std::sync::atomic::AtomicBool;
+
+static mut INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
 #[cfg(unix)]
 extern "C" fn sigint_handler(_sig: libc::c_int) {
-    // Do nothing; SA_RESETHAND should clear the handler.
+    unsafe {
+        INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    // SA_RESETHAND should clear the handler.
 }
 
 #[cfg(unix)]
@@ -18,4 +25,8 @@ pub fn register_sigint() {
         sa.sa_flags = libc::SA_RESETHAND;
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
     }
+}
+
+pub fn was_interrupted() -> bool {
+    unsafe { INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) }
 }

@@ -723,11 +723,12 @@ impl<'a> Work<'a> {
             };
         }
 
-        Ok(if tasks_failed > 0 {
-            None
-        } else {
-            Some(tasks_done)
-        })
+        // If the user ctl-c's, it likely caused a subtask to fail.
+        // But at least for the LLVM test suite it can catch sigint and print
+        // "interrupted by user" and exit with success, and in that case we
+        // don't want n2 to print a "succeeded" message afterwards.
+        let success = tasks_failed == 0 && !signal::was_interrupted();
+        Ok(success.then(|| tasks_done))
     }
 
     /// Returns the number of tasks executed on successful builds, or None on failed builds.
