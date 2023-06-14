@@ -1,16 +1,13 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::{
-    canon::canon_path, db, densemap::DenseMap, graph::*, progress, progress::Progress,
+    canon::canon_path, db, densemap::DenseMap, graph::*, progress, progress::Progress, signal,
     smallmap::SmallMap, task, trace,
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Duration;
-
-#[cfg(unix)]
-use crate::signal;
 
 /// Build steps go through this sequence of states.
 /// See "Build states" in the design notes.

@@ -33,20 +33,19 @@ mod windows {
         }
     }
 
-    #[allow(clippy::uninit_assumed_init)]
     pub fn get_cols() -> Option<usize> {
-        extern crate winapi;
-        extern crate kernel32;
-        use kernel32::{GetConsoleScreenBufferInfo, GetStdHandle};
-        let console = unsafe { GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE) };
-        if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
-            return None;
-        }
         unsafe {
-            let mut csbi = ::std::mem::MaybeUninit::uninit().assume_init();
-            if GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
+            let console =
+                winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
+            if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
                 return None;
             }
+            let mut csbi =
+                ::std::mem::MaybeUninit::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>::uninit();
+            if winapi::um::wincon::GetConsoleScreenBufferInfo(console, csbi.as_mut_ptr()) == 0 {
+                return None;
+            }
+            let csbi = csbi.assume_init();
             Some(csbi.dwSize.X as usize)
         }
     }
