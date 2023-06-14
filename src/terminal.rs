@@ -44,7 +44,7 @@ mod windows {
                 ::std::mem::MaybeUninit::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>::uninit();
             if winapi::um::wincon::GetConsoleScreenBufferInfo(
                 console,
-                &mut csbi as *mut CONSOLE_SCREEN_BUFFER_INFO,
+                &mut csbi as *mut winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO,
             ) == 0
             {
                 return None;
