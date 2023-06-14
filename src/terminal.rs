@@ -35,6 +35,8 @@ mod windows {
 
     #[allow(clippy::uninit_assumed_init)]
     pub fn get_cols() -> Option<usize> {
+        extern crate winapi;
+        extern crate kernel32;
         use kernel32::{GetConsoleScreenBufferInfo, GetStdHandle};
         let console = unsafe { GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE) };
         if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
