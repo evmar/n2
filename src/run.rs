@@ -199,7 +199,11 @@ fn run_impl() -> anyhow::Result<i32> {
             println!("n2: no work to do");
         }
         BuildResult::Success(n) => {
-            println!("n2: ran {} tasks, now up to date", n);
+            println!(
+                "n2: ran {} task{}, now up to date",
+                n,
+                if n == 1 { "" } else { "s" }
+            );
         }
     }
 
