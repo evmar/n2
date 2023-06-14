@@ -1,18 +1,14 @@
 //! Build progress tracking and reporting, for the purpose of display to the
 //! user.
 
+use crate::{
+    graph::Build, graph::BuildId, task::TaskResult, task::Termination, terminal, work::BuildState,
+    work::StateCounts,
+};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::time::Duration;
 use std::time::Instant;
-
-use crate::graph::Build;
-use crate::graph::BuildId;
-use crate::task::TaskResult;
-use crate::task::Termination;
-use crate::terminal;
-use crate::work::BuildState;
-use crate::work::StateCounts;
 
 /// Compute the message to display on the console for a given build.
 pub fn build_message(build: &Build) -> &str {

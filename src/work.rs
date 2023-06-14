@@ -1,14 +1,9 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
-use crate::canon::canon_path;
-use crate::db;
-use crate::densemap::DenseMap;
-use crate::graph::*;
-use crate::progress;
-use crate::progress::Progress;
-use crate::smallmap::SmallMap;
-use crate::task;
-use crate::trace;
+use crate::{
+    canon::canon_path, db, densemap::DenseMap, graph::*, progress, progress::Progress,
+    smallmap::SmallMap, task, trace,
+};
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -758,7 +753,7 @@ build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
         let a_id = graph.file_id("a");
-        let mut states = crate::work::BuildStates::new(graph.builds.next_id(), SmallMap::default());
+        let mut states = BuildStates::new(graph.builds.next_id(), SmallMap::default());
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {
             Ok(_) => panic!("expected build cycle error"),

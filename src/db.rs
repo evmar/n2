@@ -1,13 +1,10 @@
 //! The n2 database stores information about previous builds for determining
 //! which files are up to date.
 
-use crate::densemap;
-use crate::densemap::DenseMap;
-use crate::graph::BuildId;
-use crate::graph::FileId;
-use crate::graph::Graph;
-use crate::graph::Hash;
-use crate::graph::Hashes;
+use crate::{
+    densemap, densemap::DenseMap, graph::BuildId, graph::FileId, graph::Graph, graph::Hash,
+    graph::Hashes,
+};
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 use std::fs::File;

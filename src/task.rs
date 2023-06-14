@@ -5,9 +5,11 @@
 //! The threads might be relatively cheap(?) because they just block on
 //! the subprocesses though?
 
-use crate::depfile;
-use crate::graph::{BuildId, RspFile};
-use crate::scanner::Scanner;
+use crate::{
+    depfile,
+    graph::{BuildId, RspFile},
+    scanner::Scanner,
+};
 use anyhow::{anyhow, bail};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;

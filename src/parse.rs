@@ -5,10 +5,11 @@
 //! To avoid allocations parsing frequently uses references into the input
 //! text, marked with the lifetime `'text`.
 
+use crate::{
+    eval::{EvalPart, EvalString, LazyVars, Vars},
+    scanner::{ParseError, ParseResult, Scanner},
+};
 use std::path::Path;
-
-use crate::eval::{EvalPart, EvalString, LazyVars, Vars};
-use crate::scanner::{ParseError, ParseResult, Scanner};
 
 pub struct Rule<'text> {
     pub name: &'text str,

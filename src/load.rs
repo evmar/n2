@@ -1,10 +1,12 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
-use crate::canon::{canon_path, canon_path_fast};
-use crate::graph::{FileId, RspFile};
-use crate::parse::Statement;
-use crate::smallmap::SmallMap;
-use crate::{db, eval, graph, parse, trace};
+use crate::{
+    canon::{canon_path, canon_path_fast},
+    graph::{FileId, RspFile},
+    parse::Statement,
+    smallmap::SmallMap,
+    {db, eval, graph, parse, trace},
+};
 use anyhow::{anyhow, bail};
 use std::borrow::Cow;
 use std::collections::HashMap;

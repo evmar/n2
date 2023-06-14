@@ -101,13 +101,14 @@ impl BuildOuts {
     pub fn remove_duplicates(&mut self) {
         let mut ids = Vec::new();
         for (i, &id) in self.ids.iter().enumerate() {
-            if !self.ids[0..i].iter().any(|&prev| prev == id) {
-                ids.push(id);
-            } else {
+            if self.ids[0..i].iter().any(|&prev| prev == id) {
+                // Skip over duplicate.
                 if i < self.explicit {
                     self.explicit -= 1;
                 }
+                continue;
             }
+            ids.push(id);
         }
         self.ids = ids;
     }

@@ -1,7 +1,6 @@
+use crate::{load, progress::ConsoleProgress, terminal, trace, work};
 use anyhow::anyhow;
 use std::path::Path;
-
-use crate::{load, progress::ConsoleProgress, terminal, trace, work};
 
 // The result of starting a build.
 enum BuildResult {
