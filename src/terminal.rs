@@ -33,7 +33,6 @@ mod windows {
         }
     }
 
-    #[allow(clippy::uninit_assumed_init)]
     pub fn get_cols() -> Option<usize> {
         unsafe {
             let console =
@@ -41,10 +40,12 @@ mod windows {
             if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
                 return None;
             }
-            let mut csbi = ::std::mem::MaybeUninit::uninit().assume_init();
+            let mut csbi =
+                ::std::mem::MaybeUninit::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>::uninit();
             if winapi::um::wincon::GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
                 return None;
             }
+            let csbi = csbi.assume_init();
             Some(csbi.dwSize.X as usize)
         }
     }
