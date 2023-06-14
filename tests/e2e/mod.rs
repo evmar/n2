@@ -8,7 +8,6 @@ pub fn n2_binary() -> std::path::PathBuf {
         .parent()
         .expect("binary directory")
         .join("n2")
-        .to_path_buf()
 }
 
 pub fn n2_command(args: Vec<&str>) -> std::process::Command {

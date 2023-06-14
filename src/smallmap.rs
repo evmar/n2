@@ -35,7 +35,7 @@ impl<K: PartialEq, V> SmallMap<K, V> {
                 return Some(v);
             }
         }
-        return None;
+        None
     }
 
     pub fn iter(&self) -> std::slice::Iter<(K, V)> {
