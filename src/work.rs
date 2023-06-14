@@ -1,5 +1,6 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
+use crate::canon::canon_path;
 use crate::db;
 use crate::densemap::DenseMap;
 use crate::graph::*;
@@ -328,7 +329,7 @@ impl<'a> Work<'a> {
     /// If there's a build rule that generates build.ninja, return the FileId
     /// to pass to want_fileid that will rebuild it.
     pub fn build_ninja_fileid(&mut self, build_filename: &str) -> Option<FileId> {
-        if let Some(id) = self.graph.lookup_file_id(build_filename) {
+        if let Some(id) = self.graph.lookup(&canon_path(build_filename)) {
             if self.graph.file(id).input.is_some() {
                 return Some(id);
             }
@@ -342,7 +343,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn want_file(&mut self, name: &str) -> anyhow::Result<()> {
-        let target = match self.graph.lookup_file_id(name) {
+        let target = match self.graph.lookup(&canon_path(name)) {
             None => anyhow::bail!("unknown path requested: {:?}", name),
             Some(id) => id,
         };
@@ -419,7 +420,7 @@ impl<'a> Work<'a> {
             None => Vec::new(),
             Some(names) => names
                 .into_iter()
-                .map(|mut name| self.graph.file_id(&mut name))
+                .map(|name| self.graph.file_id(canon_path(name)))
                 .collect(),
         };
         let deps_changed = self.graph.build_mut(id).update_discovered(deps);
@@ -756,7 +757,7 @@ build b: phony c
 build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
-        let a_id = graph.file_id(&mut "a".to_string());
+        let a_id = graph.file_id("a");
         let mut states = crate::work::BuildStates::new(graph.builds.next_id(), SmallMap::default());
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {

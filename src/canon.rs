@@ -43,7 +43,7 @@ impl<T: Copy> StackStack<T> {
 /// These paths can show up due to variable expansion in particular.
 /// Returns the new length of the path, guaranteed <= the original length.
 #[must_use]
-pub fn canon_path_in_place(path: &mut str) -> usize {
+pub fn canon_path_fast(path: &mut str) -> usize {
     // Safety: this traverses the path buffer to move data around.
     // We maintain the invariant that *dst always points to a point within
     // the buffer, and that src is always checked against end before reading.
@@ -128,9 +128,9 @@ pub fn canon_path_in_place(path: &mut str) -> usize {
     }
 }
 
-pub fn canon_path<T: Into<String>>(inpath: T) -> String {
-    let mut path: String = inpath.into();
-    let len = canon_path_in_place(&mut path);
+pub fn canon_path<T: Into<String>>(path: T) -> String {
+    let mut path = path.into();
+    let len = canon_path_fast(&mut path);
     path.truncate(len);
     path
 }

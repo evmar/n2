@@ -1,6 +1,5 @@
 //! The build graph, a graph between files and commands.
 
-use crate::canon::{canon_path, canon_path_in_place};
 use crate::densemap::{self, DenseMap};
 use std::collections::HashMap;
 use std::hash::{self, Hasher};
@@ -253,39 +252,32 @@ pub struct Graph {
 }
 
 impl Graph {
-    /// Add a new file, generating a new FileId for it.
-    fn add_file(&mut self, name: String) -> FileId {
-        self.files.push(File {
-            name,
-            input: None,
-            dependents: Vec::new(),
-        })
-    }
-
     /// Look up a file by its FileId.
     pub fn file(&self, id: FileId) -> &File {
         self.files.get(id)
     }
 
-    /// Canonicalize a path and get/generate its FileId.
-    pub fn file_id(&mut self, canon: &mut str) -> FileId {
-        let len = canon_path_in_place(canon);
-        let canon = &canon[..len];
-        match self.file_to_id.get(canon) {
-            Some(id) => *id,
-            None => {
-                // TODO: so many string copies :<
-                let id = self.add_file(canon.to_string());
-                self.file_to_id.insert(canon.to_string(), id);
-                id
-            }
-        }
+    /// Look up a file by its name.  Name must have been canonicalized already.
+    pub fn lookup(&self, file: &str) -> Option<FileId> {
+        self.file_to_id.get(file).copied()
     }
 
-    /// Canonicalize a path and look up its FileId.
-    pub fn lookup_file_id(&self, f: &str) -> Option<FileId> {
-        let canon = canon_path(f);
-        self.file_to_id.get(&canon).copied()
+    /// Look up a file by its name, adding it if not already present.
+    /// Name must have been canonicalized already.
+    /// This function has a funny API to avoid copies; pass a String if you have
+    /// one already, otherwise a &str is acceptable.
+    pub fn file_id<S: AsRef<str> + Into<String>>(&mut self, file: S) -> FileId {
+        self.lookup(file.as_ref()).unwrap_or_else(|| {
+            // TODO: so many string copies :<
+            let file = file.into();
+            let id = self.files.push(File {
+                name: file.clone(),
+                input: None,
+                dependents: Vec::new(),
+            });
+            self.file_to_id.insert(file, id);
+            id
+        })
     }
 
     /// Add a new Build, generating a BuildId for it.

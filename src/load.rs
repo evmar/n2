@@ -1,5 +1,6 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
+use crate::canon::{canon_path, canon_path_fast};
 use crate::graph::{FileId, RspFile};
 use crate::parse::Statement;
 use crate::smallmap::SmallMap;
@@ -50,7 +51,11 @@ struct Loader {
 impl parse::Loader for Loader {
     type Path = FileId;
     fn path(&mut self, path: &mut str) -> Self::Path {
-        self.graph.file_id(path)
+        // Perf: this is called while parsing build.ninja files.  We go to
+        // some effort to avoid allocating in the common case of a path that
+        // refers to a file that is already known.
+        let len = canon_path_fast(path);
+        self.graph.file_id(&path[..len])
     }
 }
 
@@ -188,7 +193,7 @@ pub struct State {
 pub fn read(build_filename: &str) -> anyhow::Result<State> {
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || {
-        let id = loader.graph.file_id(&mut build_filename.to_string());
+        let id = loader.graph.file_id(canon_path(build_filename));
         loader.read_file(id)
     })?;
     let mut hashes = graph::Hashes::default();
