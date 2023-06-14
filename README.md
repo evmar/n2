@@ -32,6 +32,31 @@ create a symlink:
 
 somewhere in your `$PATH`, such that CMake can discover it.
 
+## The console output
+
+While building, n2 displays build progress like this:
+
+```
+[=========================---------       ] 2772/4459 done, 8/930 running
+2s Building foo/bar
+0s Building foo/baz
+```
+
+The progress bar always covers all build steps needed for the targets,
+regardless of whether they need to be executed or not.
+
+- **Done:** This build has 4459 total build steps, 2272 of which are currently
+  up to date. This is what the equals signs show.
+- **In progress:** Hyphens show steps that are in-progress (e.g. if you had
+  enough CPUs they would all be executing). The `8/930 running` means n2 is
+  currently executing 8 of them.
+- **Unknown:** The remaining space shows steps whose status is yet to be known,
+  as they depend on the in progress steps.
+
+The lines below the progress bar show some build steps that are currrently
+running, along with how long they've been running. Their text is controlled by
+the input `build.ninja` file.
+
 ## More reading
 
 - [Design notes](doc/design_notes.md).
