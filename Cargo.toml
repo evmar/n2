@@ -21,7 +21,7 @@ winapi = { version = "0.3.6", features = [ "processenv", "consoleapi", "synchapi
 jemallocator = "0.5.0"
 
 [dev-dependencies]
-tempfile = "3.3.0"
+tempfile = "3.6.0"
 
 [profile.release]
 debug = true
