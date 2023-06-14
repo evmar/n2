@@ -15,7 +15,7 @@ use std::io::BufWriter;
 use std::io::Read;
 use std::io::Write;
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// Files are identified by integers that are stable across n2 executions.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -77,13 +77,25 @@ impl Writer {
         })
     }
 
+    fn read_entry(reader: &mut BufReader<&mut File>) -> bincode::Result<Option<DbEntry>> {
+        let result = bincode::deserialize_from(reader);
+        if let Err(boxed) = &result {
+            if let bincode::ErrorKind::Io(err) = boxed.as_ref() {
+                if err.kind() == std::io::ErrorKind::UnexpectedEof {
+                    return Ok(None);
+                }
+            }
+        }
+        result.map(Some)
+    }
+
     fn open(mut f: File, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Self> {
         let mut reader = BufReader::with_capacity(1usize << 16, &mut f);
         read_signature(&mut reader)?;
         let mut ids = IdMap::default();
 
-        for entry in serde_cbor::Deserializer::from_reader(&mut reader).into_iter() {
-            match entry? {
+        while let Some(entry) = Self::read_entry(&mut reader)? {
+            match entry {
                 DbEntry::File(name) => {
                     let file_id = graph.file_id(name);
                     let db_id = ids.fileids.push(file_id);
@@ -125,7 +137,7 @@ impl Writer {
                 let id = self.ids.fileids.push(fileid);
                 self.ids.db_ids.insert(fileid, id);
                 let entry = DbEntry::File(graph.file(fileid).name.to_owned());
-                serde_cbor::ser::to_writer(&mut self.w, &entry)?;
+                bincode::serialize_into(&mut self.w, &entry)?;
                 id
             }
         };
@@ -145,7 +157,7 @@ impl Writer {
             .map(|&file_id| self.ensure_id(graph, file_id))
             .collect::<anyhow::Result<Vec<_>>>()?;
         let entry = DbEntry::Build { outs, deps, hash };
-        serde_cbor::ser::to_writer(&mut self.w, &entry)?;
+        bincode::serialize_into(&mut self.w, &entry)?;
         self.w.flush()?;
         Ok(())
     }
