@@ -282,6 +282,11 @@ impl BuildStates {
     }
 }
 
+pub struct Options {
+    pub keep_going: usize,
+    pub parallelism: usize,
+}
+
 pub struct Work<'a> {
     graph: &'a mut Graph,
     db: &'a mut db::Writer,
@@ -299,10 +304,9 @@ impl<'a> Work<'a> {
         graph: &'a mut Graph,
         last_hashes: &'a Hashes,
         db: &'a mut db::Writer,
+        options: &Options,
         progress: &'a mut dyn Progress,
-        keep_going: usize,
         pools: SmallMap<String, usize>,
-        parallelism: usize,
     ) -> Self {
         let file_state = FileState::new(graph);
         let builds = graph.builds.next_id();
@@ -310,11 +314,11 @@ impl<'a> Work<'a> {
             graph,
             db,
             progress,
-            keep_going,
+            keep_going: options.keep_going,
             file_state,
             last_hashes,
             build_states: BuildStates::new(builds, pools),
-            runner: task::Runner::new(parallelism),
+            runner: task::Runner::new(options.parallelism),
         }
     }
 

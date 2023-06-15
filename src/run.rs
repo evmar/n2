@@ -14,9 +14,7 @@ enum BuildResult {
 }
 
 struct BuildParams<'a> {
-    parallelism: usize,
-    regen: bool,
-    keep_going: usize,
+    options: work::Options,
     target_names: &'a [String],
     build_filename: &'a String,
 }
@@ -25,20 +23,23 @@ struct BuildParams<'a> {
 // possible, and if that build changes build.ninja, then return
 // BuildResult::Regen to signal to the caller that we need to start the whole
 // build over.
-fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result<BuildResult> {
+fn build(
+    progress: &mut ConsoleProgress,
+    params: &BuildParams,
+    regen: bool,
+) -> anyhow::Result<BuildResult> {
     let mut state = trace::scope("load::read", || load::read(params.build_filename))?;
 
     let mut work = work::Work::new(
         &mut state.graph,
         &state.hashes,
         &mut state.db,
+        &params.options,
         progress,
-        params.keep_going,
         state.pools,
-        params.parallelism,
     );
 
-    if params.regen {
+    if regen {
         if let Some(target) = work.build_ninja_fileid(params.build_filename) {
             // Attempt to rebuild build.ninja.
             work.want_fileid(target)?;
@@ -127,6 +128,18 @@ fn run_impl() -> anyhow::Result<i32> {
 
     let opts: Opts = argh::from_env();
 
+    let params = BuildParams {
+        options: work::Options {
+            parallelism: match opts.parallelism {
+                Some(p) => p,
+                None => default_parallelism()?,
+            },
+            keep_going: opts.keep_going,
+        },
+        target_names: &opts.targets,
+        build_filename: &opts.build_file,
+    };
+
     if fake_ninja_compat && opts.version {
         println!("1.10.2");
         return Ok(0);
@@ -160,32 +173,18 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    let parallelism = match opts.parallelism {
-        Some(p) => p,
-        None => default_parallelism()?,
-    };
-
     if let Some(dir) = opts.chdir {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
-    let mut progress = ConsoleProgress::new(opts.verbose, terminal::use_fancy());
+    let mut progress: ConsoleProgress = ConsoleProgress::new(opts.verbose, terminal::use_fancy());
 
     // Build once with regen=true, and if the result says we regenerated the
     // build file, reload and build everything a second time.
-
-    let mut params = BuildParams {
-        parallelism,
-        regen: true,
-        keep_going: opts.keep_going,
-        target_names: &opts.targets,
-        build_filename: &opts.build_file,
-    };
-    let mut result = build(&mut progress, &params)?;
+    let mut result: BuildResult = build(&mut progress, &params, true)?;
     if let BuildResult::Regen = result {
-        params.regen = false;
-        result = build(&mut progress, &params)?;
+        result = build(&mut progress, &params, false)?;
     }
 
     match result {
