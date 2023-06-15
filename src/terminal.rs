@@ -44,7 +44,7 @@ mod windows {
                 return None;
             }
             let mut csbi = ::std::mem::zeroed::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>();
-            if winapi::um::wincon::GetConsoleScreenBufferInfo(console, csbi.as_mut_ptr()) == 0 {
+            if winapi::um::wincon::GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
                 return None;
             }
             if csbi.dwSize.X < 10 {
