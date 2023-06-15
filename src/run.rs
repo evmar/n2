@@ -2,33 +2,14 @@ use crate::{load, progress::ConsoleProgress, terminal, trace, work};
 use anyhow::anyhow;
 use std::path::Path;
 
-// The result of starting a build.
-enum BuildResult {
-    /// A build task failed.
-    Failed,
-    /// Regenerated build.ninja rather than the requested build.  The caller
-    /// must reload build.ninja to continue with building.
-    Regen,
-    /// Build succeeded, and the number is the count of executed tasks.
-    Success(usize),
-}
-
 struct BuildParams<'a> {
     options: work::Options,
     target_names: &'a [String],
     build_filename: &'a String,
 }
 
-// Build a given set of targets.  If regen is true, build "build.ninja" first if
-// possible, and if that build changes build.ninja, then return
-// BuildResult::Regen to signal to the caller that we need to start the whole
-// build over.
-fn build(
-    progress: &mut ConsoleProgress,
-    params: &BuildParams,
-    regen: bool,
-) -> anyhow::Result<BuildResult> {
-    let state = trace::scope("load::read", || load::read(params.build_filename))?;
+fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result<Option<usize>> {
+    let mut state = trace::scope("load::read", || load::read(params.build_filename))?;
     let mut work = work::Work::new(
         state.graph,
         state.hashes,
@@ -38,19 +19,27 @@ fn build(
         state.pools,
     );
 
-    if regen {
-        if let Some(target) = work.build_ninja_fileid(params.build_filename) {
-            // Attempt to rebuild build.ninja.
-            work.want_fileid(target)?;
-            match trace::scope("work.run", || work.run())? {
-                None => return Ok(BuildResult::Failed),
-                Some(0) => {
-                    // build.ninja already up to date.
-                }
-                Some(_) => {
-                    // Regenerated build.ninja; start over.
-                    return Ok(BuildResult::Regen);
-                }
+    // Attempt to rebuild build.ninja.
+    if let Some(target) = work.is_build_target(params.build_filename) {
+        work.want_fileid(target)?;
+        match trace::scope("work.run", || work.run())? {
+            None => return Ok(None),
+            Some(0) => {
+                // build.ninja already up to date.
+                // TODO: this logic is not right in the case where a build has
+                // a step that doesn't touch build.ninja.
+            }
+            Some(_) => {
+                // Regenerated build.ninja; start over.
+                state = trace::scope("load::read", || load::read(params.build_filename))?;
+                work = work::Work::new(
+                    state.graph,
+                    state.hashes,
+                    state.db,
+                    &params.options,
+                    progress,
+                    state.pools,
+                );
             }
         }
     }
@@ -67,10 +56,7 @@ fn build(
         anyhow::bail!("no path specified and no default");
     }
 
-    Ok(match trace::scope("work.run", || work.run())? {
-        None => BuildResult::Failed,
-        Some(n) => BuildResult::Success(n),
-    })
+    trace::scope("work.run", || work.run())
 }
 
 fn default_parallelism() -> anyhow::Result<usize> {
@@ -178,25 +164,16 @@ fn run_impl() -> anyhow::Result<i32> {
     }
 
     let mut progress: ConsoleProgress = ConsoleProgress::new(opts.verbose, terminal::use_fancy());
-
-    // Build once with regen=true, and if the result says we regenerated the
-    // build file, reload and build everything a second time.
-    let mut result: BuildResult = build(&mut progress, &params, true)?;
-    if let BuildResult::Regen = result {
-        result = build(&mut progress, &params, false)?;
-    }
-
-    match result {
-        BuildResult::Regen => panic!("should not happen"),
-        BuildResult::Failed => {
+    match build(&mut progress, &params)? {
+        None => {
             // Don't print any summary, the failing task is enough info.
             return Ok(1);
         }
-        BuildResult::Success(0) => {
+        Some(0) => {
             // Special case: don't print numbers when no work done.
             println!("n2: no work to do");
         }
-        BuildResult::Success(n) => {
+        Some(n) => {
             println!(
                 "n2: ran {} task{}, now up to date",
                 n,
