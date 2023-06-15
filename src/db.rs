@@ -11,12 +11,11 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
-use std::mem::MaybeUninit;
 
 const VERSION: u32 = 1;
 
 /// Files are identified by integers that are stable across n2 executions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Id(u32);
 impl densemap::Index for Id {
     fn index(&self) -> usize {
@@ -39,69 +38,15 @@ pub struct IdMap {
     db_ids: HashMap<FileId, Id>,
 }
 
-/// Buffer that accumulates a single record's worth of writes.
-/// Caller calls various .write_*() methods and then flush()es it to a Write.
-/// We use this instead of a BufWrite because we want to write one full record
-/// at a time if possible.
-struct WriteBuf {
-    buf: [MaybeUninit<u8>; 16 << 10],
-    len: usize,
-}
-
-impl WriteBuf {
-    fn new() -> Self {
-        WriteBuf {
-            buf: unsafe { MaybeUninit::uninit().assume_init() },
-            len: 0,
-        }
-    }
-
-    // Perf note: I tinkered with these writes in godbolt and using
-    // copy_from_slice generated better code than alternatives that did
-    // different kinds of indexing.
-
-    fn write(&mut self, buf: &[u8]) {
-        // Safety: self.buf and buf are non-overlapping; bounds checks.
-        unsafe {
-            let ptr = self.buf.as_mut_ptr().add(self.len);
-            self.len += buf.len();
-            if self.len > self.buf.len() {
-                panic!("oversized WriteBuf");
-            }
-            std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr as *mut u8, buf.len());
-        }
-    }
-
-    fn write_u16(&mut self, n: u16) {
-        self.write(&n.to_le_bytes());
-    }
-
-    fn write_u24(&mut self, n: u32) {
-        self.write(&n.to_le_bytes()[..3]);
-    }
-
-    fn write_u64(&mut self, n: u64) {
-        self.write(&n.to_le_bytes());
-    }
-
-    fn write_str(&mut self, s: &str) {
-        self.write_u16(s.len() as u16);
-        self.write(s.as_bytes());
-    }
-
-    fn write_id(&mut self, id: Id) {
-        if id.0 > (1 << 24) {
-            panic!("too many fileids");
-        }
-        self.write_u24(id.0);
-    }
-
-    fn flush<W: Write>(self, w: &mut W) -> std::io::Result<()> {
-        // Safety: invariant is that self.buf up to self.len is initialized.
-        let buf: &[u8] = unsafe { std::mem::transmute(&self.buf[..self.len]) };
-        w.write_all(buf)?;
-        Ok(())
-    }
+/// The on-disk format is a series of records containing either paths or build state.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum Record {
+    Path(String),
+    Build {
+        outs: Vec<Id>,
+        deps: Vec<Id>,
+        hash: Hash,
+    },
 }
 
 /// An opened database, ready for writes.
@@ -130,16 +75,14 @@ impl Writer {
         self.w.write_all(&u32::to_le_bytes(VERSION))
     }
 
-    fn write_path(&mut self, name: &str) -> std::io::Result<()> {
-        if name.len() >= 0b1000_0000_0000_0000 {
-            panic!("filename too long");
-        }
-        let mut buf = WriteBuf::new();
-        buf.write_str(name);
-        buf.flush(&mut self.w)
+    fn write_path(&mut self, name: &str) -> anyhow::Result<()> {
+        let entry = Record::Path(name.to_owned());
+        bincode::serialize_into(&mut self.w, &entry)?;
+        // XXX buf.flush(&mut self.w)
+        Ok(())
     }
 
-    fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> std::io::Result<Id> {
+    fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> anyhow::Result<Id> {
         let id = match self.ids.db_ids.get(&fileid) {
             Some(&id) => id,
             None => {
@@ -152,27 +95,23 @@ impl Writer {
         Ok(id)
     }
 
-    pub fn write_build(&mut self, graph: &Graph, id: BuildId, hash: Hash) -> std::io::Result<()> {
+    pub fn write_build(&mut self, graph: &Graph, id: BuildId, hash: Hash) -> anyhow::Result<()> {
         let build = graph.build(id);
-        let mut buf = WriteBuf::new();
-        let outs = build.outs();
-        let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
-        buf.write_u16(mark);
-        for &out in outs {
-            let id = self.ensure_id(graph, out)?;
-            buf.write_id(id);
-        }
+        let outs = build
+            .outs()
+            .iter()
+            .map(|&file_id| self.ensure_id(graph, file_id))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let deps = build
+            .discovered_ins()
+            .iter()
+            .map(|&file_id| self.ensure_id(graph, file_id))
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let deps = build.discovered_ins();
-        buf.write_u16(deps.len() as u16);
-        for &dep in deps {
-            let id = self.ensure_id(graph, dep)?;
-            buf.write_id(id);
-        }
-
-        buf.write_u64(hash.0);
-
-        buf.flush(&mut self.w)
+        let entry = Record::Build { outs, deps, hash };
+        bincode::serialize_into(&mut self.w, &entry)?;
+        // XXX buf.flush(&mut self.w)
+        Ok(())
     }
 }
 
@@ -184,40 +123,19 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    fn read_u16(&mut self) -> std::io::Result<u16> {
-        let mut buf: [u8; 2] = [0; 2];
-        self.r.read_exact(&mut buf[..])?;
-        Ok(u16::from_le_bytes(buf))
+    fn read_entry(&mut self) -> bincode::Result<Option<Record>> {
+        let result = bincode::deserialize_from(&mut self.r);
+        if let Err(boxed) = &result {
+            if let bincode::ErrorKind::Io(err) = boxed.as_ref() {
+                if err.kind() == std::io::ErrorKind::UnexpectedEof {
+                    return Ok(None);
+                }
+            }
+        }
+        result.map(Some)
     }
 
-    fn read_u24(&mut self) -> std::io::Result<u32> {
-        let mut buf: [u8; 4] = [0; 4];
-        self.r.read_exact(&mut buf[..3])?;
-        Ok(u32::from_le_bytes(buf))
-    }
-
-    fn read_u64(&mut self) -> std::io::Result<u64> {
-        let mut buf: [u8; 8] = [0; 8];
-        self.r.read_exact(&mut buf)?;
-        Ok(u64::from_le_bytes(buf))
-    }
-
-    fn read_id(&mut self) -> std::io::Result<Id> {
-        self.read_u24().map(Id)
-    }
-
-    fn read_str(&mut self, len: usize) -> std::io::Result<String> {
-        let mut buf = Vec::with_capacity(len);
-        // Safety: buf contents are uninitialized here, but we never read them
-        // before initialization.
-        // TODO: clippy says this is still UB, yuck.
-        unsafe { buf.set_len(len) };
-        self.r.read_exact(buf.as_mut_slice())?;
-        Ok(unsafe { String::from_utf8_unchecked(buf) })
-    }
-
-    fn read_path(&mut self, len: usize) -> std::io::Result<()> {
-        let name = self.read_str(len)?;
+    fn add_path(&mut self, name: String) -> std::io::Result<()> {
         // No canonicalization needed, paths were written canonicalized.
         let fileid = self.graph.file_id(name);
         let dbid = self.ids.fileids.push(fileid);
@@ -225,7 +143,7 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    fn read_build(&mut self, len: usize) -> std::io::Result<()> {
+    fn add_build(&mut self, outs: Vec<Id>, deps: Vec<Id>, hash: Hash) -> std::io::Result<()> {
         // This record logs a build.  We expect all the outputs to be
         // outputs of the same build id; if not, that means the graph has
         // changed since this log, in which case we just ignore it.
@@ -238,17 +156,11 @@ impl<'a> Reader<'a> {
         // to affect dirty checking, not build order.
 
         let mut unique_bid = None;
-        let mut obsolete = false;
-        for _ in 0..len {
-            let fileid = self.read_id()?;
-            if obsolete {
-                // Even though we know we don't want this record, we must
-                // keep reading to parse through it.
-                continue;
-            }
+        for fileid in outs {
             match self.graph.file(*self.ids.fileids.get(fileid)).input {
                 None => {
-                    obsolete = true;
+                    // The graph doesn't believe this is an input; discard.
+                    return Ok(());
                 }
                 Some(bid) => {
                     match unique_bid {
@@ -257,23 +169,18 @@ impl<'a> Reader<'a> {
                             // Ok, matches the existing id.
                         }
                         Some(_) => {
-                            // Mismatch.
-                            unique_bid = None;
-                            obsolete = true;
+                            // Some outputs have differing inputs; discard.
+                            return Ok(());
                         }
                     }
                 }
             }
         }
 
-        let len = self.read_u16()?;
-        let mut deps = Vec::new();
-        for _ in 0..len {
-            let id = self.read_id()?;
-            deps.push(*self.ids.fileids.get(id));
-        }
-
-        let hash = Hash(self.read_u64()?);
+        let deps = deps
+            .into_iter()
+            .map(|id| *self.ids.fileids.get(id))
+            .collect::<Vec<_>>();
 
         // unique_bid is set here if this record is valid.
         if let Some(id) = unique_bid {
@@ -300,18 +207,11 @@ impl<'a> Reader<'a> {
 
     fn read_file(&mut self) -> anyhow::Result<()> {
         self.read_signature()?;
-        loop {
-            let mut len = match self.read_u16() {
-                Ok(r) => r,
-                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(err) => bail!(err),
-            };
-            let mask = 0b1000_0000_0000_0000;
-            if len & mask == 0 {
-                self.read_path(len as usize)?;
-            } else {
-                len &= !mask;
-                self.read_build(len as usize)?;
+
+        while let Some(entry) = self.read_entry()? {
+            match entry {
+                Record::Path(path) => self.add_path(path)?,
+                Record::Build { outs, deps, hash } => self.add_build(outs, deps, hash)?,
             }
         }
         Ok(())
