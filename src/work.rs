@@ -285,6 +285,8 @@ impl BuildStates {
 pub struct Options {
     pub keep_going: usize,
     pub parallelism: usize,
+    /// When true, verbosely explain why targets are considered dirty.
+    pub explain: bool,
 }
 
 pub struct Work<'a> {
@@ -292,6 +294,7 @@ pub struct Work<'a> {
     db: db::Writer,
     progress: &'a mut dyn Progress,
     keep_going: usize,
+    explain: bool,
     file_state: FileState,
     last_hashes: Hashes,
     build_states: BuildStates,
@@ -314,6 +317,7 @@ impl<'a> Work<'a> {
             db,
             progress,
             keep_going: options.keep_going,
+            explain: options.explain,
             file_state,
             last_hashes,
             build_states: BuildStates::new(build_count, pools),
@@ -484,7 +488,7 @@ impl<'a> Work<'a> {
     /// Returns a build error if any required input files are missing.
     /// Otherwise returns true if any expected but not required files,
     /// e.g. outputs, are missing, implying that the build needs to be executed.
-    fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<bool> {
+    fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
         {
             let build = self.graph.build(id);
             let phony = build.cmdline.is_none();
@@ -554,8 +558,9 @@ impl<'a> Work<'a> {
         // For discovered_ins, ensure we have mtimes for them.
         // But if they're missing, it isn't an error, it just means the build
         // is dirty.
-        if self.ensure_discovered_stats(id)?.is_some() {
-            return Ok(true);
+        let missing = self.ensure_discovered_stats(id)?;
+        if missing.is_some() {
+            return Ok(missing);
         }
 
         // Stat all the outputs.
@@ -570,12 +575,12 @@ impl<'a> Work<'a> {
             }
             let mtime = self.file_state.restat(id, file.path())?;
             if mtime == MTime::Missing {
-                return Ok(true);
+                return Ok(Some(id));
             }
         }
 
         // All files accounted for.
-        Ok(false)
+        Ok(None)
     }
 
     /// Check a ready build for whether it needs to run, returning true if so.
@@ -593,15 +598,46 @@ impl<'a> Work<'a> {
 
         // If any files are missing, the build is dirty without needing
         // to consider hashes.
-        if file_missing {
+        if let Some(missing) = file_missing {
+            if self.explain {
+                self.progress.log(format!(
+                    "explain: {}: input {} missing",
+                    build.location,
+                    self.graph.file(missing).name
+                ));
+            }
             return Ok(true);
         }
 
         // If we get here, all the relevant files are present and stat()ed,
         // so compare the hash against the last hash.
+
         // TODO: skip this whole function if no previous hash is present.
+        // More complex than just moving this block up, because we currently
+        // assume that we've always checked inputs after we've run a build.
+        let prev_hash = match self.last_hashes.get(id) {
+            None => {
+                if self.explain {
+                    self.progress.log(format!(
+                        "explain: {}: no previous state known",
+                        build.location
+                    ));
+                }
+                return Ok(true);
+            }
+            Some(prev_hash) => prev_hash,
+        };
+
         let hash = hash_build(&self.graph, &mut self.file_state, build)?;
-        Ok(self.last_hashes.changed(id, hash))
+        if prev_hash != hash {
+            if self.explain {
+                self.progress
+                    .log(format!("explain: {}: input changed", build.location));
+            }
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     /// Create the parent directories of a given list of fileids.

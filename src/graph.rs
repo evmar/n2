@@ -425,12 +425,8 @@ impl Hashes {
         self.0.insert(id, hash);
     }
 
-    pub fn changed(&self, id: BuildId, hash: Hash) -> bool {
-        let last_hash = match self.0.get(&id) {
-            None => return true,
-            Some(h) => *h,
-        };
-        hash != last_hash
+    pub fn get(&self, id: BuildId) -> Option<Hash> {
+        self.0.get(&id).copied()
     }
 }
 

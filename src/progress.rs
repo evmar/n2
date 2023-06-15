@@ -29,6 +29,9 @@ pub trait Progress {
     /// Called when a task starts or completes.
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>);
 
+    /// Log some (debug) information, without corrupting the progress display.
+    fn log(&mut self, msg: String);
+
     /// Called when the overall build has completed (success or failure), to allow
     /// cleaning up the display.
     fn finish(&mut self);
@@ -102,6 +105,11 @@ impl Progress for ConsoleProgress {
             }
         }
         self.maybe_print_progress();
+    }
+
+    fn log(&mut self, msg: String) {
+        self.clear_progress();
+        println!("{}", msg);
     }
 
     fn flush(&mut self) {

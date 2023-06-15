@@ -113,6 +113,15 @@ fn run_impl() -> anyhow::Result<i32> {
 
     let args: Args = argh::from_env();
 
+    let mut options = work::Options {
+        parallelism: match args.parallelism {
+            Some(p) => p,
+            None => default_parallelism()?,
+        },
+        keep_going: args.keep_going,
+        explain: false,
+    };
+
     if fake_ninja_compat && args.version {
         println!("1.10.2");
         return Ok(0);
@@ -120,9 +129,11 @@ fn run_impl() -> anyhow::Result<i32> {
 
     if let Some(debug) = args.debug {
         match debug.as_str() {
+            "explain" => options.explain = true,
             "list" => {
                 println!("debug tools:");
-                println!("  trace  generate json performance trace");
+                println!("  explain  print why each target is considered out of date");
+                println!("  trace    generate json performance trace");
                 return Ok(1);
             }
             "trace" => trace::open("trace.json")?,
@@ -150,14 +161,6 @@ fn run_impl() -> anyhow::Result<i32> {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
-
-    let options = work::Options {
-        parallelism: match args.parallelism {
-            Some(p) => p,
-            None => default_parallelism()?,
-        },
-        keep_going: args.keep_going,
-    };
 
     let mut progress: ConsoleProgress = ConsoleProgress::new(args.verbose, terminal::use_fancy());
     match build(options, args.build_file, args.targets, &mut progress)? {
