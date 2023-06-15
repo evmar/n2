@@ -2,25 +2,24 @@ use crate::{load, progress::ConsoleProgress, terminal, trace, work};
 use anyhow::anyhow;
 use std::path::Path;
 
-struct BuildParams<'a> {
+fn build(
     options: work::Options,
-    target_names: &'a [String],
-    build_filename: &'a String,
-}
-
-fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result<Option<usize>> {
-    let mut state = trace::scope("load::read", || load::read(params.build_filename))?;
+    build_filename: String,
+    targets: Vec<String>,
+    progress: &mut ConsoleProgress,
+) -> anyhow::Result<Option<usize>> {
+    let mut state = trace::scope("load::read", || load::read(&build_filename))?;
     let mut work = work::Work::new(
         state.graph,
         state.hashes,
         state.db,
-        &params.options,
+        &options,
         progress,
         state.pools,
     );
 
     // Attempt to rebuild build.ninja.
-    if let Some(target) = work.is_build_target(params.build_filename) {
+    if let Some(target) = work.is_build_target(&build_filename) {
         work.want_fileid(target)?;
         match trace::scope("work.run", || work.run())? {
             None => return Ok(None),
@@ -31,12 +30,12 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
             }
             Some(_) => {
                 // Regenerated build.ninja; start over.
-                state = trace::scope("load::read", || load::read(params.build_filename))?;
+                state = trace::scope("load::read", || load::read(&build_filename))?;
                 work = work::Work::new(
                     state.graph,
                     state.hashes,
                     state.db,
-                    &params.options,
+                    &options,
                     progress,
                     state.pools,
                 );
@@ -44,8 +43,8 @@ fn build(progress: &mut ConsoleProgress, params: &BuildParams) -> anyhow::Result
         }
     }
 
-    if !params.target_names.is_empty() {
-        for name in params.target_names {
+    if !targets.is_empty() {
+        for name in &targets {
             work.want_file(name)?;
         }
     } else if !state.default.is_empty() {
@@ -113,18 +112,6 @@ fn run_impl() -> anyhow::Result<i32> {
 
     let opts: Opts = argh::from_env();
 
-    let params = BuildParams {
-        options: work::Options {
-            parallelism: match opts.parallelism {
-                Some(p) => p,
-                None => default_parallelism()?,
-            },
-            keep_going: opts.keep_going,
-        },
-        target_names: &opts.targets,
-        build_filename: &opts.build_file,
-    };
-
     if fake_ninja_compat && opts.version {
         println!("1.10.2");
         return Ok(0);
@@ -163,8 +150,16 @@ fn run_impl() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
+    let options = work::Options {
+        parallelism: match opts.parallelism {
+            Some(p) => p,
+            None => default_parallelism()?,
+        },
+        keep_going: opts.keep_going,
+    };
+
     let mut progress: ConsoleProgress = ConsoleProgress::new(opts.verbose, terminal::use_fancy());
-    match build(&mut progress, &params)? {
+    match build(options, opts.build_file, opts.targets, &mut progress)? {
         None => {
             // Don't print any summary, the failing task is enough info.
             return Ok(1);
