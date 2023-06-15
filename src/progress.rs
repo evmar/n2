@@ -30,7 +30,7 @@ pub trait Progress {
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>);
 
     /// Log some (debug) information, without corrupting the progress display.
-    fn log(&mut self, msg: String);
+    fn log(&mut self, msg: &str);
 
     /// Called when the overall build has completed (success or failure), to allow
     /// cleaning up the display.
@@ -59,7 +59,7 @@ pub struct ConsoleProgress {
     /// Build tasks that are currently executing.
     /// Pushed to as tasks are started, so it's always in order of age.
     tasks: VecDeque<Task>,
-    /// Whether to print command lines of completed programs.
+    /// Whether to print command lines of started programs.
     verbose: bool,
     /// Whether to print a progress bar and currently running tasks.
     fancy_terminal: bool,
@@ -91,6 +91,9 @@ impl Progress for ConsoleProgress {
             None => {
                 // Task starting.
                 let message = build_message(build);
+                if self.verbose {
+                    self.log(build.cmdline.as_ref().unwrap());
+                }
                 self.tasks.push_back(Task {
                     id,
                     start: Instant::now(),
@@ -107,7 +110,7 @@ impl Progress for ConsoleProgress {
         self.maybe_print_progress();
     }
 
-    fn log(&mut self, msg: String) {
+    fn log(&mut self, msg: &str) {
         self.clear_progress();
         println!("{}", msg);
     }
@@ -216,12 +219,10 @@ impl ConsoleProgress {
         // By default we don't want to print anything when a task completes,
         // but we do want to print the completed task when:
         // - failed tasks
-        // - when we opted in to verbose output
         // - when we aren't doing fancy terminal progress display
         // - when the task had output (even in non-failing cases)
 
         if result.termination == Termination::Success
-            && !self.verbose
             && self.fancy_terminal
             && result.output.is_empty()
         {
@@ -234,12 +235,7 @@ impl ConsoleProgress {
             Termination::Interrupted => "interrupted: ",
             Termination::Failure => "failed: ",
         };
-        let message = if self.verbose {
-            build.cmdline.as_ref().unwrap()
-        } else {
-            build_message(build)
-        };
-        println!("{}{}", status, message);
+        println!("{}{}", status, build_message(build));
 
         if !result.output.is_empty() {
             std::io::stdout().write_all(&result.output).unwrap();

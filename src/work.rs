@@ -600,7 +600,7 @@ impl<'a> Work<'a> {
         // to consider hashes.
         if let Some(missing) = file_missing {
             if self.explain {
-                self.progress.log(format!(
+                self.progress.log(&format!(
                     "explain: {}: input {} missing",
                     build.location,
                     self.graph.file(missing).name
@@ -618,7 +618,7 @@ impl<'a> Work<'a> {
         let prev_hash = match self.last_hashes.get(id) {
             None => {
                 if self.explain {
-                    self.progress.log(format!(
+                    self.progress.log(&format!(
                         "explain: {}: no previous state known",
                         build.location
                     ));
@@ -632,7 +632,7 @@ impl<'a> Work<'a> {
         if prev_hash != hash {
             if self.explain {
                 self.progress
-                    .log(format!("explain: {}: input changed", build.location));
+                    .log(&format!("explain: {}: input changed", build.location));
             }
             return Ok(true);
         }
