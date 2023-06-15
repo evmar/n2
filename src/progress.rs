@@ -90,10 +90,10 @@ impl Progress for ConsoleProgress {
         match result {
             None => {
                 // Task starting.
-                let message = build_message(build);
                 if self.verbose {
                     self.log(build.cmdline.as_ref().unwrap());
                 }
+                let message = build_message(build);
                 self.tasks.push_back(Task {
                     id,
                     start: Instant::now(),
