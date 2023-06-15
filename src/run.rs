@@ -67,7 +67,7 @@ fn default_parallelism() -> anyhow::Result<usize> {
 
 #[derive(argh::FromArgs)] // this struct generates the flags and --help output
 /// n2, a ninja compatible build system
-struct Opts {
+struct Args {
     /// chdir before running
     #[argh(option, short = 'C')]
     chdir: Option<String>,
@@ -106,18 +106,19 @@ struct Opts {
 }
 
 fn run_impl() -> anyhow::Result<i32> {
-    let args: Vec<_> = std::env::args().collect();
-    let fake_ninja_compat = Path::new(&args[0]).file_name().unwrap()
+    let fake_ninja_compat = Path::new(&std::env::args().nth(0).unwrap())
+        .file_name()
+        .unwrap()
         == std::ffi::OsStr::new(&format!("ninja{}", std::env::consts::EXE_SUFFIX));
 
-    let opts: Opts = argh::from_env();
+    let args: Args = argh::from_env();
 
-    if fake_ninja_compat && opts.version {
+    if fake_ninja_compat && args.version {
         println!("1.10.2");
         return Ok(0);
     }
 
-    if let Some(debug) = opts.debug {
+    if let Some(debug) = args.debug {
         match debug.as_str() {
             "list" => {
                 println!("debug tools:");
@@ -129,7 +130,7 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    if let Some(tool) = opts.tool {
+    if let Some(tool) = args.tool {
         match tool.as_str() {
             "list" => {
                 println!("subcommands:");
@@ -145,21 +146,21 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
-    if let Some(dir) = opts.chdir {
+    if let Some(dir) = args.chdir {
         let dir = Path::new(&dir);
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
     let options = work::Options {
-        parallelism: match opts.parallelism {
+        parallelism: match args.parallelism {
             Some(p) => p,
             None => default_parallelism()?,
         },
-        keep_going: opts.keep_going,
+        keep_going: args.keep_going,
     };
 
-    let mut progress: ConsoleProgress = ConsoleProgress::new(opts.verbose, terminal::use_fancy());
-    match build(options, opts.build_file, opts.targets, &mut progress)? {
+    let mut progress: ConsoleProgress = ConsoleProgress::new(args.verbose, terminal::use_fancy());
+    match build(options, args.build_file, args.targets, &mut progress)? {
         None => {
             // Don't print any summary, the failing task is enough info.
             return Ok(1);
