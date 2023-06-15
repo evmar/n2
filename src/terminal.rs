@@ -8,11 +8,14 @@ mod unix {
 
     pub fn get_cols() -> Option<usize> {
         unsafe {
-            let mut winsize = std::mem::MaybeUninit::<libc::winsize>::uninit();
+            let mut winsize = std::mem::zeroed::<libc::winsize>();
             if libc::ioctl(0, libc::TIOCGWINSZ, &mut winsize) < 0 {
                 return None;
             }
-            let winsize = winsize.assume_init();
+            if winsize.ws_col < 10 {
+                // https://github.com/evmar/n2/issues/63: ignore too-narrow widths
+                return None;
+            }
             Some(winsize.ws_col as usize)
         }
     }
@@ -40,12 +43,14 @@ mod windows {
             if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
                 return None;
             }
-            let mut csbi =
-                ::std::mem::MaybeUninit::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>::uninit();
+            let mut csbi = ::std::mem::zeroed::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>();
             if winapi::um::wincon::GetConsoleScreenBufferInfo(console, csbi.as_mut_ptr()) == 0 {
                 return None;
             }
-            let csbi = csbi.assume_init();
+            if csbi.dwSize.X < 10 {
+                // https://github.com/evmar/n2/issues/63: ignore too-narrow widths
+                return None;
+            }
             Some(csbi.dwSize.X as usize)
         }
     }
