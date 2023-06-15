@@ -28,12 +28,11 @@ fn build(
     params: &BuildParams,
     regen: bool,
 ) -> anyhow::Result<BuildResult> {
-    let mut state = trace::scope("load::read", || load::read(params.build_filename))?;
-
+    let state = trace::scope("load::read", || load::read(params.build_filename))?;
     let mut work = work::Work::new(
-        &mut state.graph,
-        &state.hashes,
-        &mut state.db,
+        state.graph,
+        state.hashes,
+        state.db,
         &params.options,
         progress,
         state.pools,

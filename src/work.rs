@@ -288,28 +288,27 @@ pub struct Options {
 }
 
 pub struct Work<'a> {
-    graph: &'a mut Graph,
-    db: &'a mut db::Writer,
-
+    graph: Graph,
+    db: db::Writer,
     progress: &'a mut dyn Progress,
     keep_going: usize,
     file_state: FileState,
-    last_hashes: &'a Hashes,
+    last_hashes: Hashes,
     build_states: BuildStates,
     runner: task::Runner,
 }
 
 impl<'a> Work<'a> {
     pub fn new(
-        graph: &'a mut Graph,
-        last_hashes: &'a Hashes,
-        db: &'a mut db::Writer,
+        graph: Graph,
+        last_hashes: Hashes,
+        db: db::Writer,
         options: &Options,
         progress: &'a mut dyn Progress,
         pools: SmallMap<String, usize>,
     ) -> Self {
-        let file_state = FileState::new(graph);
-        let builds = graph.builds.next_id();
+        let file_state = FileState::new(&graph);
+        let build_count = graph.builds.next_id();
         Work {
             graph,
             db,
@@ -317,7 +316,7 @@ impl<'a> Work<'a> {
             keep_going: options.keep_going,
             file_state,
             last_hashes,
-            build_states: BuildStates::new(builds, pools),
+            build_states: BuildStates::new(build_count, pools),
             runner: task::Runner::new(options.parallelism),
         }
     }
@@ -335,7 +334,7 @@ impl<'a> Work<'a> {
 
     pub fn want_fileid(&mut self, id: FileId) -> anyhow::Result<()> {
         let mut stack = Vec::new();
-        self.build_states.want_file(self.graph, &mut stack, id)
+        self.build_states.want_file(&self.graph, &mut stack, id)
     }
 
     pub fn want_file(&mut self, name: &str) -> anyhow::Result<()> {
@@ -451,8 +450,8 @@ impl<'a> Work<'a> {
             return Ok(());
         }
 
-        let hash = hash_build(self.graph, &mut self.file_state, build)?;
-        self.db.write_build(self.graph, id, hash)?;
+        let hash = hash_build(&self.graph, &mut self.file_state, build)?;
+        self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
     }
@@ -601,7 +600,7 @@ impl<'a> Work<'a> {
         // If we get here, all the relevant files are present and stat()ed,
         // so compare the hash against the last hash.
         // TODO: skip this whole function if no previous hash is present.
-        let hash = hash_build(self.graph, &mut self.file_state, build)?;
+        let hash = hash_build(&self.graph, &mut self.file_state, build)?;
         Ok(self.last_hashes.changed(id, hash))
     }
 
