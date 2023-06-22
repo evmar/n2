@@ -257,3 +257,21 @@ rule echo
 
     Ok(())
 }
+
+#[test]
+fn explain() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[TOUCH_RULE, "build out: touch in", ""].join("\n"),
+    )?;
+    space.write("in", "")?;
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "up to date");
+
+    space.write("in", "")?;
+    let out = space.run_expect(&mut n2_command(vec!["-d", "explain", "out"]))?;
+    assert_output_contains(&out, "explain: build.ninja:5: input changed");
+
+    Ok(())
+}
