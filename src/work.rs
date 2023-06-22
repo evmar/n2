@@ -283,7 +283,7 @@ impl BuildStates {
 }
 
 pub struct Options {
-    pub keep_going: usize,
+    pub failures_left: Option<usize>,
     pub parallelism: usize,
     /// When true, verbosely explain why targets are considered dirty.
     pub explain: bool,
@@ -293,7 +293,7 @@ pub struct Work<'a> {
     graph: Graph,
     db: db::Writer,
     progress: &'a mut dyn Progress,
-    keep_going: usize,
+    failures_left: Option<usize>,
     explain: bool,
     file_state: FileState,
     last_hashes: Hashes,
@@ -316,7 +316,7 @@ impl<'a> Work<'a> {
             graph,
             db,
             progress,
-            keep_going: options.keep_going,
+            failures_left: options.failures_left,
             explain: options.explain,
             file_state,
             last_hashes,
@@ -742,9 +742,9 @@ impl<'a> Work<'a> {
                 .task_state(task.buildid, build, Some(&task.result));
             match task.result.termination {
                 task::Termination::Failure => {
-                    if self.keep_going > 0 {
-                        self.keep_going -= 1;
-                        if self.keep_going == 0 {
+                    if let Some(failures_left) = &mut self.failures_left {
+                        *failures_left -= 1;
+                        if *failures_left == 0 {
                             return Ok(None);
                         }
                     }

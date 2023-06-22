@@ -118,7 +118,7 @@ fn run_impl() -> anyhow::Result<i32> {
             Some(p) => p,
             None => default_parallelism()?,
         },
-        keep_going: args.keep_going,
+        failures_left: Some(args.keep_going).filter(|&n| n > 0),
         explain: false,
     };
 
