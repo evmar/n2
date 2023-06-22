@@ -1,8 +1,8 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::{
-    canon::canon_path, db, densemap::DenseMap, graph::*, hash::hash_build, progress,
-    progress::Progress, signal, smallmap::SmallMap, task, trace,
+    canon::canon_path, db, densemap::DenseMap, graph::*, hash, progress, progress::Progress,
+    signal, smallmap::SmallMap, task, trace,
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -454,7 +454,7 @@ impl<'a> Work<'a> {
             return Ok(());
         }
 
-        let hash = hash_build(&self.graph, &mut self.file_state, build)?;
+        let hash = hash::hash_build(&self.graph, &self.file_state, build);
         self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
@@ -628,7 +628,7 @@ impl<'a> Work<'a> {
             Some(prev_hash) => prev_hash,
         };
 
-        let hash = hash_build(&self.graph, &mut self.file_state, build)?;
+        let hash = hash::hash_build(&self.graph, &self.file_state, build);
         if prev_hash != hash {
             if self.explain {
                 self.progress

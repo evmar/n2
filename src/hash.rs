@@ -18,7 +18,7 @@ const UNIT_SEPARATOR: u8 = 0x1F;
 fn hash_files(
     hasher: &mut std::collections::hash_map::DefaultHasher,
     graph: &Graph,
-    file_state: &mut FileState,
+    file_state: &FileState,
     ids: &[FileId],
 ) {
     for &id in ids {
@@ -40,11 +40,7 @@ fn hash_files(
 // Prerequisite: all referenced files have already been stat()ed and are present.
 // (It doesn't make sense to hash a build with missing files, because it's out
 // of date regardless of the state of the other files.)
-pub fn hash_build(
-    graph: &Graph,
-    file_state: &mut FileState,
-    build: &Build,
-) -> std::io::Result<Hash> {
+pub fn hash_build(graph: &Graph, file_state: &FileState, build: &Build) -> Hash {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     hash_files(&mut hasher, graph, file_state, build.dirtying_ins());
     hasher.write_u8(UNIT_SEPARATOR);
@@ -55,5 +51,5 @@ pub fn hash_build(
     hash::Hash::hash(&build.rspfile, &mut hasher);
     hasher.write_u8(UNIT_SEPARATOR);
     hash_files(&mut hasher, graph, file_state, build.outs());
-    Ok(Hash(hasher.finish()))
+    Hash(hasher.finish())
 }
