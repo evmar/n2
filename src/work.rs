@@ -1,8 +1,8 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::{
-    canon::canon_path, db, densemap::DenseMap, graph::*, progress, progress::Progress, signal,
-    smallmap::SmallMap, task, trace,
+    canon::canon_path, db, densemap::DenseMap, graph::*, hash::hash_build, progress,
+    progress::Progress, signal, smallmap::SmallMap, task, trace,
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;

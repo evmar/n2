@@ -2,8 +2,8 @@
 //! which files are up to date.
 
 use crate::{
-    densemap, densemap::DenseMap, graph::BuildId, graph::FileId, graph::Graph, graph::Hash,
-    graph::Hashes,
+    densemap, densemap::DenseMap, graph::BuildId, graph::FileId, graph::Graph, graph::Hashes,
+    hash::Hash,
 };
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
