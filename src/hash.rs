@@ -6,8 +6,9 @@
 
 use crate::graph::{Build, FileId, FileState, Graph, MTime, RspFile};
 use std::{
+    collections::hash_map::DefaultHasher,
     fmt::Write,
-    hash::{self, Hasher},
+    hash::{Hash, Hasher},
     time::SystemTime,
 };
 
@@ -49,13 +50,13 @@ fn get_fileid_status<'a>(
 
 /// The BuildHasher used during normal builds, designed to not serialize too much.
 #[derive(Default)]
-struct TerseHash(std::collections::hash_map::DefaultHasher);
+struct TerseHash(DefaultHasher);
 
 const UNIT_SEPARATOR: u8 = 0x1F;
 
 impl TerseHash {
     fn write_string(&mut self, string: &str) {
-        std::hash::Hash::hash(string, &mut self.0);
+        string.hash(&mut self.0);
     }
 
     fn write_separator(&mut self) {
@@ -78,7 +79,7 @@ impl Manifest for TerseHash {
         for &id in ids {
             let (name, mtime) = get_fileid_status(graph, file_state, id);
             self.write_string(name);
-            std::hash::Hash::hash(&mtime, &mut self.0);
+            mtime.hash(&mut self.0);
         }
         self.write_separator();
     }
@@ -89,7 +90,7 @@ impl Manifest for TerseHash {
     }
 
     fn write_rsp(&mut self, rspfile: &RspFile) {
-        hash::Hash::hash(rspfile, &mut self.0);
+        rspfile.hash(&mut self.0);
     }
 }
 
@@ -136,7 +137,7 @@ impl Manifest for ExplainHash {
         for &id in ids {
             let (name, mtime) = get_fileid_status(graph, file_state, id);
             let millis = mtime
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
             write!(&mut self.text, "  {millis} {name}\n").unwrap();
@@ -146,7 +147,7 @@ impl Manifest for ExplainHash {
     fn write_rsp(&mut self, rspfile: &RspFile) {
         write!(&mut self.text, "rspfile path: {}\n", rspfile.path.display()).unwrap();
 
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = DefaultHasher::new();
         h.write(rspfile.content.as_bytes());
         write!(&mut self.text, "rspfile hash: {:x}\n", h.finish()).unwrap();
     }
