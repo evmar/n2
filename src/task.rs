@@ -13,7 +13,7 @@ use crate::{
 use anyhow::{anyhow, bail};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[cfg(unix)]
 use std::io::Write;
@@ -340,16 +340,11 @@ impl Runner {
         self.running += 1;
     }
 
-    /// Wait for a build to complete, with a timeout.
-    /// If the timeout elapses return None.
-    pub fn wait(&mut self, dur: Duration) -> Option<FinishedTask> {
-        let task = match self.finished_recv.recv_timeout(dur) {
-            Err(mpsc::RecvTimeoutError::Timeout) => return None,
-            // The unwrap() checks the recv() call, to panic on mpsc errors.
-            r => r.unwrap(),
-        };
+    /// Wait for a build to complete.  May block for a long time.
+    pub fn wait(&mut self) -> FinishedTask {
+        let task = self.finished_recv.recv().unwrap();
         self.tids.release(task.tid);
         self.running -= 1;
-        Some(task)
+        task
     }
 }

@@ -68,7 +68,9 @@ fn build(
         anyhow::bail!("no path specified and no default");
     }
 
-    trace::scope("work.run", || work.run())
+    let ret = trace::scope("work.run", || work.run());
+    progress.finish();
+    ret
 }
 
 fn default_parallelism() -> anyhow::Result<usize> {

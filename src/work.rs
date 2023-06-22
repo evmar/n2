@@ -7,7 +7,6 @@ use crate::{
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::Duration;
 
 /// Build steps go through this sequence of states.
 /// See "Build states" in the design notes.
@@ -662,10 +661,9 @@ impl<'a> Work<'a> {
         Ok(())
     }
 
-    // Runs the build.
-    // Returns a Result for failures, but we must clean up the progress before
-    // returning the result to the caller.
-    fn run_without_cleanup(&mut self) -> anyhow::Result<Option<usize>> {
+    /// Runs the build.
+    /// Returns the number of tasks executed on successful builds, or None on failed builds.
+    pub fn run(&mut self) -> anyhow::Result<Option<usize>> {
         #[cfg(unix)]
         signal::register_sigint();
         let mut tasks_done = 0;
@@ -724,14 +722,7 @@ impl<'a> Work<'a> {
                 panic!("BUG: no work to do and runner not running");
             }
 
-            // Flush progress here, to ensure that the progress is the most up
-            // to date before we wait.  Otherwise the progress might seem like
-            // we're doing nothing while we wait.
-            self.progress.flush();
-            let task = match self.runner.wait(Duration::from_millis(500)) {
-                None => continue, // timeout
-                Some(task) => task,
-            };
+            let task = self.runner.wait();
             let build = self.graph.build(task.buildid);
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);
@@ -770,15 +761,6 @@ impl<'a> Work<'a> {
         // don't want n2 to print a "succeeded" message afterwards.
         let success = tasks_failed == 0 && !signal::was_interrupted();
         Ok(success.then(|| tasks_done))
-    }
-
-    /// Returns the number of tasks executed on successful builds, or None on failed builds.
-    pub fn run(&mut self) -> anyhow::Result<Option<usize>> {
-        let result = self.run_without_cleanup();
-        // Clean up progress before returning.
-        self.progress.update(&self.build_states.counts);
-        self.progress.finish();
-        result
     }
 }
 

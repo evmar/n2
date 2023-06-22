@@ -7,6 +7,9 @@ use crate::{
 };
 use std::collections::VecDeque;
 use std::io::Write;
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -22,9 +25,6 @@ pub fn build_message(build: &Build) -> &str {
 pub trait Progress {
     /// Called as individual build tasks progress through build states.
     fn update(&mut self, counts: &StateCounts);
-
-    /// Called when we expect to be waiting for a while before another update.
-    fn flush(&mut self);
 
     /// Called when a task starts or completes.
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>);
@@ -68,10 +68,6 @@ impl DumbConsoleProgress {
 
 impl Progress for DumbConsoleProgress {
     fn update(&mut self, _counts: &StateCounts) {
-        // ignore
-    }
-
-    fn flush(&mut self) {
         // ignore
     }
 
@@ -123,8 +119,82 @@ impl Progress for DumbConsoleProgress {
 /// start position.  This means on errors etc. we can clear any status by
 /// clearing the console too.
 pub struct FancyConsoleProgress {
-    /// Last time we updated the console, used to throttle updates.
-    last_update: Instant,
+    state: Arc<Mutex<FancyState>>,
+}
+
+/// Screen updates happen after this duration passes, to reduce the amount
+/// of printing in the case of rapid updates.  This helps with terminal flicker.
+const UPDATE_DELAY: Duration = std::time::Duration::from_millis(100);
+
+impl FancyConsoleProgress {
+    pub fn new(verbose: bool) -> Self {
+        let dirty_cond = Arc::new(Condvar::new());
+        let state = Arc::new(Mutex::new(FancyState {
+            done: false,
+            dirty: false,
+            dirty_cond: dirty_cond.clone(),
+            counts: StateCounts::default(),
+            tasks: VecDeque::new(),
+            verbose,
+        }));
+
+        // Thread to debounce status updates -- waits a bit, then prints after
+        // any dirty state.
+        std::thread::spawn({
+            let state = state.clone();
+            move || loop {
+                // Sleep before doing anything, so that we delay slightly
+                // before our first print.  This reduces flicker in the case where
+                // the work immediately completes.
+                std::thread::sleep(UPDATE_DELAY);
+
+                // Wait to be notified of a display update, or timeout at 500ms.
+                // The timeout is for the case where there are lengthy build
+                // steps and the progress will show how long they've been
+                // running.
+                let (mut state, _) = dirty_cond
+                    .wait_timeout_while(
+                        state.lock().unwrap(),
+                        Duration::from_millis(500),
+                        |state| !state.dirty,
+                    )
+                    .unwrap();
+                if state.done {
+                    break;
+                }
+
+                // Update regardless of whether we timed out or not.
+                state.print_progress();
+            }
+        });
+
+        FancyConsoleProgress { state }
+    }
+}
+
+impl Progress for FancyConsoleProgress {
+    fn update(&mut self, counts: &StateCounts) {
+        self.state.lock().unwrap().update(counts);
+    }
+
+    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
+        self.state.lock().unwrap().task_state(id, build, result);
+    }
+
+    fn log(&mut self, msg: &str) {
+        self.state.lock().unwrap().log(msg);
+    }
+
+    fn finish(&mut self) {
+        self.state.lock().unwrap().finish();
+    }
+}
+
+struct FancyState {
+    done: bool,
+    dirty: bool,
+    dirty_cond: Arc<Condvar>,
+
     /// Counts of tasks in each state.  TODO: pass this as function args?
     counts: StateCounts,
     /// Build tasks that are currently executing.
@@ -134,24 +204,15 @@ pub struct FancyConsoleProgress {
     verbose: bool,
 }
 
-impl FancyConsoleProgress {
-    pub fn new(verbose: bool) -> Self {
-        FancyConsoleProgress {
-            // Act like our last update was now, so that we delay slightly
-            // before our first print.  This reduces flicker in the case where
-            // the work immediately completes.
-            last_update: Instant::now(),
-            counts: StateCounts::default(),
-            tasks: VecDeque::new(),
-            verbose,
-        }
+impl FancyState {
+    fn dirty(&mut self) {
+        self.dirty = true;
+        self.dirty_cond.notify_one();
     }
-}
 
-impl Progress for FancyConsoleProgress {
     fn update(&mut self, counts: &StateCounts) {
         self.counts = counts.clone();
-        self.maybe_print_progress();
+        self.dirty();
     }
 
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
@@ -172,41 +233,39 @@ impl Progress for FancyConsoleProgress {
                 // Task completed.
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
-                if result.termination == Termination::Success && result.output.is_empty() {
-                    // Common case: don't show anything.
-                    return;
-                }
-
-                let status = match result.termination {
-                    Termination::Success => "",
-                    Termination::Interrupted => "interrupted: ",
-                    Termination::Failure => "failed: ",
+                match result.termination {
+                    Termination::Success => {
+                        if result.output.is_empty() {
+                            // Common case: don't show anything.
+                        } else {
+                            self.log(build_message(build))
+                        }
+                    }
+                    Termination::Interrupted => {
+                        self.log(&format!("interrupted: {}", build_message(build)))
+                    }
+                    Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
                 };
-                self.log(&format!("{}{}", status, build_message(build)));
-
                 if !result.output.is_empty() {
                     std::io::stdout().write_all(&result.output).unwrap();
                 }
             }
         }
-        self.maybe_print_progress();
+        self.dirty();
     }
 
     fn log(&mut self, msg: &str) {
         self.clear_progress();
         println!("{}", msg);
-    }
-
-    fn flush(&mut self) {
-        self.print_progress();
+        self.dirty();
     }
 
     fn finish(&mut self) {
         self.clear_progress();
+        self.done = true;
+        self.dirty(); // let thread quit
     }
-}
 
-impl FancyConsoleProgress {
     fn progress_bar(&self) -> String {
         let bar_size = 40;
         let mut bar = String::with_capacity(bar_size);
@@ -239,7 +298,7 @@ impl FancyConsoleProgress {
         std::io::stdout().write_all(b"\r\x1b[J").unwrap();
     }
 
-    fn print_progress(&self) {
+    fn print_progress(&mut self) {
         self.clear_progress();
         let failed = self.counts.get(BuildState::Failed);
         let mut progress_line = format!(
@@ -254,7 +313,9 @@ impl FancyConsoleProgress {
         progress_line.push_str(&format!(
             "{}/{} running",
             self.tasks.len(),
-            self.counts.get(BuildState::Queued) + self.tasks.len(),
+            self.counts.get(BuildState::Queued)
+                + self.counts.get(BuildState::Running)
+                + self.counts.get(BuildState::Ready),
         ));
         println!("{}", progress_line);
 
@@ -279,15 +340,6 @@ impl FancyConsoleProgress {
 
         // Move cursor up to the first printed line, for overprinting.
         print!("\x1b[{}A", lines);
-    }
-
-    fn maybe_print_progress(&mut self) {
-        let now = Instant::now();
-        let delta = now.duration_since(self.last_update);
-        if delta < Duration::from_millis(50) {
-            return;
-        }
-        self.print_progress();
-        self.last_update = now;
+        self.dirty = false;
     }
 }
