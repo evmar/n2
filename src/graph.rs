@@ -2,7 +2,7 @@
 
 use crate::{
     densemap::{self, DenseMap},
-    hash::Hash,
+    hash::BuildHash,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -369,14 +369,14 @@ impl FileState {
 }
 
 #[derive(Default)]
-pub struct Hashes(HashMap<BuildId, Hash>);
+pub struct Hashes(HashMap<BuildId, BuildHash>);
 
 impl Hashes {
-    pub fn set(&mut self, id: BuildId, hash: Hash) {
+    pub fn set(&mut self, id: BuildId, hash: BuildHash) {
         self.0.insert(id, hash);
     }
 
-    pub fn get(&self, id: BuildId) -> Option<Hash> {
+    pub fn get(&self, id: BuildId) -> Option<BuildHash> {
         self.0.get(&id).copied()
     }
 }

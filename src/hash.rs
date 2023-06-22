@@ -14,11 +14,11 @@ use std::{
 /// Hash value used to identify a given instance of a Build's execution;
 /// compared to verify whether a Build is up to date.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Hash(pub u64);
+pub struct BuildHash(pub u64);
 
-/// A trait for computing the build's hash.  Indirected as a trait so we can
+/// A trait for computing a build's manifest.  Indirected as a trait so we can
 /// implement it a second time for "-d explain" debug purposes.
-trait BuildHasher {
+trait Manifest {
     /// Write a list of files+mtimes.  desc is used only for "-d explain" output.
     fn write_files<'a>(
         &mut self,
@@ -62,12 +62,12 @@ impl TerseHash {
         self.0.write_u8(UNIT_SEPARATOR);
     }
 
-    fn finish(&mut self) -> Hash {
-        Hash(self.0.finish())
+    fn finish(&mut self) -> BuildHash {
+        BuildHash(self.0.finish())
     }
 }
 
-impl BuildHasher for TerseHash {
+impl Manifest for TerseHash {
     fn write_files<'a>(
         &mut self,
         _desc: &str,
@@ -93,28 +93,28 @@ impl BuildHasher for TerseHash {
     }
 }
 
-fn hash_build_with_hasher<H: BuildHasher>(
-    hasher: &mut H,
+fn build_manifest<M: Manifest>(
+    manifest: &mut M,
     graph: &Graph,
     file_state: &FileState,
     build: &Build,
 ) {
-    hasher.write_files("in", graph, file_state, build.dirtying_ins());
-    hasher.write_files("discovered", graph, file_state, build.discovered_ins());
-    hasher.write_cmdline(build.cmdline.as_deref().unwrap_or(""));
+    manifest.write_files("in", graph, file_state, build.dirtying_ins());
+    manifest.write_files("discovered", graph, file_state, build.discovered_ins());
+    manifest.write_cmdline(build.cmdline.as_deref().unwrap_or(""));
     if let Some(rspfile) = &build.rspfile {
-        hasher.write_rsp(rspfile);
+        manifest.write_rsp(rspfile);
     }
-    hasher.write_files("out", graph, file_state, build.outs());
+    manifest.write_files("out", graph, file_state, build.outs());
 }
 
 // Hashes the inputs of a build to compute a signature.
 // Prerequisite: all referenced files have already been stat()ed and are present.
 // (It doesn't make sense to hash a build with missing files, because it's out
 // of date regardless of the state of the other files.)
-pub fn hash_build(graph: &Graph, file_state: &FileState, build: &Build) -> Hash {
+pub fn hash_build(graph: &Graph, file_state: &FileState, build: &Build) -> BuildHash {
     let mut hasher = TerseHash::default();
-    hash_build_with_hasher(&mut hasher, graph, file_state, build);
+    build_manifest(&mut hasher, graph, file_state, build);
     hasher.finish()
 }
 
@@ -124,7 +124,7 @@ struct ExplainHash {
     text: String,
 }
 
-impl BuildHasher for ExplainHash {
+impl Manifest for ExplainHash {
     fn write_files<'a>(
         &mut self,
         desc: &str,
@@ -160,6 +160,6 @@ impl BuildHasher for ExplainHash {
 /// Used for "-d explain" debugging output.
 pub fn explain_hash_build(graph: &Graph, file_state: &FileState, build: &Build) -> String {
     let mut explainer = ExplainHash::default();
-    hash_build_with_hasher(&mut explainer, graph, file_state, build);
+    build_manifest(&mut explainer, graph, file_state, build);
     explainer.text
 }

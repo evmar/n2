@@ -3,7 +3,7 @@
 
 use crate::{
     densemap, densemap::DenseMap, graph::BuildId, graph::FileId, graph::Graph, graph::Hashes,
-    hash::Hash,
+    hash::BuildHash,
 };
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
@@ -152,7 +152,12 @@ impl Writer {
         Ok(id)
     }
 
-    pub fn write_build(&mut self, graph: &Graph, id: BuildId, hash: Hash) -> std::io::Result<()> {
+    pub fn write_build(
+        &mut self,
+        graph: &Graph,
+        id: BuildId,
+        hash: BuildHash,
+    ) -> std::io::Result<()> {
         let build = graph.build(id);
         let mut buf = WriteBuf::new();
         let outs = build.outs();
@@ -273,7 +278,7 @@ impl<'a> Reader<'a> {
             deps.push(*self.ids.fileids.get(id));
         }
 
-        let hash = Hash(self.read_u64()?);
+        let hash = BuildHash(self.read_u64()?);
 
         // unique_bid is set here if this record is valid.
         if let Some(id) = unique_bid {
