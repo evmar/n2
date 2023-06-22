@@ -46,12 +46,83 @@ struct Task {
     message: String,
 }
 
-/// Console progress pretty-printer.
+/// Progress implementation for "dumb" console, without any overprinting.
+#[derive(Default)]
+pub struct DumbConsoleProgress {
+    /// Whether to print command lines of started programs.
+    verbose: bool,
+
+    /// The id of the last command printed, used to avoid printing it twice
+    /// when we have two updates from the same command in a row.
+    last_started: Option<BuildId>,
+}
+
+impl DumbConsoleProgress {
+    pub fn new(verbose: bool) -> Self {
+        Self {
+            verbose,
+            last_started: None,
+        }
+    }
+}
+
+impl Progress for DumbConsoleProgress {
+    fn update(&mut self, _counts: &StateCounts) {
+        // ignore
+    }
+
+    fn flush(&mut self) {
+        // ignore
+    }
+
+    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
+        match result {
+            None => {
+                // Starting.
+                self.log(if self.verbose {
+                    build.cmdline.as_ref().unwrap()
+                } else {
+                    build_message(build)
+                });
+                self.last_started = Some(id);
+            }
+            Some(result) => {
+                // Finished.
+                match result.termination {
+                    Termination::Success => {
+                        if result.output.is_empty() {
+                            // Common success case, no need to print.
+                        } else if self.last_started == Some(id) {
+                            // We just printed the command, don't print it again.
+                        } else {
+                            self.log(build_message(build))
+                        }
+                    }
+                    Termination::Interrupted => {
+                        self.log(&format!("interrupted: {}", build_message(build)))
+                    }
+                    Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
+                };
+                if !result.output.is_empty() {
+                    std::io::stdout().write_all(&result.output).unwrap();
+                }
+            }
+        }
+    }
+
+    fn log(&mut self, msg: &str) {
+        println!("{}", msg);
+    }
+
+    fn finish(&mut self) {}
+}
+
+/// Progress implementation for "fancy" console, with progress bar etc.
 /// Each time it prints, it clears from the cursor to the end of the console,
 /// prints the status text, and then moves moves the cursor back up to the
 /// start position.  This means on errors etc. we can clear any status by
 /// clearing the console too.
-pub struct ConsoleProgress {
+pub struct FancyConsoleProgress {
     /// Last time we updated the console, used to throttle updates.
     last_update: Instant,
     /// Counts of tasks in each state.  TODO: pass this as function args?
@@ -61,13 +132,11 @@ pub struct ConsoleProgress {
     tasks: VecDeque<Task>,
     /// Whether to print command lines of started programs.
     verbose: bool,
-    /// Whether to print a progress bar and currently running tasks.
-    fancy_terminal: bool,
 }
 
-impl ConsoleProgress {
-    pub fn new(verbose: bool, fancy_terminal: bool) -> Self {
-        ConsoleProgress {
+impl FancyConsoleProgress {
+    pub fn new(verbose: bool) -> Self {
+        FancyConsoleProgress {
             // Act like our last update was now, so that we delay slightly
             // before our first print.  This reduces flicker in the case where
             // the work immediately completes.
@@ -75,12 +144,11 @@ impl ConsoleProgress {
             counts: StateCounts::default(),
             tasks: VecDeque::new(),
             verbose,
-            fancy_terminal,
         }
     }
 }
 
-impl Progress for ConsoleProgress {
+impl Progress for FancyConsoleProgress {
     fn update(&mut self, counts: &StateCounts) {
         self.counts = counts.clone();
         self.maybe_print_progress();
@@ -104,7 +172,21 @@ impl Progress for ConsoleProgress {
                 // Task completed.
                 self.tasks
                     .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
-                self.print_result(build, result);
+                if result.termination == Termination::Success && result.output.is_empty() {
+                    // Common case: don't show anything.
+                    return;
+                }
+
+                let status = match result.termination {
+                    Termination::Success => "",
+                    Termination::Interrupted => "interrupted: ",
+                    Termination::Failure => "failed: ",
+                };
+                self.log(&format!("{}{}", status, build_message(build)));
+
+                if !result.output.is_empty() {
+                    std::io::stdout().write_all(&result.output).unwrap();
+                }
             }
         }
         self.maybe_print_progress();
@@ -124,7 +206,7 @@ impl Progress for ConsoleProgress {
     }
 }
 
-impl ConsoleProgress {
+impl FancyConsoleProgress {
     fn progress_bar(&self) -> String {
         let bar_size = 40;
         let mut bar = String::with_capacity(bar_size);
@@ -152,18 +234,12 @@ impl ConsoleProgress {
     }
 
     fn clear_progress(&self) {
-        if !self.fancy_terminal {
-            return;
-        }
         // If the user hit ctl-c, it may have printed something on the line.
         // So \r to go to first column first, then clear anything below.
         std::io::stdout().write_all(b"\r\x1b[J").unwrap();
     }
 
     fn print_progress(&self) {
-        if !self.fancy_terminal {
-            return;
-        }
         self.clear_progress();
         let failed = self.counts.get(BuildState::Failed);
         let mut progress_line = format!(
@@ -213,32 +289,5 @@ impl ConsoleProgress {
         }
         self.print_progress();
         self.last_update = now;
-    }
-
-    fn print_result(&mut self, build: &Build, result: &TaskResult) {
-        // By default we don't want to print anything when a task completes,
-        // but we do want to print the completed task when:
-        // - failed tasks
-        // - when we aren't doing fancy terminal progress display
-        // - when the task had output (even in non-failing cases)
-
-        if result.termination == Termination::Success
-            && self.fancy_terminal
-            && result.output.is_empty()
-        {
-            return;
-        }
-
-        self.clear_progress();
-        let status = match result.termination {
-            Termination::Success => "",
-            Termination::Interrupted => "interrupted: ",
-            Termination::Failure => "failed: ",
-        };
-        println!("{}{}", status, build_message(build));
-
-        if !result.output.is_empty() {
-            std::io::stdout().write_all(&result.output).unwrap();
-        }
     }
 }

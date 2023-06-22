@@ -1,4 +1,8 @@
-use crate::{load, progress::ConsoleProgress, terminal, trace, work};
+use crate::{
+    load,
+    progress::{DumbConsoleProgress, FancyConsoleProgress, Progress},
+    terminal, trace, work,
+};
 use anyhow::anyhow;
 use std::path::Path;
 
@@ -6,8 +10,17 @@ fn build(
     options: work::Options,
     build_filename: String,
     targets: Vec<String>,
-    progress: &mut ConsoleProgress,
+    verbose: bool,
 ) -> anyhow::Result<Option<usize>> {
+    let (mut dumb_console, mut fancy_console);
+    let progress: &mut dyn Progress = if terminal::use_fancy() {
+        fancy_console = FancyConsoleProgress::new(verbose);
+        &mut fancy_console
+    } else {
+        dumb_console = DumbConsoleProgress::new(verbose);
+        &mut dumb_console
+    };
+
     let mut state = trace::scope("load::read", || load::read(&build_filename))?;
     let mut work = work::Work::new(
         state.graph,
@@ -166,8 +179,7 @@ fn run_impl() -> anyhow::Result<i32> {
         std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
-    let mut progress: ConsoleProgress = ConsoleProgress::new(args.verbose, terminal::use_fancy());
-    match build(options, args.build_file, args.targets, &mut progress)? {
+    match build(options, args.build_file, args.targets, args.verbose)? {
         None => {
             // Don't print any summary, the failing task is enough info.
             return Ok(1);
