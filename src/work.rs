@@ -633,6 +633,11 @@ impl<'a> Work<'a> {
             if self.explain {
                 self.progress
                     .log(&format!("explain: {}: input changed", build.location));
+                self.progress.log(&hash::explain_hash_build(
+                    &self.graph,
+                    &self.file_state,
+                    build,
+                ));
             }
             return Ok(true);
         }
