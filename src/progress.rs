@@ -124,7 +124,7 @@ pub struct FancyConsoleProgress {
 
 /// Screen updates happen after this duration passes, to reduce the amount
 /// of printing in the case of rapid updates.  This helps with terminal flicker.
-const UPDATE_DELAY: Duration = std::time::Duration::from_millis(100);
+const UPDATE_DELAY: Duration = std::time::Duration::from_millis(50);
 
 impl FancyConsoleProgress {
     pub fn new(verbose: bool) -> Self {
@@ -143,28 +143,28 @@ impl FancyConsoleProgress {
         std::thread::spawn({
             let state = state.clone();
             move || loop {
-                // Sleep before doing anything, so that we delay slightly
-                // before our first print.  This reduces flicker in the case where
-                // the work immediately completes.
-                std::thread::sleep(UPDATE_DELAY);
-
                 // Wait to be notified of a display update, or timeout at 500ms.
                 // The timeout is for the case where there are lengthy build
                 // steps and the progress will show how long they've been
                 // running.
-                let (mut state, _) = dirty_cond
-                    .wait_timeout_while(
-                        state.lock().unwrap(),
-                        Duration::from_millis(500),
-                        |state| !state.dirty,
-                    )
-                    .unwrap();
-                if state.done {
-                    break;
+                {
+                    let (state, _) = dirty_cond
+                        .wait_timeout_while(
+                            state.lock().unwrap(),
+                            Duration::from_millis(500),
+                            |state| !state.dirty,
+                        )
+                        .unwrap();
+                    if state.done {
+                        break;
+                    }
                 }
 
+                // Delay a little bit in case more display updates come in.
+                std::thread::sleep(UPDATE_DELAY);
+
                 // Update regardless of whether we timed out or not.
-                state.print_progress();
+                state.lock().unwrap().print_progress();
             }
         });
 
