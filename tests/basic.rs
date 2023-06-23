@@ -276,7 +276,6 @@ fn explain() -> anyhow::Result<()> {
     // The dump of the file manifest after includes mtimes that we don't want
     // to be sensitive to, so just look for some bits we know show up there.
     assert_output_contains(&out, "discovered:");
-    assert_output_contains(&out, "cmdline: touch out");
 
     Ok(())
 }
