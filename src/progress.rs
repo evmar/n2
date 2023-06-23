@@ -266,32 +266,6 @@ impl FancyState {
         self.dirty(); // let thread quit
     }
 
-    fn progress_bar(&self) -> String {
-        let bar_size = 40;
-        let mut bar = String::with_capacity(bar_size);
-        let mut sum: usize = 0;
-        let total = self.counts.total();
-        for (count, ch) in [
-            (
-                self.counts.get(BuildState::Done) + self.counts.get(BuildState::Failed),
-                '=',
-            ),
-            (
-                self.counts.get(BuildState::Queued)
-                    + self.counts.get(BuildState::Running)
-                    + self.counts.get(BuildState::Ready),
-                '-',
-            ),
-            (self.counts.get(BuildState::Want), ' '),
-        ] {
-            sum += count;
-            while bar.len() <= (sum * bar_size / total) {
-                bar.push(ch);
-            }
-        }
-        bar
-    }
-
     fn clear_progress(&self) {
         // If the user hit ctl-c, it may have printed something on the line.
         // So \r to go to first column first, then clear anything below.
@@ -303,7 +277,7 @@ impl FancyState {
         let failed = self.counts.get(BuildState::Failed);
         let mut progress_line = format!(
             "[{}] {}/{} done, ",
-            self.progress_bar(),
+            progress_bar(&self.counts, 40),
             self.counts.get(BuildState::Done) + failed,
             self.counts.total()
         );
@@ -342,4 +316,30 @@ impl FancyState {
         print!("\x1b[{}A", lines);
         self.dirty = false;
     }
+}
+
+/// Render a StateCounts as an ASCII progress bar.
+fn progress_bar(counts: &StateCounts, bar_size: usize) -> String {
+    let mut bar = String::with_capacity(bar_size);
+    let mut sum: usize = 0;
+    let total = counts.total();
+    for (count, ch) in [
+        (
+            counts.get(BuildState::Done) + counts.get(BuildState::Failed),
+            '=',
+        ),
+        (
+            counts.get(BuildState::Queued)
+                + counts.get(BuildState::Running)
+                + counts.get(BuildState::Ready),
+            '-',
+        ),
+        (counts.get(BuildState::Want), ' '),
+    ] {
+        sum += count;
+        while bar.len() <= (sum * bar_size / total) {
+            bar.push(ch);
+        }
+    }
+    bar
 }
