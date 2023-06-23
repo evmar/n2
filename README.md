@@ -5,7 +5,8 @@
 
 n2 (pronounced "into") implements enough of [Ninja](https://ninja-build.org/) to
 successfully build some projects that build with Ninja. Compared to Ninja, n2
-missing some features but is faster to build and has a better UI.
+missing some features but is faster to build and has a better UI; see [a
+more detailed comparison](doc/comparison.md).
 
 > [Here's a small demo](https://asciinema.org/a/F2E7a6nX4feoSSWVI4oFAm21T) of n2
 > building some of Clang.
@@ -38,13 +39,16 @@ While building, n2 displays build progress like this:
 The progress bar always covers all build steps needed for the targets,
 regardless of whether they need to be executed or not.
 
-- **Done:** This build has 4459 total build steps, 2272 of which are currently
-  up to date. This is what the equals signs show.
-- **In progress:** Hyphens show steps that are in-progress (e.g. if you had
-  enough CPUs they would all be executing). The `8/930 running` means n2 is
-  currently executing 8 of them.
-- **Unknown:** The remaining space shows steps whose status is yet to be known,
-  as they depend on the in progress steps.
+The bar shows three categories of state:
+
+- **Done:** The `=` signs show the build steps that are already up to date.
+- **In progress:** The `-` signs show steps that are in-progress; if you had
+  enough CPUs they would all be executing. The `8/930 running` after shows that
+  n2 is   currently executing 8 of the 930 available steps.
+- **Unknown:** The remaining empty space indicates steps whose status is yet
+  to be known, as they depend on the in progress steps.  For example, if an
+  intermediate step doesn't write its outputs n2 may not need to execute the
+  dependent steps.
 
 The lines below the progress bar show some build steps that are currrently
 running, along with how long they've been running. Their text is controlled by
@@ -60,15 +64,4 @@ the design notes as one of the primary artifacts of this.
 
 - [Design notes](doc/design_notes.md).
 - [Development tips](doc/development.md).
-
-## Differences from Ninja
-
-n2 is [missing many Ninja features](doc/missing.md).
-
-n2 does some things Ninja doesn't:
-
-- Builds start tasks as soon as an out of date one is found, rather than
-  gathering all the out of date tasks before executing.
-- Fancier status output, modeled after Bazel.
-- `-d trace` generates a performance trace as used by Chrome's `about:tracing`
-  or alternatives (speedscope, perfetto).
+- [Comparison with Ninja / missing features](doc/comparison.md).
