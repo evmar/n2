@@ -54,7 +54,7 @@ impl StateCounts {
             BuildState::Failed => 5,
         }
     }
-    fn add(&mut self, state: BuildState, delta: isize) {
+    pub fn add(&mut self, state: BuildState, delta: isize) {
         self.0[StateCounts::idx(state)] =
             (self.0[StateCounts::idx(state)] as isize + delta) as usize;
     }

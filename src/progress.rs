@@ -323,6 +323,9 @@ fn progress_bar(counts: &StateCounts, bar_size: usize) -> String {
     let mut bar = String::with_capacity(bar_size);
     let mut sum: usize = 0;
     let total = counts.total();
+    if total == 0 {
+        return " ".repeat(bar_size);
+    }
     for (count, ch) in [
         (
             counts.get(BuildState::Done) + counts.get(BuildState::Failed),
@@ -337,9 +340,51 @@ fn progress_bar(counts: &StateCounts, bar_size: usize) -> String {
         (counts.get(BuildState::Want), ' '),
     ] {
         sum += count;
-        while bar.len() <= (sum * bar_size / total) {
+        let mut target_size = sum * bar_size / total;
+        if count > 0 && target_size == bar.len() && target_size < bar_size {
+            // Special case: for non-zero count, ensure we always get at least
+            // one tick.
+            target_size += 1;
+        }
+        while bar.len() < target_size {
             bar.push(ch);
         }
     }
     bar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_bar_rendering() {
+        let mut counts = StateCounts::default();
+
+        // Don't crash if we show progress before having any tasks.
+        assert_eq!(progress_bar(&counts, 10), "          ");
+
+        counts.add(BuildState::Want, 100);
+        assert_eq!(progress_bar(&counts, 10), "          ");
+
+        // Half want -> ready.
+        counts.add(BuildState::Want, -50);
+        counts.add(BuildState::Ready, 50);
+        assert_eq!(progress_bar(&counts, 10), "-----     ");
+
+        // One ready -> done.
+        counts.add(BuildState::Ready, -1);
+        counts.add(BuildState::Done, 1);
+        assert_eq!(progress_bar(&counts, 10), "=----     ");
+
+        // All but one want -> ready.
+        counts.add(BuildState::Want, -49);
+        counts.add(BuildState::Ready, 49);
+        assert_eq!(progress_bar(&counts, 10), "=-------- ");
+
+        // All want -> ready.
+        counts.add(BuildState::Want, -1);
+        counts.add(BuildState::Ready, 1);
+        assert_eq!(progress_bar(&counts, 10), "=---------");
+    }
 }
