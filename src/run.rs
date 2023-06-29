@@ -78,7 +78,6 @@ fn build(
     }
 
     let ret = trace::scope("work.run", || work.run());
-    progress.finish();
     ret
 }
 

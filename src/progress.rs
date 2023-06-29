@@ -31,10 +31,6 @@ pub trait Progress {
 
     /// Log some (debug) information, without corrupting the progress display.
     fn log(&mut self, msg: &str);
-
-    /// Called when the overall build has completed (success or failure), to allow
-    /// cleaning up the display.
-    fn finish(&mut self);
 }
 
 /// Currently running build task, as tracked for progress updates.
@@ -109,8 +105,6 @@ impl Progress for DumbConsoleProgress {
     fn log(&mut self, msg: &str) {
         println!("{}", msg);
     }
-
-    fn finish(&mut self) {}
 }
 
 /// Progress implementation for "fancy" console, with progress bar etc.
@@ -184,9 +178,11 @@ impl Progress for FancyConsoleProgress {
     fn log(&mut self, msg: &str) {
         self.state.lock().unwrap().log(msg);
     }
+}
 
-    fn finish(&mut self) {
-        self.state.lock().unwrap().finish();
+impl Drop for FancyConsoleProgress {
+    fn drop(&mut self) {
+        self.state.lock().unwrap().cleanup();
     }
 }
 
@@ -260,7 +256,7 @@ impl FancyState {
         self.dirty();
     }
 
-    fn finish(&mut self) {
+    fn cleanup(&mut self) {
         self.clear_progress();
         self.done = true;
         self.dirty(); // let thread quit
