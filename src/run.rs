@@ -32,14 +32,16 @@ fn build(
     );
 
     // Attempt to rebuild build.ninja.
-    if let Some(target) = work.is_build_target(&build_filename) {
-        work.want_fileid(target)?;
+    let build_file_target = work.lookup(&build_filename);
+    if let Some(target) = build_file_target {
+        work.want_file(target)?;
         match trace::scope("work.run", || work.run())? {
             None => return Ok(None),
             Some(0) => {
                 // build.ninja already up to date.
                 // TODO: this logic is not right in the case where a build has
-                // a step that doesn't touch build.ninja.
+                // a step that doesn't touch build.ninja.  We should instead
+                // verify the specific FileId was updated.
             }
             Some(_) => {
                 // Regenerated build.ninja; start over.
@@ -58,11 +60,18 @@ fn build(
 
     if !targets.is_empty() {
         for name in &targets {
-            work.want_file(name)?;
+            let target = work
+                .lookup(name)
+                .ok_or_else(|| anyhow::anyhow!("unknown path requested: {:?}", name))?;
+            if Some(target) == build_file_target {
+                // Already built above.
+                continue;
+            }
+            work.want_file(target)?;
         }
     } else if !state.default.is_empty() {
         for target in state.default {
-            work.want_fileid(target)?;
+            work.want_file(target)?;
         }
     } else {
         anyhow::bail!("no path specified and no default");

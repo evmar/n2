@@ -324,28 +324,13 @@ impl<'a> Work<'a> {
         }
     }
 
-    /// If there's a build rule that generates the given file, return the FileId
-    /// to pass to want_fileid that will rebuild it.
-    pub fn is_build_target(&mut self, name: &str) -> Option<FileId> {
-        if let Some(id) = self.graph.lookup(&canon_path(name)) {
-            if self.graph.file(id).input.is_some() {
-                return Some(id);
-            }
-        }
-        None
+    pub fn lookup(&mut self, name: &str) -> Option<FileId> {
+        self.graph.lookup(&canon_path(name))
     }
 
-    pub fn want_fileid(&mut self, id: FileId) -> anyhow::Result<()> {
+    pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
         let mut stack = Vec::new();
         self.build_states.want_file(&self.graph, &mut stack, id)
-    }
-
-    pub fn want_file(&mut self, name: &str) -> anyhow::Result<()> {
-        let target = match self.graph.lookup(&canon_path(name)) {
-            None => anyhow::bail!("unknown path requested: {:?}", name),
-            Some(id) => id,
-        };
-        self.want_fileid(target)
     }
 
     /// Check whether a given build is ready, generally after one of its inputs

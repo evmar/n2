@@ -53,6 +53,7 @@ fn generate_build_file() -> anyhow::Result<()> {
     space.write(
         "gen.sh",
         "
+echo 'regenerating build.ninja'
 cat >build.ninja <<EOT
 rule regen
   command = sh ./gen.sh
@@ -70,10 +71,12 @@ EOT
 
     // Run: expect to regenerate because we don't know how the file was made.
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "regenerating build.ninja");
     assert_output_contains(&out, "ran 1 task");
 
     // Run: everything should be up to date.
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_not_contains(&out, "regenerating build.ninja");
     assert_output_contains(&out, "no work");
 
     Ok(())
@@ -87,6 +90,7 @@ fn generate_specified_build_file() -> anyhow::Result<()> {
     space.write(
         "gen.sh",
         "
+echo 'regenerating specified_build.ninja'
 cat >specified_build.ninja <<EOT
 rule regen
   command = sh ./gen.sh
@@ -104,10 +108,12 @@ EOT
 
     // Run: expect to regenerate because we don't know how the file was made.
     let out = space.run_expect(&mut n2_command(vec!["-f", "specified_build.ninja", "out"]))?;
+    assert_output_contains(&out, "regenerating specified_build.ninja");
     assert_output_contains(&out, "ran 1 task");
 
     // Run: everything should be up to date.
     let out = space.run_expect(&mut n2_command(vec!["-f", "specified_build.ninja", "out"]))?;
+    assert_output_not_contains(&out, "regenerating");
     assert_output_contains(&out, "no work");
 
     Ok(())
