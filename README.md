@@ -14,13 +14,21 @@ missing some features but is faster to build and has a better UI; see
 ## Install
 
 ```
-$ cargo build --release
-$ ./target/release/n2 -C some/build/dir
+$ cargo install --git https://github.com/evmar/n2
+# (installs into ~/.cargo/bin/)
+
+$ n2 -C some/build/dir some-target
 ```
 
-When CMake executes Ninja it expects some particular Ninja behaviors. n2
-emulates these behaviors when invoked as `ninja`. To use n2 with CMake you can
-create a symlink somewhere in your `$PATH`, such that CMake can discover it.
+### Replacing Ninja when using CMake
+
+When CMake generates Ninja files it attempts run a program named `ninja` with
+some particular Ninja behaviors. If you have Ninja installed already then things
+will continue to work as before.
+
+If you don't have Ninja installed at all, n2 can emulate the expected CMake
+behavior when invoked as `ninja`. To do this you create a symlink named `ninja`
+somewhere in your `$PATH`, such that CMake can discover it.
 
 - UNIX: `ln -s path/to/n2 ninja`
 - Windows(cmd): `mklink ninja.exe path\to\n2`
