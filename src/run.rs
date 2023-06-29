@@ -31,6 +31,8 @@ fn build(
         state.pools,
     );
 
+    let mut tasks_finished = 0;
+
     // Attempt to rebuild build.ninja.
     let build_file_target = work.lookup(&build_filename);
     if let Some(target) = build_file_target {
@@ -43,8 +45,9 @@ fn build(
                 // a step that doesn't touch build.ninja.  We should instead
                 // verify the specific FileId was updated.
             }
-            Some(_) => {
+            Some(n) => {
                 // Regenerated build.ninja; start over.
+                tasks_finished = n;
                 state = trace::scope("load::read", || load::read(&build_filename))?;
                 work = work::Work::new(
                     state.graph,
@@ -77,8 +80,9 @@ fn build(
         anyhow::bail!("no path specified and no default");
     }
 
-    let ret = trace::scope("work.run", || work.run());
-    ret
+    let tasks = trace::scope("work.run", || work.run())?;
+    // Include any tasks from initial build in final count of steps.
+    Ok(tasks.map(|n| n + tasks_finished))
 }
 
 fn default_parallelism() -> anyhow::Result<usize> {
@@ -129,7 +133,7 @@ struct Args {
 }
 
 fn run_impl() -> anyhow::Result<i32> {
-    let fake_ninja_compat = Path::new(&std::env::args().nth(0).unwrap())
+    let mut fake_ninja_compat = Path::new(&std::env::args().nth(0).unwrap())
         .file_name()
         .unwrap()
         == std::ffi::OsStr::new(&format!("ninja{}", std::env::consts::EXE_SUFFIX));
@@ -143,19 +147,17 @@ fn run_impl() -> anyhow::Result<i32> {
         },
         failures_left: Some(args.keep_going).filter(|&n| n > 0),
         explain: false,
+        adopt: false,
     };
 
-    if args.version {
-        if fake_ninja_compat {
-            println!("1.10.2");
-        } else {
-            println!("{}", env!("CARGO_PKG_VERSION"));
-        }
-        return Ok(0);
+    if let Some(dir) = args.chdir {
+        let dir = Path::new(&dir);
+        std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
     if let Some(debug) = args.debug {
         match debug.as_str() {
+            "ninja_compat" => fake_ninja_compat = true,
             "explain" => options.explain = true,
             "list" => {
                 println!("debug tools:");
@@ -168,6 +170,17 @@ fn run_impl() -> anyhow::Result<i32> {
         }
     }
 
+    if args.version {
+        if fake_ninja_compat {
+            // CMake requires a particular Ninja version.
+            println!("1.10.2");
+            return Ok(0);
+        } else {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+        }
+        return Ok(0);
+    }
+
     if let Some(tool) = args.tool {
         match tool.as_str() {
             "list" => {
@@ -175,18 +188,20 @@ fn run_impl() -> anyhow::Result<i32> {
                 println!("  (none yet, but see README if you're looking here trying to get CMake to work)");
                 return Ok(1);
             }
+            "recompact" if fake_ninja_compat => {
+                // CMake unconditionally invokes this tool, yuck.
+                return Ok(0); // do nothing
+            }
+            "restat" if fake_ninja_compat => {
+                // CMake invokes this after generating build files; mark build
+                // targets as up to date by running the build with "adopt" flag
+                // on.
+                options.adopt = true;
+            }
             _ => {
-                if fake_ninja_compat {
-                    return Ok(0);
-                }
                 anyhow::bail!("unknown -t {:?}, use -t list to list", tool);
             }
         }
-    }
-
-    if let Some(dir) = args.chdir {
-        let dir = Path::new(&dir);
-        std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
     }
 
     match build(options, args.build_file, args.targets, args.verbose)? {

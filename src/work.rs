@@ -286,6 +286,8 @@ pub struct Options {
     pub parallelism: usize,
     /// When true, verbosely explain why targets are considered dirty.
     pub explain: bool,
+    /// When true, just mark targets up to date without running anything.
+    pub adopt: bool,
 }
 
 pub struct Work<'a> {
@@ -294,6 +296,7 @@ pub struct Work<'a> {
     progress: &'a mut dyn Progress,
     failures_left: Option<usize>,
     explain: bool,
+    adopt: bool,
     file_state: FileState,
     last_hashes: Hashes,
     build_states: BuildStates,
@@ -317,6 +320,7 @@ impl<'a> Work<'a> {
             progress,
             failures_left: options.failures_left,
             explain: options.explain,
+            adopt: options.adopt,
             file_state,
             last_hashes,
             build_states: BuildStates::new(build_count, pools),
@@ -690,7 +694,20 @@ impl<'a> Work<'a> {
                     // Not dirty; go directly to the Done state.
                     self.ready_dependents(id);
                 } else {
-                    self.build_states.enqueue(id, self.graph.build(id))?;
+                    if self.adopt {
+                        // Act as if the target already finished.
+                        self.record_finished(
+                            id,
+                            task::TaskResult {
+                                termination: task::Termination::Success,
+                                output: vec![],
+                                discovered_deps: None,
+                            },
+                        )?;
+                        self.ready_dependents(id);
+                    } else {
+                        self.build_states.enqueue(id, self.graph.build(id))?;
+                    }
                 }
                 made_progress = true;
             }

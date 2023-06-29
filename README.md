@@ -20,19 +20,24 @@ $ cargo install --git https://github.com/evmar/n2
 $ n2 -C some/build/dir some-target
 ```
 
-### Replacing Ninja when using CMake
+### Using with CMake
 
 When CMake generates Ninja files it attempts run a program named `ninja` with
-some particular Ninja behaviors. If you have Ninja installed already then things
-will continue to work as before.
+some particular Ninja behaviors. In particular, it attempts to inform Ninja/n2
+that its generated build files are up to date so that the build system doesn't
+attempt to rebuild them.
 
-If you don't have Ninja installed at all, n2 can emulate the expected CMake
-behavior when invoked as `ninja`. To do this you create a symlink named `ninja`
-somewhere in your `$PATH`, such that CMake can discover it.
+n2 can emulate the expected CMake behavior when invoked as `ninja`. To do this
+you create a symlink named `ninja` somewhere in your `$PATH`, such that CMake
+can discover it.
 
 - UNIX: `ln -s path/to/n2 ninja`
 - Windows(cmd): `mklink ninja.exe path\to\n2`
 - Windows(PowerShell): `New-Item -Type Symlink ninja.exe -Target path\to\n2`
+
+> **Warning**\
+> If you don't have Ninja installed at all, you must install such a symlink
+> because CMake attempts to invoke `ninja` itself!
 
 ## The console output
 

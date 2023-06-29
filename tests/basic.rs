@@ -72,7 +72,7 @@ EOT
     // Run: expect to regenerate because we don't know how the file was made.
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "regenerating build.ninja");
-    assert_output_contains(&out, "ran 1 task");
+    assert_output_contains(&out, "ran 2 tasks");
 
     // Run: everything should be up to date.
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
@@ -109,7 +109,7 @@ EOT
     // Run: expect to regenerate because we don't know how the file was made.
     let out = space.run_expect(&mut n2_command(vec!["-f", "specified_build.ninja", "out"]))?;
     assert_output_contains(&out, "regenerating specified_build.ninja");
-    assert_output_contains(&out, "ran 1 task");
+    assert_output_contains(&out, "ran 2 tasks");
 
     // Run: everything should be up to date.
     let out = space.run_expect(&mut n2_command(vec!["-f", "specified_build.ninja", "out"]))?;
@@ -310,6 +310,36 @@ fn explain() -> anyhow::Result<()> {
     // The dump of the file manifest after includes mtimes that we don't want
     // to be sensitive to, so just look for some bits we know show up there.
     assert_output_contains(&out, "discovered:");
+
+    Ok(())
+}
+
+#[test]
+fn restat() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[TOUCH_RULE, "build build.ninja: touch in", ""].join("\n"),
+    )?;
+    space.write("in", "")?;
+
+    let out = space.run_expect(&mut n2_command(vec![
+        "-d",
+        "ninja_compat",
+        "-t",
+        "restat",
+        "build.ninja",
+    ]))?;
+    assert_output_not_contains(&out, "touch build.ninja");
+
+    // Building the build file should do nothing, because restat marked it up to date.
+    let out = space.run_expect(&mut n2_command(vec!["build.ninja"]))?;
+    assert_output_not_contains(&out, "touch build.ninja");
+
+    // But modifying the input should cause it to be up to date.
+    space.write("in", "")?;
+    let out = space.run_expect(&mut n2_command(vec!["build.ninja"]))?;
+    assert_output_contains(&out, "touch build.ninja");
 
     Ok(())
 }
