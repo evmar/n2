@@ -121,6 +121,34 @@ EOT
 
 #[cfg(unix)]
 #[test]
+fn generate_build_file_failure() -> anyhow::Result<()> {
+    // Run a project where a build rule generates the build.ninja but it fails.
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            TOUCH_RULE,
+            "build out: touch",
+            "
+rule regen
+  command = sh ./gen.sh
+  generator = 1",
+            "build build.ninja: regen gen.sh",
+            "",
+        ]
+        .join("\n"),
+    )?;
+    space.write("gen.sh", "exit 1")?;
+
+    // Run: regenerate and fail.
+    let out = space.run(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "failed:");
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn generate_rsp_file() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
