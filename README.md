@@ -5,8 +5,8 @@
 
 n2 (pronounced "into") implements enough of [Ninja](https://ninja-build.org/) to
 successfully build some projects that build with Ninja. Compared to Ninja, n2
-missing some features but is faster to build and has a better UI; see [a
-more detailed comparison](doc/comparison.md).
+missing some features but is faster to build and has a better UI; see
+[a more detailed comparison](doc/comparison.md).
 
 > [Here's a small demo](https://asciinema.org/a/F2E7a6nX4feoSSWVI4oFAm21T) of n2
 > building some of Clang.
@@ -44,9 +44,9 @@ The bar shows three categories of state:
 - **Done:** The `=` signs show the build steps that are already up to date.
 - **In progress:** The `-` signs show steps that are in-progress; if you had
   enough CPUs they would all be executing. The `8/930 running` after shows that
-  n2 is   currently executing 8 of the 930 available steps.
-- **Unknown:** The remaining empty space indicates steps whose status is yet
-  to be known, as they depend on the in progress steps.  For example, if an
+  n2 is currently executing 8 of the 930 available steps.
+- **Unknown:** The remaining empty space indicates steps whose status is yet to
+  be known, as they depend on the in progress steps. For example, if an
   intermediate step doesn't write its outputs n2 may not need to execute the
   dependent steps.
 
