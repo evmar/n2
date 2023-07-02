@@ -30,9 +30,18 @@ mod windows {
         unsafe {
             let handle =
                 winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
-            let mut out = 0;
+            let mut mode = 0;
             // Note: GetConsoleMode itself fails when not attached to a console.
-            winapi::um::consoleapi::GetConsoleMode(handle, &mut out) != 0
+            let ok = winapi::um::consoleapi::GetConsoleMode(handle, &mut mode) != 0;
+            if ok {
+                // Enable terminal processing so we can overwrite previous content.
+                // Ignore errors.
+                _ = winapi::um::consoleapi::SetConsoleMode(
+                    handle,
+                    mode | winapi::um::wincon::ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+                );
+            }
+            ok
         }
     }
 
