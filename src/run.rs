@@ -33,9 +33,12 @@ fn build(
 
     let mut tasks_finished = 0;
 
-    // Attempt to rebuild build.ninja.
     let build_file_target = work.lookup(&build_filename);
+    // Attempt to rebuild build.ninja.
     if let Some(target) = build_file_target {
+        if state.fresh {
+            work.adopt = true;
+        }
         work.want_file(target)?;
         match trace::scope("work.run", || work.run())? {
             None => return Ok(None),

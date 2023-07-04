@@ -185,6 +185,8 @@ impl Loader {
 /// State loaded by read().
 pub struct State {
     pub graph: graph::Graph,
+    /// True if we think this is the first time n2 has been run for this build directory.
+    pub fresh: bool,
     pub db: db::Writer,
     pub hashes: graph::Hashes,
     pub default: Vec<FileId>,
@@ -199,12 +201,13 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
         loader.read_file(id)
     })?;
     let mut hashes = graph::Hashes::default();
-    let db = trace::scope("db::open", || {
+    let (fresh, db) = trace::scope("db::open", || {
         db::open(".n2_db", &mut loader.graph, &mut hashes)
     })
     .map_err(|err| anyhow!("load .n2_db: {}", err))?;
     Ok(State {
         graph: loader.graph,
+        fresh,
         db,
         hashes,
         default: loader.default,

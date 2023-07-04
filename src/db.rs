@@ -333,7 +333,8 @@ impl<'a> Reader<'a> {
 }
 
 /// Opens or creates an on-disk database, loading its state into the provided Graph.
-pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
+/// Returns (fresh, Writer) where "fresh" is true when this is the first n2 run.
+pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<(bool, Writer)> {
     match std::fs::OpenOptions::new()
         .read(true)
         .append(true)
@@ -341,11 +342,11 @@ pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Resul
     {
         Ok(mut f) => {
             let ids = Reader::read(&mut f, graph, hashes)?;
-            Ok(Writer::from_opened(ids, f))
+            Ok((false, Writer::from_opened(ids, f)))
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let w = Writer::create(path)?;
-            Ok(w)
+            Ok((true, w))
         }
         Err(err) => Err(anyhow!(err)),
     }
