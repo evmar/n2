@@ -204,7 +204,7 @@ fn explain() -> anyhow::Result<()> {
     space.write("in", "")?;
     let out = space.run_expect(&mut n2_command(vec!["-d", "explain", "out"]))?;
     // The main "explain" log line:
-    assert_output_contains(&out, "explain: build.ninja:5: input changed");
+    assert_output_contains(&out, "explain: build.ninja:6: input changed");
     // The dump of the file manifest after includes mtimes that we don't want
     // to be sensitive to, so just look for some bits we know show up there.
     assert_output_contains(&out, "discovered:");

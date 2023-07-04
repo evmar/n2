@@ -94,14 +94,19 @@ impl TestSpace {
     }
 }
 
+// Ensure TOUCH_RULE has the same description and number of lines of text
+// on Windows/non-Windows to make tests agnostic to platform.
+
 #[cfg(unix)]
 pub const TOUCH_RULE: &str = "
 rule touch
   command = touch $out
+  description = touch $out
 ";
 
 #[cfg(windows)]
 pub const TOUCH_RULE: &str = "
 rule touch
   command = cmd /c type nul > $out
+  description = touch $out
 ";

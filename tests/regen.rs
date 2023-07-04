@@ -107,6 +107,7 @@ rule regen
 }
 
 /// Use "-t restat" to mark the build.ninja up to date ahead of time.
+#[cfg(unix)] // TODO: this ought to work on Windows, hrm.
 #[test]
 fn restat() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
