@@ -9,8 +9,8 @@ keywords = ["ninja", "build"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/evmar/n2"
-# const Mutex::new
-rust-version = "1.63"
+# std::thread::available_parallelism
+rust-version = "1.59"
 description = "a ninja compatible build system"
 
 [dependencies]
