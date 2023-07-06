@@ -1,7 +1,3 @@
-//! Integration test.  Runs n2 binary against a temp directory.
-
-mod e2e;
-
 use crate::e2e::*;
 
 #[test]

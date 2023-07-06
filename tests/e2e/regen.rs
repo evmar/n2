@@ -1,7 +1,5 @@
 //! Tests around regenerating the build.ninja file.
 
-mod e2e;
-
 use crate::e2e::*;
 
 #[cfg(unix)]

@@ -1,6 +1,7 @@
 //! Support code for e2e tests, which run n2 as a binary.
 
-#![allow(dead_code)] // used by separate test crates
+mod basic;
+mod regen;
 
 pub fn n2_binary() -> std::path::PathBuf {
     std::env::current_exe()
