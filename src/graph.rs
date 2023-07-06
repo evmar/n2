@@ -195,11 +195,6 @@ impl Build {
         &self.ins.ids[0..(self.ins.explicit + self.ins.implicit)]
     }
 
-    /// Order-only inputs: inputs that are only used for ordering execution.
-    pub fn order_only_ins(&self) -> &[FileId] {
-        &self.ins.ids[(self.ins.explicit + self.ins.implicit)..]
-    }
-
     /// Inputs that are needed before building.
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
     /// Note that we don't order on discovered_ins, because they're not allowed to

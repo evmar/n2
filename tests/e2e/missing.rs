@@ -33,11 +33,33 @@ fn missing_generated() -> anyhow::Result<()> {
         .join("\n"),
     )?;
 
-    let out = space.run(&mut n2_command(vec!["out"]))?;
-    assert_output_contains(&out, "input mid missing");
-
-    // TODO: we'll need to revisit this behavior to fix
     // https://github.com/evmar/n2/issues/69
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "echo mid");
+    assert_output_contains(&out, "touch out");
+
+    Ok(())
+}
+
+#[test]
+fn missing_phony() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            TOUCH_RULE,
+            "build order_only: phony",        // never writes output
+            "build out: touch || order_only", // uses never-written output
+            "",
+        ]
+        .join("\n"),
+    )?;
+
+    // https://github.com/evmar/n2/issues/69
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "touch out");
 
     Ok(())
 }
