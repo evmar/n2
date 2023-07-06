@@ -17,10 +17,6 @@ mod terminal;
 mod trace;
 mod work;
 
-#[cfg(unix)]
-#[macro_use]
-extern crate lazy_static;
-
 #[cfg(not(any(windows, target_arch = "wasm32")))]
 use jemallocator::Jemalloc;
 

@@ -97,9 +97,7 @@ fn run_task(
 }
 
 #[cfg(unix)]
-lazy_static! {
-    static ref TASK_MUTEX: Mutex<i32> = Mutex::new(0);
-}
+static TASK_MUTEX: Mutex<()> = Mutex::new(());
 
 #[cfg(unix)]
 fn run_command(cmdline: &str) -> anyhow::Result<TaskResult> {
