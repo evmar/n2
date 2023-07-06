@@ -356,7 +356,7 @@ impl FileState {
         *self.0.lookup(id).unwrap_or(&None)
     }
 
-    pub fn restat(&mut self, id: FileId, path: &Path) -> std::io::Result<MTime> {
+    pub fn stat(&mut self, id: FileId, path: &Path) -> std::io::Result<MTime> {
         let mtime = stat(path)?;
         self.0.set_grow(id, Some(mtime), None);
         Ok(mtime)
