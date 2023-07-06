@@ -1,6 +1,7 @@
 //! Support code for e2e tests, which run n2 as a binary.
 
 mod basic;
+mod missing;
 mod regen;
 
 pub fn n2_binary() -> std::path::PathBuf {
