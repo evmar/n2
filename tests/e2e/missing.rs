@@ -3,7 +3,21 @@
 use super::*;
 
 #[test]
-fn missing_intermediate() -> anyhow::Result<()> {
+fn missing_input() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[TOUCH_RULE, "build out: touch in", ""].join("\n"),
+    )?;
+
+    let out = space.run(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "input in missing");
+
+    Ok(())
+}
+
+#[test]
+fn missing_generated() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
