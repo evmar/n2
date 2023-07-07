@@ -6,7 +6,10 @@ pub use crate::process_posix::run_command;
 pub use crate::process_win::run_command;
 
 #[cfg(target_arch = "wasm32")]
-fn run_command(cmdline: &str) -> anyhow::Result<(Termination, Vec<u8>)> {
+fn run_command(
+    cmdline: &str,
+    mut output_cb: impl FnMut(&[u8]),
+) -> anyhow::Result<(Termination, Vec<u8>)> {
     anyhow::bail!("wasm cannot run commands");
 }
 

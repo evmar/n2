@@ -69,7 +69,10 @@ fn run_task(
     if let Some(rspfile) = rspfile {
         write_rspfile(rspfile)?;
     }
-    let (termination, output) = process::run_command(cmdline)?;
+    let mut output = Vec::new();
+    let termination = process::run_command(cmdline, |buf| {
+        output.extend_from_slice(buf);
+    })?;
     let mut discovered_deps = None;
     if termination == process::Termination::Success {
         if let Some(depfile) = depfile {

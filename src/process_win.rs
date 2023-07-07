@@ -37,7 +37,10 @@ fn zeroed_process_information() -> winapi::um::processthreadsapi::PROCESS_INFORM
     }
 }
 
-pub fn run_command(cmdline: &str) -> anyhow::Result<(Termination, Vec<u8>)> {
+pub fn run_command(
+    cmdline: &str,
+    mut output_cb: impl FnMut(&[u8]),
+) -> anyhow::Result<(Termination, Vec<u8>)> {
     // Don't want to run `cmd /c` since that limits cmd line length to 8192 bytes.
     // std::process::Command can't take a string and pass it through to CreateProcess unchanged,
     // so call that ourselves.
@@ -93,15 +96,11 @@ pub fn run_command(cmdline: &str) -> anyhow::Result<(Termination, Vec<u8>)> {
         winapi::um::handleapi::CloseHandle(process_info.hProcess);
     }
 
-    let output = Vec::new();
-    // TODO: Set up pipes so that we can print the process's output.
-    //output.append(&mut cmd.stdout);
-    //output.append(&mut cmd.stderr);
     let termination = match exit_code {
         0 => Termination::Success,
         0xC000013A => Termination::Interrupted,
         _ => Termination::Failure,
     };
 
-    Ok((termination, output))
+    Ok(termination)
 }

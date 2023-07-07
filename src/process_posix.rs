@@ -3,7 +3,6 @@
 
 use crate::process::Termination;
 use std::io::Read;
-use std::io::Write;
 use std::os::fd::FromRawFd;
 use std::os::unix::process::ExitStatusExt;
 
@@ -59,7 +58,7 @@ impl Drop for PosixSpawnFileActions {
     }
 }
 
-pub fn run_command(cmdline: &str) -> anyhow::Result<(Termination, Vec<u8>)> {
+pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::Result<Termination> {
     // Spawn the subprocess using posix_spawn with output redirected to the pipe.
     // We don't use Rust's process spawning because of issue #14 and because
     // we want to feed both stdout and stderr into the same pipe, which cannot
@@ -103,8 +102,14 @@ pub fn run_command(cmdline: &str) -> anyhow::Result<(Termination, Vec<u8>)> {
         (pid, std::fs::File::from_raw_fd(pipe[0]))
     };
 
-    let mut output = Vec::new();
-    pipe.read_to_end(&mut output)?;
+    let mut buf: [u8; 4 << 10] = [0; 4 << 10];
+    loop {
+        let n = pipe.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        output_cb(&buf[0..n]);
+    }
 
     let status = unsafe {
         let mut status: i32 = 0;
@@ -118,13 +123,13 @@ pub fn run_command(cmdline: &str) -> anyhow::Result<(Termination, Vec<u8>)> {
         if let Some(sig) = status.signal() {
             match sig {
                 libc::SIGINT => {
-                    write!(output, "interrupted").unwrap();
+                    output_cb("interrupted".as_bytes());
                     termination = Termination::Interrupted;
                 }
-                _ => write!(output, "signal {}", sig).unwrap(),
+                _ => output_cb(format!("signal {}", sig).as_bytes()),
             }
         }
     }
 
-    Ok((termination, output))
+    Ok(termination)
 }
