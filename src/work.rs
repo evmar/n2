@@ -1,8 +1,8 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::{
-    canon::canon_path, db, densemap::DenseMap, graph::*, hash, progress, progress::Progress,
-    signal, smallmap::SmallMap, task, trace,
+    canon::canon_path, db, densemap::DenseMap, graph::*, hash, process, progress,
+    progress::Progress, signal, smallmap::SmallMap, task, trace,
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -665,7 +665,7 @@ impl<'a> Work<'a> {
                         self.record_finished(
                             id,
                             task::TaskResult {
-                                termination: task::Termination::Success,
+                                termination: process::Termination::Success,
                                 output: vec![],
                                 discovered_deps: None,
                             },
@@ -700,7 +700,7 @@ impl<'a> Work<'a> {
             self.progress
                 .task_state(task.buildid, build, Some(&task.result));
             match task.result.termination {
-                task::Termination::Failure => {
+                process::Termination::Failure => {
                     if let Some(failures_left) = &mut self.failures_left {
                         *failures_left -= 1;
                         if *failures_left == 0 {
@@ -711,11 +711,11 @@ impl<'a> Work<'a> {
                     self.build_states
                         .set(task.buildid, build, BuildState::Failed);
                 }
-                task::Termination::Interrupted => {
+                process::Termination::Interrupted => {
                     // If the task was interrupted bail immediately.
                     return Ok(None);
                 }
-                task::Termination::Success => {
+                process::Termination::Success => {
                     tasks_done += 1;
                     self.record_finished(task.buildid, task.result)?;
                     self.ready_dependents(task.buildid);
