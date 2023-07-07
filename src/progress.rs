@@ -2,8 +2,8 @@
 //! user.
 
 use crate::{
-    graph::Build, graph::BuildId, task::TaskResult, task::Termination, terminal, work::BuildState,
-    work::StateCounts,
+    graph::Build, graph::BuildId, process::Termination, task::TaskResult, terminal,
+    work::BuildState, work::StateCounts,
 };
 use std::collections::VecDeque;
 use std::io::Write;

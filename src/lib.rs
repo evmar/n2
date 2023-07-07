@@ -7,6 +7,11 @@ mod graph;
 mod hash;
 mod load;
 mod parse;
+mod process;
+#[cfg(unix)]
+mod process_posix;
+#[cfg(windows)]
+mod process_win;
 mod progress;
 pub mod run;
 mod scanner;
