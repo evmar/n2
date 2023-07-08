@@ -18,6 +18,7 @@ pub fn build_message(build: &Build) -> &str {
     build
         .desc
         .as_ref()
+        .filter(|desc| !desc.is_empty())
         .unwrap_or_else(|| build.cmdline.as_ref().unwrap())
 }
 
