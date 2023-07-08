@@ -288,23 +288,20 @@ impl FancyState {
                 + self.counts.get(BuildState::Ready),
         ));
         println!("{}", progress_line);
+        let mut lines = 1;
 
         let max_cols = terminal::get_cols().unwrap_or(80);
-        let mut lines = 1;
-        let max_lines = 8;
+        let max_tasks = 8;
         let now = Instant::now();
-        for task in self.tasks.iter().take(max_lines) {
-            if lines == max_lines && self.tasks.len() > max_lines {
-                println!("...and {} more", self.tasks.len() - max_lines + 1);
-            } else {
-                let delta = now.duration_since(task.start).as_secs();
-                let line = format!("{}s {}", delta, task.message);
-                if line.len() >= max_cols {
-                    println!("{}...", &line[0..max_cols - 4]);
-                } else {
-                    println!("{}", line);
-                }
-            }
+        for task in self.tasks.iter().take(max_tasks) {
+            let delta = now.duration_since(task.start).as_secs() as usize;
+            println!("{}", task_message(&task.message, delta, max_cols));
+            lines += 1;
+        }
+
+        if self.tasks.len() > max_tasks {
+            let remaining = self.tasks.len() - max_tasks;
+            println!("...and {} more", remaining);
             lines += 1;
         }
 
@@ -312,6 +309,23 @@ impl FancyState {
         print!("\x1b[{}A", lines);
         self.dirty = false;
     }
+}
+
+/// Format a task's status message to optionally include how long it has been running
+/// and also to fit within a maximum number of terminal columns.
+fn task_message(message: &str, seconds: usize, max_cols: usize) -> String {
+    let time_note = if seconds > 2 {
+        format!(" ({}s)", seconds)
+    } else {
+        "".into()
+    };
+    let mut out = message.to_owned();
+    if out.len() + time_note.len() >= max_cols {
+        out.truncate(max_cols - time_note.len() - 3);
+        out.push_str("...");
+    }
+    out.push_str(&time_note);
+    out
 }
 
 /// Render a StateCounts as an ASCII progress bar.
@@ -382,5 +396,18 @@ mod tests {
         counts.add(BuildState::Want, -1);
         counts.add(BuildState::Ready, 1);
         assert_eq!(progress_bar(&counts, 10), "=---------");
+    }
+
+    #[test]
+    fn task_rendering() {
+        assert_eq!(task_message("building foo.o", 0, 80), "building foo.o");
+        assert_eq!(task_message("building foo.o", 0, 10), "buildin...");
+        assert_eq!(task_message("building foo.o", 0, 5), "bu...");
+    }
+
+    #[test]
+    fn task_rendering_with_time() {
+        assert_eq!(task_message("building foo.o", 5, 80), "building foo.o (5s)");
+        assert_eq!(task_message("building foo.o", 5, 10), "bu... (5s)");
     }
 }
