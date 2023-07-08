@@ -6,6 +6,12 @@ use std::io::Read;
 use std::os::fd::FromRawFd;
 use std::os::unix::process::ExitStatusExt;
 
+// https://github.com/rust-lang/libc/issues/2520
+// libc crate doesn't expose the 'environ' pointer.
+extern "C" {
+    static environ: *const *mut libc::c_char;
+}
+
 fn check_posix(func: &str, ret: libc::c_int) -> anyhow::Result<()> {
     if ret < 0 {
         let err_str = unsafe { std::ffi::CStr::from_ptr(libc::strerror(ret)) };
@@ -93,7 +99,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
                 actions.as_ptr(),
                 std::ptr::null(),
                 std::mem::transmute(&argv),
-                std::ptr::null(),
+                environ,
             ),
         )?;
 
