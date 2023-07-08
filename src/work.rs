@@ -37,9 +37,11 @@ pub enum BuildState {
     Failed,
 }
 
-// Counters that track number of builds in each state.
-// Only covers builds not in the "unknown" state, which means it's only builds
-// that are considered part of the current build.
+/// Counters that track builds in each state, excluding phony builds.
+/// This is only for display to the user and should not be used as a source of
+/// truth for tracking progress.
+/// Only covers builds not in the "unknown" state, which means it's only builds
+/// that are considered part of the current build.
 #[derive(Clone, Debug, Default)]
 pub struct StateCounts([usize; 6]);
 impl StateCounts {
@@ -94,8 +96,12 @@ impl PoolState {
 struct BuildStates {
     states: DenseMap<BuildId, BuildState>,
 
-    // Counts of builds in each state.
+    /// Counts of builds in each state.
     counts: StateCounts,
+
+    /// Total number of builds that haven't been driven to completion
+    /// (done or failed).
+    total_pending: usize,
 
     /// Builds in the ready state, stored redundantly for quick access.
     ready: VecDeque<BuildId>,
@@ -118,6 +124,7 @@ impl BuildStates {
         BuildStates {
             states: DenseMap::new_sized(size, BuildState::Unknown),
             counts: StateCounts::default(),
+            total_pending: 0,
             ready: VecDeque::new(),
             pools,
         }
@@ -128,19 +135,25 @@ impl BuildStates {
     }
 
     fn set(&mut self, id: BuildId, build: &Build, state: BuildState) {
-        let mprev = self.states.get_mut(id);
-        let prev = *mprev;
-        // println!("{:?} {:?}=>{:?}", id, prev, state);
-        *mprev = state;
-        match prev {
-            BuildState::Running => {
+        // This function is called on all state transitions.
+        // We get 'prev', the previous state, and 'state', the new state.
+        let prev = std::mem::replace(self.states.get_mut(id), state);
+
+        // We skip user-facing counters for phony builds.
+        let skip_ui_count = build.cmdline.is_none();
+
+        // println!("{:?} {:?}=>{:?} {:?}", id, prev, state, self.counts);
+        if prev == BuildState::Unknown {
+            self.total_pending += 1;
+        } else {
+            if prev == BuildState::Running {
                 self.get_pool(build).unwrap().running -= 1;
             }
-            _ => {}
-        };
-        if prev != BuildState::Unknown {
-            self.counts.add(prev, -1);
+            if !skip_ui_count {
+                self.counts.add(prev, -1);
+            }
         }
+
         match state {
             BuildState::Ready => {
                 self.ready.push_back(id);
@@ -153,9 +166,15 @@ impl BuildStates {
                 // }
                 self.get_pool(build).unwrap().running += 1;
             }
+            BuildState::Done | BuildState::Failed => {
+                self.total_pending -= 1;
+            }
             _ => {}
         };
-        self.counts.add(state, 1);
+        if !skip_ui_count {
+            self.counts.add(state, 1);
+        }
+
         /*
         This is too expensive to log on every individual state change...
         trace::if_enabled(|t| {
@@ -174,10 +193,7 @@ impl BuildStates {
     }
 
     fn unfinished(&self) -> bool {
-        self.counts.get(BuildState::Want) > 0
-            || self.counts.get(BuildState::Ready) > 0
-            || self.counts.get(BuildState::Running) > 0
-            || self.counts.get(BuildState::Queued) > 0
+        self.total_pending > 0
     }
 
     /// Visits a BuildId that is an input to the desired output.
