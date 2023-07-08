@@ -479,7 +479,8 @@ impl<'a> Work<'a> {
             if !self.recheck_ready(id) {
                 continue;
             }
-            self.build_states.set(id, build, BuildState::Ready);
+            self.build_states
+                .set(id, self.graph.build(id), BuildState::Ready);
         }
     }
 
