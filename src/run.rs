@@ -123,6 +123,11 @@ struct Args {
     #[argh(switch, hidden_help)]
     version: bool,
 
+    /// compdb flag (required by meson)
+    #[allow(dead_code)]
+    #[argh(switch, short = 'x', hidden_help)]
+    expand_rspfile: bool,
+
     /// print executed command lines
     #[argh(switch, short = 'v')]
     verbose: bool,
@@ -187,6 +192,10 @@ fn run_impl() -> anyhow::Result<i32> {
                 println!("subcommands:");
                 println!("  (none yet, but see README if you're looking here trying to get CMake to work)");
                 return Ok(1);
+            }
+            "compdb" if fake_ninja_compat => {
+                // meson wants to invoke this tool.
+                return Ok(0); // do nothing; TODO
             }
             "recompact" if fake_ninja_compat => {
                 // CMake unconditionally invokes this tool, yuck.

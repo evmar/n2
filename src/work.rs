@@ -603,7 +603,7 @@ impl<'a> Work<'a> {
         if prev_hash != hash {
             if self.explain {
                 self.progress
-                    .log(&format!("explain: {}: input changed", build.location));
+                    .log(&format!("explain: {}: manifest changed", build.location));
                 self.progress.log(&hash::explain_hash_build(
                     &self.graph,
                     &self.file_state,
