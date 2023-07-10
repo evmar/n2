@@ -30,11 +30,12 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
 
         let mut process_info =
             std::mem::zeroed::<winapi::um::processthreadsapi::PROCESS_INFORMATION>();
-        let mut mut_cmdline = cmdline.to_string() + "\0";
+        let mut cmdline_nul: Vec<u8> = String::from(cmdline).into_bytes();
+        cmdline_nul.push(0);
 
         if winapi::um::processthreadsapi::CreateProcessA(
             std::ptr::null_mut(),
-            mut_cmdline.as_mut_ptr() as *mut i8,
+            cmdline_nul.as_mut_ptr() as *mut i8,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             /*inherit handles = */ winapi::shared::ntdef::TRUE.into(),
