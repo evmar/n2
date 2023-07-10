@@ -54,6 +54,11 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
         let mut startup_info = zeroed_startupinfo();
         startup_info.cb = std::mem::size_of::<winapi::um::processthreadsapi::STARTUPINFOA>() as u32;
         startup_info.dwFlags = winapi::um::winbase::STARTF_USESTDHANDLES;
+        startup_info.hStdInput =
+            winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+        startup_info.hStdOutput =
+            winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
+        startup_info.hStdError = startup_info.hStdOutput;
 
         let mut process_info = zeroed_process_information();
 

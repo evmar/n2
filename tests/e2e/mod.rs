@@ -112,3 +112,17 @@ rule touch
   command = cmd /c type nul > $out
   description = touch $out
 ";
+
+#[cfg(unix)]
+pub const ECHO_RULE: &str = "
+rule echo
+  command = echo $out
+  description = echo $out
+";
+
+#[cfg(windows)]
+pub const ECHO_RULE: &str = "
+rule echo
+  command = cmd /c echo $out
+  description = echo $out
+";

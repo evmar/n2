@@ -23,9 +23,7 @@ fn missing_generated() -> anyhow::Result<()> {
         "build.ninja",
         &[
             TOUCH_RULE,
-            "rule echo
-  command = echo $out
-",
+            ECHO_RULE,
             "build mid: echo",      // never writes output
             "build out: touch mid", // uses never-written output
             "",
