@@ -5,6 +5,43 @@ extern crate winapi;
 
 use crate::process::Termination;
 
+/// Wrapper for PROCESS_INFORMATION that cleans up on Drop.
+struct ProcessInformation(winapi::um::processthreadsapi::PROCESS_INFORMATION);
+
+impl ProcessInformation {
+    fn new() -> Self {
+        Self(unsafe { std::mem::zeroed() })
+    }
+    fn as_mut_ptr(&mut self) -> winapi::um::processthreadsapi::LPPROCESS_INFORMATION {
+        &mut self.0
+    }
+}
+
+impl std::ops::Deref for ProcessInformation {
+    type Target = winapi::um::processthreadsapi::PROCESS_INFORMATION;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for ProcessInformation {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl Drop for ProcessInformation {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.hProcess.is_null() {
+                winapi::um::handleapi::CloseHandle(self.hProcess);
+            }
+            if !self.hThread.is_null() {
+                winapi::um::handleapi::CloseHandle(self.hThread);
+            }
+        }
+    }
+}
+
 #[allow(non_snake_case)]
 fn GetLastError() -> u32 {
     unsafe { winapi::um::errhandlingapi::GetLastError() }
@@ -28,8 +65,8 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
             winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
         startup_info.hStdError = startup_info.hStdOutput;
 
-        let mut process_info =
-            std::mem::zeroed::<winapi::um::processthreadsapi::PROCESS_INFORMATION>();
+        let mut process_info = ProcessInformation::new();
+
         let mut cmdline_nul: Vec<u8> = String::from(cmdline).into_bytes();
         cmdline_nul.push(0);
 
@@ -43,14 +80,10 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             &mut startup_info,
-            &mut process_info,
+            process_info.as_mut_ptr(),
         ) == 0
         {
             anyhow::bail!("{}: {}", "CreateProcessA", GetLastError());
-        }
-
-        if winapi::um::handleapi::CloseHandle(process_info.hThread) == 0 {
-            anyhow::bail!("{}: {}", "CloseHandle", GetLastError());
         }
 
         if winapi::um::synchapi::WaitForSingleObject(
@@ -68,9 +101,6 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
             anyhow::bail!("{}: {}", "GetExitCodeProcess", GetLastError());
         }
 
-        if winapi::um::handleapi::CloseHandle(process_info.hProcess) == 0 {
-            anyhow::bail!("{}: {}", "CloseHandle", GetLastError());
-        }
         exit_code
     };
 
