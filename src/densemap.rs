@@ -22,6 +22,20 @@ impl<K, V> Default for DenseMap<K, V> {
     }
 }
 
+impl<K: Index, V> std::ops::Index<K> for DenseMap<K, V> {
+    type Output = V;
+
+    fn index(&self, k: K) -> &Self::Output {
+        &self.vec[k.index()]
+    }
+}
+
+impl<K: Index, V> std::ops::IndexMut<K> for DenseMap<K, V> {
+    fn index_mut(&mut self, k: K) -> &mut Self::Output {
+        &mut self.vec[k.index()]
+    }
+}
+
 impl<K: Index, V> DenseMap<K, V> {
     pub fn get(&self, k: K) -> &V {
         &self.vec[k.index()]

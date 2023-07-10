@@ -158,7 +158,7 @@ impl Writer {
         id: BuildId,
         hash: BuildHash,
     ) -> std::io::Result<()> {
-        let build = graph.build(id);
+        let build = &graph.builds[id];
         let mut buf = WriteBuf::new();
         let outs = build.outs();
         let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
@@ -279,7 +279,7 @@ impl<'a> Reader<'a> {
         // unique_bid is set here if this record is valid.
         if let Some(id) = unique_bid {
             // Common case: only one associated build.
-            self.graph.build_mut(id).set_discovered_ins(deps);
+            self.graph.builds[id].set_discovered_ins(deps);
             self.hashes.set(id, hash);
         }
         Ok(())

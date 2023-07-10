@@ -309,15 +309,6 @@ impl Graph {
         self.builds.push(build);
         Ok(())
     }
-
-    /// Look up a Build by BuildId.
-    pub fn build(&self, id: BuildId) -> &Build {
-        self.builds.get(id)
-    }
-    /// Look up a Build by BuildId.
-    pub fn build_mut(&mut self, id: BuildId) -> &mut Build {
-        self.builds.get_mut(id)
-    }
 }
 
 /// MTime info gathered for a file.  This also models "file is absent".

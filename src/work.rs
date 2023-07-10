@@ -208,7 +208,7 @@ impl BuildStates {
             return Ok(()); // Already visited.
         }
 
-        let build = graph.build(id);
+        let build = &graph.builds[id];
         self.set(id, build, BuildState::Want);
 
         // Any Build that doesn't depend on an output of another Build is ready.
@@ -356,7 +356,7 @@ impl<'a> Work<'a> {
     /// Check whether a given build is ready, generally after one of its inputs
     /// has been updated.
     fn recheck_ready(&self, id: BuildId) -> bool {
-        let build = self.graph.build(id);
+        let build = &self.graph.builds[id];
         // println!("recheck {:?} {} ({}...)", id, build.location, self.graph.file(build.outs()[0]).name);
         for &id in build.ordering_ins() {
             let file = self.graph.file(id);
@@ -385,7 +385,7 @@ impl<'a> Work<'a> {
         id: BuildId,
         discovered: bool,
     ) -> anyhow::Result<Option<FileId>> {
-        let build = self.graph.build(id);
+        let build = &self.graph.builds[id];
         let ids = if discovered {
             build.discovered_ins()
         } else {
@@ -434,20 +434,20 @@ impl<'a> Work<'a> {
                 .map(|name| self.graph.file_id(canon_path(name)))
                 .collect(),
         };
-        let deps_changed = self.graph.build_mut(id).update_discovered(deps);
+        let deps_changed = self.graph.builds[id].update_discovered(deps);
 
         // We may have discovered new deps, so ensure we have mtimes for those.
         if deps_changed {
             if let Some(missing) = self.ensure_input_files(id, true)? {
                 anyhow::bail!(
                     "{} depfile references nonexistent {}",
-                    self.graph.build(id).location,
+                    self.graph.builds[id].location,
                     self.graph.file(missing).name
                 );
             }
         }
 
-        let build = self.graph.build(id);
+        let build = &self.graph.builds[id];
 
         let input_was_missing = build
             .dirtying_ins()
@@ -479,7 +479,7 @@ impl<'a> Work<'a> {
 
     /// Given a build that just finished, check whether its dependent builds are now ready.
     fn ready_dependents(&mut self, id: BuildId) {
-        let build = self.graph.build(id);
+        let build = &self.graph.builds[id];
         self.build_states.set(id, build, BuildState::Done);
 
         let mut dependents = HashSet::new();
@@ -496,7 +496,7 @@ impl<'a> Work<'a> {
                 continue;
             }
             self.build_states
-                .set(id, self.graph.build(id), BuildState::Ready);
+                .set(id, &self.graph.builds[id], BuildState::Ready);
         }
     }
 
@@ -507,7 +507,7 @@ impl<'a> Work<'a> {
     /// Otherwise returns the missing id if any expected but not required files,
     /// e.g. outputs, are missing, implying that the build needs to be executed.
     fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
-        let phony = self.graph.build(id).cmdline.is_none();
+        let phony = self.graph.builds[id].cmdline.is_none();
         // TODO: do we just return true immediately if phony?
         // There are likely weird interactions with builds that depend on
         // a phony output, despite that not really making sense.
@@ -525,7 +525,7 @@ impl<'a> Work<'a> {
         if let Some(missing) = self.ensure_input_files(id, false)? {
             let file = self.graph.file(missing);
             if file.input.is_none() && !workaround_missing_phony_deps {
-                let build = self.graph.build(id);
+                let build = &self.graph.builds[id];
                 anyhow::bail!("{}: input {} missing", build.location, file.name);
             }
             return Ok(Some(missing));
@@ -539,7 +539,7 @@ impl<'a> Work<'a> {
         // and if we're checking if it's dirty we are visiting it the first
         // time, so we stat unconditionally.
         // This is looking at if the outputs are already present.
-        for &id in self.graph.build(id).outs() {
+        for &id in self.graph.builds[id].outs() {
             let file = self.graph.file(id);
             if self.file_state.get(id).is_some() {
                 panic!("expected no file state for {}", file.name);
@@ -559,7 +559,7 @@ impl<'a> Work<'a> {
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let file_missing = self.check_build_files_missing(id)?;
 
-        let build = self.graph.build(id);
+        let build = &self.graph.builds[id];
 
         // A phony build can never be dirty.
         let phony = build.cmdline.is_none();
@@ -659,7 +659,7 @@ impl<'a> Work<'a> {
                     Some(id) => id,
                     None => break,
                 };
-                let build = self.graph.build(id);
+                let build = &self.graph.builds[id];
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
                 self.runner.start(
@@ -689,7 +689,7 @@ impl<'a> Work<'a> {
                         )?;
                         self.ready_dependents(id);
                     } else {
-                        self.build_states.enqueue(id, self.graph.build(id))?;
+                        self.build_states.enqueue(id, &self.graph.builds[id])?;
                     }
                 }
                 made_progress = true;
@@ -708,7 +708,7 @@ impl<'a> Work<'a> {
             }
 
             let task = self.runner.wait();
-            let build = self.graph.build(task.buildid);
+            let build = &self.graph.builds[task.buildid];
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);
                 t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
