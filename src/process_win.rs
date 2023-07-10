@@ -5,6 +5,11 @@ extern crate winapi;
 
 use crate::process::Termination;
 
+#[allow(non_snake_case)]
+fn GetLastError() -> u32 {
+    unsafe { winapi::um::errhandlingapi::GetLastError() }
+}
+
 fn zeroed_startupinfo() -> winapi::um::processthreadsapi::STARTUPINFOA {
     winapi::um::processthreadsapi::STARTUPINFOA {
         cb: 0,
@@ -42,19 +47,19 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
     // std::process::Command can't take a string and pass it through to CreateProcess unchanged,
     // so call that ourselves.
 
-    // TODO: Set this to just 0 for console pool jobs.
-    let process_flags = winapi::um::winbase::CREATE_NEW_PROCESS_GROUP;
+    let exit_code = unsafe {
+        // TODO: Set this to just 0 for console pool jobs.
+        let process_flags = winapi::um::winbase::CREATE_NEW_PROCESS_GROUP;
 
-    let mut startup_info = zeroed_startupinfo();
-    startup_info.cb = std::mem::size_of::<winapi::um::processthreadsapi::STARTUPINFOA>() as u32;
-    startup_info.dwFlags = winapi::um::winbase::STARTF_USESTDHANDLES;
+        let mut startup_info = zeroed_startupinfo();
+        startup_info.cb = std::mem::size_of::<winapi::um::processthreadsapi::STARTUPINFOA>() as u32;
+        startup_info.dwFlags = winapi::um::winbase::STARTF_USESTDHANDLES;
 
-    let mut process_info = zeroed_process_information();
+        let mut process_info = zeroed_process_information();
 
-    let mut mut_cmdline = cmdline.to_string() + "\0";
+        let mut mut_cmdline = cmdline.to_string() + "\0";
 
-    let create_process_success = unsafe {
-        winapi::um::processthreadsapi::CreateProcessA(
+        if winapi::um::processthreadsapi::CreateProcessA(
             std::ptr::null_mut(),
             mut_cmdline.as_mut_ptr() as *mut i8,
             std::ptr::null_mut(),
@@ -65,33 +70,35 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
             std::ptr::null_mut(),
             &mut startup_info,
             &mut process_info,
-        )
-    };
-    if create_process_success == 0 {
-        // TODO: better error?
-        let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
-        anyhow::bail!("CreateProcessA failed: {}", error);
-    }
+        ) == 0
+        {
+            anyhow::bail!("{}: {}", "CreateProcessA", GetLastError());
+        }
 
-    unsafe {
-        winapi::um::handleapi::CloseHandle(process_info.hThread);
-    }
+        if winapi::um::handleapi::CloseHandle(process_info.hThread) == 0 {
+            anyhow::bail!("{}: {}", "CloseHandle", GetLastError());
+        }
 
-    unsafe {
-        winapi::um::synchapi::WaitForSingleObject(
+        if winapi::um::synchapi::WaitForSingleObject(
             process_info.hProcess,
             winapi::um::winbase::INFINITE,
-        );
-    }
+        ) != 0
+        {
+            anyhow::bail!("{}: {}", "WaitForSingleObject", GetLastError());
+        }
 
-    let mut exit_code: u32 = 0;
-    unsafe {
-        winapi::um::processthreadsapi::GetExitCodeProcess(process_info.hProcess, &mut exit_code);
-    }
+        let mut exit_code: u32 = 0;
+        if winapi::um::processthreadsapi::GetExitCodeProcess(process_info.hProcess, &mut exit_code)
+            == 0
+        {
+            anyhow::bail!("{}: {}", "GetExitCodeProcess", GetLastError());
+        }
 
-    unsafe {
-        winapi::um::handleapi::CloseHandle(process_info.hProcess);
-    }
+        if winapi::um::handleapi::CloseHandle(process_info.hProcess) == 0 {
+            anyhow::bail!("{}: {}", "CloseHandle", GetLastError());
+        }
+        exit_code
+    };
 
     let termination = match exit_code {
         0 => Termination::Success,
