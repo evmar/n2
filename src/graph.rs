@@ -205,8 +205,10 @@ impl Build {
 
     /// Potentially update discovered_ins with a new set of deps, returning true if they changed.
     pub fn update_discovered(&mut self, mut deps: Vec<FileId>) -> bool {
-        // Filter out any deps that were already listed in the build file.
-        deps.retain(|id| !self.ins.ids.contains(id));
+        // Filter out any deps that were already dirtying in the build file.
+        // Note that it's allowed to have a duplicate against an order-only
+        // dep; see `discover_existing_dep` test.
+        deps.retain(|id| !self.discovered_ins().contains(id));
         if deps == self.discovered_ins {
             false
         } else {
