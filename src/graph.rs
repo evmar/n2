@@ -249,7 +249,7 @@ pub struct Graph {
 impl Graph {
     /// Look up a file by its FileId.
     pub fn file(&self, id: FileId) -> &File {
-        self.files.get(id)
+        &self.files[id]
     }
 
     /// Look up a file by its name.  Name must have been canonicalized already.
@@ -279,11 +279,11 @@ impl Graph {
     pub fn add_build(&mut self, mut build: Build) -> anyhow::Result<()> {
         let new_id = self.builds.next_id();
         for &id in &build.ins.ids {
-            self.files.get_mut(id).dependents.push(new_id);
+            self.files[id].dependents.push(new_id);
         }
         let mut fixup_dups = false;
         for &id in &build.outs.ids {
-            let f = self.files.get_mut(id);
+            let f = &mut self.files[id];
             match f.input {
                 Some(prev) if prev == new_id => {
                     fixup_dups = true;
@@ -297,7 +297,7 @@ impl Graph {
                         "{}: {:?} is already an output at {}",
                         build.location,
                         f.name,
-                        self.builds.get(prev).location
+                        self.builds[prev].location
                     );
                 }
                 None => f.input = Some(new_id),

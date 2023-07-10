@@ -131,13 +131,13 @@ impl BuildStates {
     }
 
     fn get(&self, id: BuildId) -> BuildState {
-        *self.states.get(id)
+        self.states[id]
     }
 
     fn set(&mut self, id: BuildId, build: &Build, state: BuildState) {
         // This function is called on all state transitions.
         // We get 'prev', the previous state, and 'state', the new state.
-        let prev = std::mem::replace(self.states.get_mut(id), state);
+        let prev = std::mem::replace(&mut self.states[id], state);
 
         // We skip user-facing counters for phony builds.
         let skip_ui_count = build.cmdline.is_none();

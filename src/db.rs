@@ -247,7 +247,7 @@ impl<'a> Reader<'a> {
                 // keep reading to parse through it.
                 continue;
             }
-            match self.graph.file(*self.ids.fileids.get(fileid)).input {
+            match self.graph.file(self.ids.fileids[fileid]).input {
                 None => {
                     obsolete = true;
                 }
@@ -271,7 +271,7 @@ impl<'a> Reader<'a> {
         let mut deps = Vec::new();
         for _ in 0..len {
             let id = self.read_id()?;
-            deps.push(*self.ids.fileids.get(id));
+            deps.push(self.ids.fileids[id]);
         }
 
         let hash = BuildHash(self.read_u64()?);
