@@ -17,6 +17,7 @@ fn skip_spaces(scanner: &mut Scanner) -> ParseResult<()> {
         match scanner.read() {
             ' ' => {}
             '\\' => match scanner.read() {
+                '\r' => scanner.expect('\n')?,
                 '\n' => {}
                 _ => return scanner.parse_error("invalid backslash escape"),
             },
@@ -35,12 +36,13 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
     let start = scanner.ofs;
     loop {
         match scanner.read() {
-            '\0' | ' ' | ':' | '\n' => {
+            '\0' | ' ' | ':' | '\r' | '\n' => {
                 scanner.back();
                 break;
             }
             '\\' => {
-                if scanner.peek() == '\n' {
+                let peek = scanner.peek();
+                if peek == '\n' || peek == '\r' {
                     scanner.back();
                     break;
                 }
@@ -67,6 +69,7 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
     while let Some(p) = read_path(scanner)? {
         deps.push(p);
     }
+    scanner.skip('\r');
     scanner.skip('\n');
     scanner.skip_spaces();
     scanner.expect('\0')?;
@@ -91,29 +94,47 @@ mod tests {
         }
     }
 
+    fn test_for_crlf(input: &str, test: fn(String)) {
+        let crlf = input.replace("\n", "\r\n");
+        for test_case in [String::from(input), crlf] {
+            test(test_case);
+        }
+    }
+
     #[test]
     fn test_parse() {
-        let mut file = b"build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n".to_vec();
-        let deps = must_parse(&mut file);
-        println!("{:?}", deps);
-        assert_eq!(deps.target, "build/browse.o");
-        assert_eq!(deps.deps.len(), 3);
+        test_for_crlf(
+            "build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n",
+            |text| {
+                let mut file = text.into_bytes();
+                let deps = must_parse(&mut file);
+                assert_eq!(deps.target, "build/browse.o");
+                assert_eq!(deps.deps.len(), 3);
+            },
+        );
     }
 
     #[test]
     fn test_parse_space_suffix() {
-        let mut file = b"build/browse.o: src/browse.cc   ".to_vec();
-        let deps = must_parse(&mut file);
-        assert_eq!(deps.target, "build/browse.o");
-        assert_eq!(deps.deps.len(), 1);
+        test_for_crlf("build/browse.o: src/browse.cc   \n", |text| {
+            let mut file = text.into_bytes();
+            let deps = must_parse(&mut file);
+            assert_eq!(deps.target, "build/browse.o");
+            assert_eq!(deps.deps.len(), 1);
+        });
     }
 
     #[test]
     fn test_parse_multiline() {
-        let mut file = b"build/browse.o: src/browse.cc\\\n  build/browse_py.h".to_vec();
-        let deps = must_parse(&mut file);
-        assert_eq!(deps.target, "build/browse.o");
-        assert_eq!(deps.deps.len(), 2);
+        test_for_crlf(
+            "build/browse.o: src/browse.cc\\\n  build/browse_py.h",
+            |text| {
+                let mut file = text.into_bytes();
+                let deps = must_parse(&mut file);
+                assert_eq!(deps.target, "build/browse.o");
+                assert_eq!(deps.deps.len(), 2);
+            },
+        );
     }
 
     #[test]
