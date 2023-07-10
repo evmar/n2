@@ -1,9 +1,18 @@
 use crate::e2e::*;
 
+#[cfg(unix)]
 const GENDEP_RULE: &str = "
 rule gendep
   description = gendep $out
   command = echo \"$dep_content\" > $out.d && touch $out
+  depfile = $out.d
+";
+
+#[cfg(windows)]
+const GENDEP_RULE: &str = "
+rule gendep
+  description = gendep $out
+  command = cmd /c echo $dep_content > $out.d && type nul > $out
   depfile = $out.d
 ";
 
