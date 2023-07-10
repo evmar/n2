@@ -220,7 +220,7 @@ impl<'a> Reader<'a> {
     fn read_path(&mut self, len: usize) -> std::io::Result<()> {
         let name = self.read_str(len)?;
         // No canonicalization needed, paths were written canonicalized.
-        let fileid = self.graph.file_id(name);
+        let fileid = self.graph.files.id_from_canonical(name);
         let dbid = self.ids.fileids.push(fileid);
         self.ids.db_ids.insert(fileid, dbid);
         Ok(())

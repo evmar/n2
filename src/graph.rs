@@ -237,53 +237,36 @@ impl Build {
     }
 }
 
-/// The build graph: owns Files/Builds and maps FileIds/BuildIds to them,
-/// as well as mapping string filenames to the underlying Files.
+/// The build graph: owns Files/Builds and maps FileIds/BuildIds to them.
 #[derive(Default)]
 pub struct Graph {
-    files: DenseMap<FileId, File>,
     pub builds: DenseMap<BuildId, Build>,
-    file_to_id: HashMap<String, FileId>,
+    pub files: GraphFiles,
+}
+
+/// Files identified by FileId, as well as mapping string filenames to them.
+/// Split from Graph for lifetime reasons.
+#[derive(Default)]
+pub struct GraphFiles {
+    by_id: DenseMap<FileId, File>,
+    by_name: HashMap<String, FileId>,
 }
 
 impl Graph {
     /// Look up a file by its FileId.
     pub fn file(&self, id: FileId) -> &File {
-        &self.files[id]
-    }
-
-    /// Look up a file by its name.  Name must have been canonicalized already.
-    pub fn lookup(&self, file: &str) -> Option<FileId> {
-        self.file_to_id.get(file).copied()
-    }
-
-    /// Look up a file by its name, adding it if not already present.
-    /// Name must have been canonicalized already.
-    /// This function has a funny API to avoid copies; pass a String if you have
-    /// one already, otherwise a &str is acceptable.
-    pub fn file_id<S: AsRef<str> + Into<String>>(&mut self, file: S) -> FileId {
-        self.lookup(file.as_ref()).unwrap_or_else(|| {
-            // TODO: so many string copies :<
-            let file = file.into();
-            let id = self.files.push(File {
-                name: file.clone(),
-                input: None,
-                dependents: Vec::new(),
-            });
-            self.file_to_id.insert(file, id);
-            id
-        })
+        &self.files.by_id[id]
     }
 
     /// Add a new Build, generating a BuildId for it.
     pub fn add_build(&mut self, mut build: Build) -> anyhow::Result<()> {
         let new_id = self.builds.next_id();
         for &id in &build.ins.ids {
-            self.files[id].dependents.push(new_id);
+            self.files.by_id[id].dependents.push(new_id);
         }
         let mut fixup_dups = false;
         for &id in &build.outs.ids {
-            let f = &mut self.files[id];
+            let f = &mut self.files.by_id[id];
             match f.input {
                 Some(prev) if prev == new_id => {
                     fixup_dups = true;
@@ -308,6 +291,31 @@ impl Graph {
         }
         self.builds.push(build);
         Ok(())
+    }
+}
+
+impl GraphFiles {
+    /// Look up a file by its name.  Name must have been canonicalized already.
+    pub fn lookup(&self, file: &str) -> Option<FileId> {
+        self.by_name.get(file).copied()
+    }
+
+    /// Look up a file by its name, adding it if not already present.
+    /// Name must have been canonicalized already.
+    /// This function has a funny API to avoid copies; pass a String if you have
+    /// one already, otherwise a &str is acceptable.
+    pub fn id_from_canonical<S: AsRef<str> + Into<String>>(&mut self, file: S) -> FileId {
+        self.lookup(file.as_ref()).unwrap_or_else(|| {
+            // TODO: so many string copies :<
+            let file = file.into();
+            let id = self.by_id.push(File {
+                name: file.clone(),
+                input: None,
+                dependents: Vec::new(),
+            });
+            self.by_name.insert(file, id);
+            id
+        })
     }
 }
 
@@ -342,7 +350,7 @@ pub struct FileState(DenseMap<FileId, Option<MTime>>);
 
 impl FileState {
     pub fn new(graph: &Graph) -> Self {
-        FileState(DenseMap::new_sized(graph.files.next_id(), None))
+        FileState(DenseMap::new_sized(graph.files.by_id.next_id(), None))
     }
 
     pub fn get(&self, id: FileId) -> Option<MTime> {

@@ -345,7 +345,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn lookup(&mut self, name: &str) -> Option<FileId> {
-        self.graph.lookup(&canon_path(name))
+        self.graph.files.lookup(&canon_path(name))
     }
 
     pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
@@ -431,7 +431,7 @@ impl<'a> Work<'a> {
             None => Vec::new(),
             Some(names) => names
                 .into_iter()
-                .map(|name| self.graph.file_id(canon_path(name)))
+                .map(|name| self.graph.files.id_from_canonical(canon_path(name)))
                 .collect(),
         };
         let deps_changed = self.graph.builds[id].update_discovered(deps);
@@ -761,7 +761,7 @@ build b: phony c
 build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
-        let a_id = graph.file_id("a");
+        let a_id = graph.files.id_from_canonical("a");
         let mut states = BuildStates::new(graph.builds.next_id(), SmallMap::default());
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {
