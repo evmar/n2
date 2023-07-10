@@ -427,16 +427,27 @@ impl<'a> Work<'a> {
     /// Given a task that just finished, record any discovered deps and hash.
     /// Postcondition: all outputs have been stat()ed.
     fn record_finished(&mut self, id: BuildId, result: task::TaskResult) -> anyhow::Result<()> {
-        let deps = match result.discovered_deps {
-            None => Vec::new(),
-            Some(names) => names
-                .into_iter()
-                .map(|name| self.graph.files.id_from_canonical(canon_path(name)))
-                .collect(),
-        };
-        let deps_changed = self.graph.builds[id].update_discovered(deps);
+        // Clean up the deps discovered from the task.
+        let mut deps = Vec::new();
+        if let Some(names) = result.discovered_deps {
+            for name in names {
+                let fileid = self.graph.files.id_from_canonical(canon_path(name));
+                // Filter duplicates from the file list.
+                if deps.contains(&fileid) {
+                    continue;
+                }
+                // Filter out any deps that were already dirtying in the build file.
+                // Note that it's allowed to have a duplicate against an order-only
+                // dep; see `discover_existing_dep` test.
+                if self.graph.builds[id].dirtying_ins().contains(&fileid) {
+                    continue;
+                }
+                deps.push(fileid);
+            }
+        }
 
         // We may have discovered new deps, so ensure we have mtimes for those.
+        let deps_changed = self.graph.builds[id].update_discovered(deps);
         if deps_changed {
             if let Some(missing) = self.ensure_input_files(id, true)? {
                 anyhow::bail!(
