@@ -358,8 +358,8 @@ impl FileState {
         *self.0.lookup(id).unwrap_or(&None)
     }
 
-    pub fn stat(&mut self, id: FileId, path: &Path) -> std::io::Result<MTime> {
-        let mtime = stat(path)?;
+    pub fn stat(&mut self, id: FileId, path: &Path) -> anyhow::Result<MTime> {
+        let mtime = stat(path).map_err(|err| anyhow::anyhow!("stat {:?}: {}", path, err))?;
         self.0.set_grow(id, Some(mtime), None);
         Ok(mtime)
     }
