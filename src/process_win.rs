@@ -114,11 +114,6 @@ impl Drop for ProcThreadAttributeList {
     }
 }
 
-#[allow(non_snake_case)]
-fn GetLastError() -> u32 {
-    unsafe { windows_sys::Win32::Foundation::GetLastError() }
-}
-
 pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::Result<Termination> {
     // Don't want to run `cmd /c` since that limits cmd line length to 8192 bytes.
     // std::process::Command can't take a string and pass it through to CreateProcess unchanged,
