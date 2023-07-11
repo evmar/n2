@@ -207,3 +207,36 @@ fn explain() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Meson generates a build step that writes to one of its inputs.
+#[test]
+fn write_to_input() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    let touch_input_command = "touch out in";
+    #[cfg(windows)]
+    let touch_input_command = "cmd /c type nul > in && cmd /c type nul > out";
+    let touch_input_rule = format!(
+        "
+rule touch_in
+  description = touch out+in
+  command = {}
+",
+        touch_input_command
+    );
+
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[&touch_input_rule, "build out: touch_in in", ""].join("\n"),
+    )?;
+    space.write("in", "")?;
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+
+    // TODO: to support meson, we need this second invocation to not build anything.
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+
+    Ok(())
+}
