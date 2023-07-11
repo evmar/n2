@@ -9,14 +9,30 @@ use std::os::windows::prelude::AsRawHandle;
 use windows_sys::Win32::{
     Foundation::*,
     Security::SECURITY_ATTRIBUTES,
-    System::{Console::*, Pipes::CreatePipe, Threading::*},
+    System::{Console::*, Diagnostics::Debug::*, Pipes::CreatePipe, Threading::*},
 };
 
 /// Construct an error from GetLastError().
 fn windows_error(func: &str) -> anyhow::Error {
     unsafe {
         let err = GetLastError();
-        anyhow::anyhow!("{}: {}", func, err)
+        let mut buf: [u8; 1024] = [0; 1024];
+        let len = FormatMessageA(
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            std::ptr::null(),
+            err,
+            0x0000_0400, // MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT)
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            std::ptr::null(),
+        );
+        if len == 0 {
+            panic!("FormatMessageA on error failed: {}", GetLastError());
+        }
+        let message = std::str::from_utf8(&buf[..len as usize])
+            .unwrap()
+            .trim_end();
+        anyhow::anyhow!("{}: {}", func, message)
     }
 }
 /// Return an Err from the current function with GetLastError info in it.
