@@ -1,0 +1,9 @@
+rule printy
+  command = prints.bat $out
+
+build print1: printy
+build print2: printy
+build print3: printy
+
+build out: phony print1 print2 print3
+default out
