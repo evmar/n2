@@ -162,7 +162,7 @@ impl Runner {
                 run_task(&cmdline, depfile.as_deref(), rspfile.as_ref()).unwrap_or_else(|err| {
                     TaskResult {
                         termination: process::Termination::Failure,
-                        output: err.to_string().into_bytes(),
+                        output: format!("{}\n", err).into_bytes(),
                         discovered_deps: None,
                     }
                 });
