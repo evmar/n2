@@ -23,6 +23,8 @@ version = "0.48"
 features = [
     "Win32_System_Console",
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Pipes",
     "Win32_System_Threading",
 ]
 
