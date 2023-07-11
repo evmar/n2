@@ -1,13 +1,12 @@
 //! Implements run_command on Windows using native Windows calls.
 //! See run_command comments for why.
 
-extern crate winapi;
+use windows_sys::Win32::{
+    Foundation::*,
+    System::{Console::*, Threading::*},
+};
 
 use crate::process::Termination;
-use winapi::{
-    shared::ntdef::*, um::handleapi::*, um::processenv::*, um::processthreadsapi::*,
-    um::synchapi::*, um::winbase::*,
-};
 
 /// Wrapper for PROCESS_INFORMATION that cleans up on Drop.
 struct ProcessInformation(PROCESS_INFORMATION);
@@ -16,7 +15,7 @@ impl ProcessInformation {
     fn new() -> Self {
         Self(unsafe { std::mem::zeroed() })
     }
-    fn as_mut_ptr(&mut self) -> LPPROCESS_INFORMATION {
+    fn as_mut_ptr(&mut self) -> *mut PROCESS_INFORMATION {
         &mut self.0
     }
 }
@@ -36,10 +35,10 @@ impl std::ops::DerefMut for ProcessInformation {
 impl Drop for ProcessInformation {
     fn drop(&mut self) {
         unsafe {
-            if !self.hProcess.is_null() {
+            if self.hProcess != 0 {
                 CloseHandle(self.hProcess);
             }
-            if !self.hThread.is_null() {
+            if self.hThread != 0 {
                 CloseHandle(self.hThread);
             }
         }
@@ -48,7 +47,7 @@ impl Drop for ProcessInformation {
 
 #[allow(non_snake_case)]
 fn GetLastError() -> u32 {
-    unsafe { winapi::um::errhandlingapi::GetLastError() }
+    unsafe { windows_sys::Win32::Foundation::GetLastError() }
 }
 
 pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Result<Termination> {
@@ -74,10 +73,10 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
 
         if CreateProcessA(
             std::ptr::null_mut(),
-            cmdline_nul.as_mut_ptr() as *mut i8,
+            cmdline_nul.as_mut_ptr(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            /*inherit handles = */ TRUE.into(),
+            /*inherit handles = */ TRUE,
             process_flags,
             std::ptr::null_mut(),
             std::ptr::null_mut(),

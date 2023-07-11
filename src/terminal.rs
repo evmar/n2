@@ -26,20 +26,18 @@ pub use unix::*;
 
 #[cfg(windows)]
 mod windows {
+    use windows_sys::Win32::{Foundation::*, System::Console::*};
+
     pub fn use_fancy() -> bool {
         unsafe {
-            let handle =
-                winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
+            let handle = GetStdHandle(STD_OUTPUT_HANDLE);
             let mut mode = 0;
             // Note: GetConsoleMode itself fails when not attached to a console.
-            let ok = winapi::um::consoleapi::GetConsoleMode(handle, &mut mode) != 0;
+            let ok = GetConsoleMode(handle, &mut mode) != 0;
             if ok {
                 // Enable terminal processing so we can overwrite previous content.
                 // Ignore errors.
-                _ = winapi::um::consoleapi::SetConsoleMode(
-                    handle,
-                    mode | winapi::um::wincon::ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-                );
+                _ = SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
             }
             ok
         }
@@ -47,13 +45,12 @@ mod windows {
 
     pub fn get_cols() -> Option<usize> {
         unsafe {
-            let console =
-                winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
-            if console == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+            let console = GetStdHandle(STD_OUTPUT_HANDLE);
+            if console == INVALID_HANDLE_VALUE {
                 return None;
             }
-            let mut csbi = ::std::mem::zeroed::<winapi::um::wincon::CONSOLE_SCREEN_BUFFER_INFO>();
-            if winapi::um::wincon::GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
+            let mut csbi = ::std::mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>();
+            if GetConsoleScreenBufferInfo(console, &mut csbi) == 0 {
                 return None;
             }
             if csbi.dwSize.X < 10 {

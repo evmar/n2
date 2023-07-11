@@ -18,17 +18,12 @@ anyhow = "1.0"
 argh = "0.1.10"
 libc = "0.2"
 
-[target.'cfg(windows)'.dependencies.winapi]
-version = "0.3.6"
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.48"
 features = [
-  "consoleapi",
-  "errhandlingapi",
-  "handleapi",
-  "processenv",
-  "processthreadsapi",
-  "std",
-  "synchapi",
-  "winbase",
+    "Win32_System_Console",
+    "Win32_Foundation",
+    "Win32_System_Threading",
 ]
 
 [target.'cfg(not(any(windows, target_arch = "wasm32")))'.dependencies]
