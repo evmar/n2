@@ -12,6 +12,20 @@ use windows_sys::Win32::{
     System::{Console::*, Pipes::CreatePipe, Threading::*},
 };
 
+/// Construct an error from GetLastError().
+fn windows_error(func: &str) -> anyhow::Error {
+    unsafe {
+        let err = GetLastError();
+        anyhow::anyhow!("{}: {}", func, err)
+    }
+}
+/// Return an Err from the current function with GetLastError info in it.
+macro_rules! win_bail {
+    ($func:ident) => {
+        return Err(windows_error(stringify!($func)));
+    };
+}
+
 /// Wrapper for PROCESS_INFORMATION that cleans up on Drop.
 struct ProcessInformation(PROCESS_INFORMATION);
 
@@ -59,11 +73,7 @@ impl ProcThreadAttributeList {
                 == 0
             {
                 if GetLastError() != ERROR_INSUFFICIENT_BUFFER {
-                    anyhow::bail!(
-                        "{}: {}",
-                        "InitializeProcThreadAttributeList",
-                        GetLastError()
-                    );
+                    win_bail!(InitializeProcThreadAttributeList);
                 }
             }
 
@@ -75,11 +85,7 @@ impl ProcThreadAttributeList {
                 &mut size,
             ) == 0
             {
-                anyhow::bail!(
-                    "{}: {}",
-                    "InitializeProcThreadAttributeList",
-                    GetLastError()
-                );
+                win_bail!(InitializeProcThreadAttributeList);
             }
             Ok(Self(buf))
         }
@@ -97,7 +103,7 @@ impl ProcThreadAttributeList {
                 std::ptr::null_mut(),
             ) == 0
             {
-                anyhow::bail!("{}: {}", "UpdateProcThreadAttribute", GetLastError());
+                win_bail!(UpdateProcThreadAttribute);
             }
         }
         Ok(())
@@ -133,7 +139,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
             /* use default buffer size */ 0,
         ) == 0
         {
-            anyhow::bail!("{}: {}", "CreatePipe", GetLastError());
+            win_bail!(CreatePipe);
         }
         (
             OwnedHandle::from_raw_handle(pipe_read as *mut c_void),
@@ -177,7 +183,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
             process_info.as_mut_ptr(),
         ) == 0
         {
-            anyhow::bail!("{}: {}", "CreateProcessA", GetLastError());
+            win_bail!(CreateProcessA);
         }
         drop(pipe_write);
 
@@ -196,12 +202,12 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
 
     let exit_code = unsafe {
         if WaitForSingleObject(process_info.hProcess, INFINITE) != 0 {
-            anyhow::bail!("{}: {}", "WaitForSingleObject", GetLastError());
+            win_bail!(WaitForSingleObject);
         }
 
         let mut exit_code: u32 = 0;
         if GetExitCodeProcess(process_info.hProcess, &mut exit_code) == 0 {
-            anyhow::bail!("{}: {}", "GetExitCodeProcess", GetLastError());
+            win_bail!(GetExitCodeProcess);
         }
 
         exit_code
