@@ -83,8 +83,8 @@ impl TestSpace {
         cmd: &mut std::process::Command,
     ) -> anyhow::Result<std::process::Output> {
         let out = self.run(cmd)?;
-        print_output(&out);
         if !out.status.success() {
+            print_output(&out);
             anyhow::bail!("build failed, status {}", out.status);
         }
         Ok(out)
