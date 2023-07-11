@@ -4,21 +4,25 @@
 extern crate winapi;
 
 use crate::process::Termination;
+use winapi::{
+    shared::ntdef::*, um::handleapi::*, um::processenv::*, um::processthreadsapi::*,
+    um::synchapi::*, um::winbase::*,
+};
 
 /// Wrapper for PROCESS_INFORMATION that cleans up on Drop.
-struct ProcessInformation(winapi::um::processthreadsapi::PROCESS_INFORMATION);
+struct ProcessInformation(PROCESS_INFORMATION);
 
 impl ProcessInformation {
     fn new() -> Self {
         Self(unsafe { std::mem::zeroed() })
     }
-    fn as_mut_ptr(&mut self) -> winapi::um::processthreadsapi::LPPROCESS_INFORMATION {
+    fn as_mut_ptr(&mut self) -> LPPROCESS_INFORMATION {
         &mut self.0
     }
 }
 
 impl std::ops::Deref for ProcessInformation {
-    type Target = winapi::um::processthreadsapi::PROCESS_INFORMATION;
+    type Target = PROCESS_INFORMATION;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -33,10 +37,10 @@ impl Drop for ProcessInformation {
     fn drop(&mut self) {
         unsafe {
             if !self.hProcess.is_null() {
-                winapi::um::handleapi::CloseHandle(self.hProcess);
+                CloseHandle(self.hProcess);
             }
             if !self.hThread.is_null() {
-                winapi::um::handleapi::CloseHandle(self.hThread);
+                CloseHandle(self.hThread);
             }
         }
     }
@@ -54,15 +58,13 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
 
     let exit_code = unsafe {
         // TODO: Set this to just 0 for console pool jobs.
-        let process_flags = winapi::um::winbase::CREATE_NEW_PROCESS_GROUP;
+        let process_flags = CREATE_NEW_PROCESS_GROUP;
 
-        let mut startup_info = std::mem::zeroed::<winapi::um::processthreadsapi::STARTUPINFOA>();
-        startup_info.cb = std::mem::size_of::<winapi::um::processthreadsapi::STARTUPINFOA>() as u32;
-        startup_info.dwFlags = winapi::um::winbase::STARTF_USESTDHANDLES;
-        startup_info.hStdInput =
-            winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
-        startup_info.hStdOutput =
-            winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
+        let mut startup_info = std::mem::zeroed::<STARTUPINFOA>();
+        startup_info.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
+        startup_info.dwFlags = STARTF_USESTDHANDLES;
+        startup_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        startup_info.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
         startup_info.hStdError = startup_info.hStdOutput;
 
         let mut process_info = ProcessInformation::new();
@@ -70,12 +72,12 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
         let mut cmdline_nul: Vec<u8> = String::from(cmdline).into_bytes();
         cmdline_nul.push(0);
 
-        if winapi::um::processthreadsapi::CreateProcessA(
+        if CreateProcessA(
             std::ptr::null_mut(),
             cmdline_nul.as_mut_ptr() as *mut i8,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            /*inherit handles = */ winapi::shared::ntdef::TRUE.into(),
+            /*inherit handles = */ TRUE.into(),
             process_flags,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -86,18 +88,12 @@ pub fn run_command(cmdline: &str, _output_cb: impl FnMut(&[u8])) -> anyhow::Resu
             anyhow::bail!("{}: {}", "CreateProcessA", GetLastError());
         }
 
-        if winapi::um::synchapi::WaitForSingleObject(
-            process_info.hProcess,
-            winapi::um::winbase::INFINITE,
-        ) != 0
-        {
+        if WaitForSingleObject(process_info.hProcess, INFINITE) != 0 {
             anyhow::bail!("{}: {}", "WaitForSingleObject", GetLastError());
         }
 
         let mut exit_code: u32 = 0;
-        if winapi::um::processthreadsapi::GetExitCodeProcess(process_info.hProcess, &mut exit_code)
-            == 0
-        {
+        if GetExitCodeProcess(process_info.hProcess, &mut exit_code) == 0 {
             anyhow::bail!("{}: {}", "GetExitCodeProcess", GetLastError());
         }
 
