@@ -244,7 +244,7 @@ pub struct Graph {
 /// Split from Graph for lifetime reasons.
 #[derive(Default)]
 pub struct GraphFiles {
-    by_id: DenseMap<FileId, File>,
+    pub by_id: DenseMap<FileId, File>,
     by_name: HashMap<String, FileId>,
 }
 

@@ -482,7 +482,7 @@ impl<'a> Work<'a> {
             return Ok(());
         }
 
-        let hash = hash::hash_build(&self.graph, &self.file_state, build);
+        let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
         self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
@@ -610,13 +610,13 @@ impl<'a> Work<'a> {
             Some(prev_hash) => prev_hash,
         };
 
-        let hash = hash::hash_build(&self.graph, &self.file_state, build);
+        let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
         if prev_hash != hash {
             if self.explain {
                 self.progress
                     .log(&format!("explain: {}: manifest changed", build.location));
                 self.progress.log(&hash::explain_hash_build(
-                    &self.graph,
+                    &self.graph.files,
                     &self.file_state,
                     build,
                 ));
