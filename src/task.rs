@@ -1,9 +1,12 @@
 //! Runs build tasks, potentially in parallel.
 //! Unaware of the build graph, pools, etc.; just command execution.
 //!
-//! TODO: consider rewriting to use poll() etc. instead of threads.
-//! The threads might be relatively cheap(?) because they just block on
-//! the subprocesses though?
+//! We use one thread per subprocess.  This differs from Ninja which goes to
+//! some effort to use ppoll-like behavior.  Because the threads are mostly
+//! blocked in IO I don't expect this to be too costly in terms of CPU, but it's
+//! worth considering how much RAM it costs.  On the positive side, the logic
+//! is significantly simpler than Ninja and we get free behaviors like parallel
+//! parsing of depfiles.
 
 use crate::{
     depfile,
@@ -61,6 +64,9 @@ fn write_rspfile(rspfile: &RspFile) -> anyhow::Result<()> {
 
 /// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
+/// This is run as a separate thread from the main n2 process and will block
+/// on the subprocess, so any additional per-subprocess work we can do belongs
+/// here.
 fn run_task(
     cmdline: &str,
     depfile: Option<&Path>,
