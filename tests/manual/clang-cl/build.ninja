@@ -1,0 +1,6 @@
+rule clang-cl
+  command = clang-cl /showIncludes $in
+  deps = msvc
+
+build test.exe: clang-cl test.c
+default test.exe

@@ -256,7 +256,12 @@ build out: echo
         ]
         .join("\n"),
     )?;
+    space.write("foo", "")?;
 
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+
+    space.write("foo", "")?;
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "ran 1 task");
 

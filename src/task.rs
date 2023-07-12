@@ -62,6 +62,31 @@ fn write_rspfile(rspfile: &RspFile) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Parse some subcommand output to extract "Note: including file:" lines as
+/// emitted by MSVC/clang-cl.
+fn extract_showincludes(output: Vec<u8>) -> (Vec<String>, Vec<u8>) {
+    let mut filtered_output = Vec::new();
+    let mut includes = Vec::new();
+    for line in output.split(|&c| c == b'\n') {
+        if let Some(include) = line.strip_prefix(b"Note: including file: ") {
+            let start = include.iter().position(|&c| c != b' ').unwrap_or(0);
+            let end = if include.ends_with(&[b'\r']) {
+                include.len() - 1
+            } else {
+                include.len()
+            };
+            let include = &include[start..end];
+            includes.push(unsafe { String::from_utf8_unchecked(include.to_vec()) });
+        } else {
+            if !filtered_output.is_empty() {
+                filtered_output.push(b'\n');
+            }
+            filtered_output.extend_from_slice(line);
+        }
+    }
+    (includes, filtered_output)
+}
+
 /// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
 /// This is run as a separate thread from the main n2 process and will block
@@ -70,6 +95,7 @@ fn write_rspfile(rspfile: &RspFile) -> anyhow::Result<()> {
 fn run_task(
     cmdline: &str,
     depfile: Option<&Path>,
+    parse_showincludes: bool,
     rspfile: Option<&RspFile>,
 ) -> anyhow::Result<TaskResult> {
     if let Some(rspfile) = rspfile {
@@ -79,7 +105,14 @@ fn run_task(
     let termination = process::run_command(cmdline, |buf| {
         output.extend_from_slice(buf);
     })?;
+
     let mut discovered_deps = None;
+    if parse_showincludes {
+        // Remove /showIncludes lines from output, regardless of success/fail.
+        let (includes, filtered) = extract_showincludes(output);
+        output = filtered;
+        discovered_deps = Some(includes);
+    }
     if termination == process::Termination::Success {
         if let Some(depfile) = depfile {
             discovered_deps = Some(read_depfile(depfile)?);
@@ -151,19 +184,23 @@ impl Runner {
         let cmdline = build.cmdline.clone().unwrap();
         let depfile = build.depfile.clone().map(|path| PathBuf::from(path));
         let rspfile = build.rspfile.clone();
+        let parse_showincludes = build.parse_showincludes;
 
         let tid = self.tids.claim();
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {
             let start = Instant::now();
-            let result =
-                run_task(&cmdline, depfile.as_deref(), rspfile.as_ref()).unwrap_or_else(|err| {
-                    TaskResult {
-                        termination: process::Termination::Failure,
-                        output: format!("{}\n", err).into_bytes(),
-                        discovered_deps: None,
-                    }
-                });
+            let result = run_task(
+                &cmdline,
+                depfile.as_deref(),
+                parse_showincludes,
+                rspfile.as_ref(),
+            )
+            .unwrap_or_else(|err| TaskResult {
+                termination: process::Termination::Failure,
+                output: format!("{}\n", err).into_bytes(),
+                discovered_deps: None,
+            });
             let finish = Instant::now();
 
             let task = FinishedTask {
@@ -184,5 +221,31 @@ impl Runner {
         self.tids.release(task.tid);
         self.running -= 1;
         task
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn show_includes() {
+        let (includes, output) = extract_showincludes(
+            b"some text
+Note: including file: a
+other text
+Note: including file: b\r
+more text
+"
+            .to_vec(),
+        );
+        assert_eq!(includes, &["a", "b"]);
+        assert_eq!(
+            output,
+            b"some text
+other text
+more text
+"
+        );
     }
 }
