@@ -155,6 +155,9 @@ pub struct Build {
     /// Path to generated `.d` file, if any.
     pub depfile: Option<String>,
 
+    /// If true, extract "/showIncludes" lines from output.
+    pub parse_showincludes: bool,
+
     // Struct that contains the path to the rsp file and its contents, if any.
     pub rspfile: Option<RspFile>,
 
@@ -176,6 +179,7 @@ impl Build {
             desc: None,
             cmdline: None,
             depfile: None,
+            parse_showincludes: false,
             rspfile: None,
             pool: None,
             ins,

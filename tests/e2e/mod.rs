@@ -117,13 +117,13 @@ rule touch
 #[cfg(unix)]
 pub const ECHO_RULE: &str = "
 rule echo
-  command = echo $out
+  command = echo $text
   description = echo $out
 ";
 
 #[cfg(windows)]
 pub const ECHO_RULE: &str = "
 rule echo
-  command = cmd /c echo $out
+  command = cmd /c echo $text
   description = echo $out
 ";

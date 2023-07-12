@@ -240,3 +240,25 @@ rule touch_in
 
     Ok(())
 }
+
+#[test]
+fn showincludes() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            ECHO_RULE,
+            "
+build out: echo
+  text = Note: including file: foo
+  deps = msvc
+",
+        ]
+        .join("\n"),
+    )?;
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+
+    Ok(())
+}
