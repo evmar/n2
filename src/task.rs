@@ -10,7 +10,7 @@
 
 use crate::{
     depfile,
-    graph::{BuildId, RspFile},
+    graph::{Build, BuildId, RspFile},
     process,
     scanner::Scanner,
 };
@@ -147,13 +147,11 @@ impl Runner {
         self.running > 0
     }
 
-    pub fn start(
-        &mut self,
-        id: BuildId,
-        cmdline: String,
-        depfile: Option<PathBuf>,
-        rspfile: Option<RspFile>,
-    ) {
+    pub fn start(&mut self, id: BuildId, build: &Build) {
+        let cmdline = build.cmdline.clone().unwrap();
+        let depfile = build.depfile.clone().map(|path| PathBuf::from(path));
+        let rspfile = build.rspfile.clone();
+
         let tid = self.tids.claim();
         let tx = self.finished_send.clone();
         std::thread::spawn(move || {

@@ -6,7 +6,6 @@ use crate::{
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::path::PathBuf;
 
 /// Build steps go through this sequence of states.
 /// See "Build states" in the design notes.
@@ -673,12 +672,7 @@ impl<'a> Work<'a> {
                 let build = &self.graph.builds[id];
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
-                self.runner.start(
-                    id,
-                    build.cmdline.clone().unwrap(),
-                    build.depfile.clone().map(PathBuf::from),
-                    build.rspfile.clone(),
-                );
+                self.runner.start(id, build);
                 self.progress.task_state(id, build, None);
                 made_progress = true;
             }
