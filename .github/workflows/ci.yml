@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -18,6 +18,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - uses: dtolnay/rust-toolchain@1.70.0
+      with:
+        components: rustfmt
     - name: Check formatting
       run: cargo fmt -- --check
     - name: Cargo cache
