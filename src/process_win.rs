@@ -12,12 +12,10 @@ use windows_sys::Win32::{
     System::{Console::*, Diagnostics::Debug::*, Pipes::CreatePipe, Threading::*},
 };
 
-/// Construct an error from GetLastError().
-fn windows_error(func: &str) -> anyhow::Error {
-    unsafe {
-        let err = GetLastError();
-        let mut buf: [u8; 1024] = [0; 1024];
-        let len = FormatMessageA(
+fn get_error_string(err: u32) -> String {
+    let mut buf: [u8; 1024] = [0; 1024];
+    let len = unsafe {
+        FormatMessageA(
             FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
             std::ptr::null(),
             err,
@@ -25,15 +23,21 @@ fn windows_error(func: &str) -> anyhow::Error {
             buf.as_mut_ptr(),
             buf.len() as u32,
             std::ptr::null(),
-        );
-        if len == 0 {
-            panic!("FormatMessageA on error failed: {}", GetLastError());
-        }
-        let message = std::str::from_utf8(&buf[..len as usize])
-            .unwrap()
-            .trim_end();
-        anyhow::anyhow!("{}: {}", func, message)
+        )
+    };
+    if len == 0 {
+        panic!("FormatMessageA on error failed: {}", err);
     }
+    std::str::from_utf8(&buf[..len as usize])
+        .unwrap()
+        .trim_end()
+        .to_owned()
+}
+
+/// Construct an error from GetLastError().
+fn windows_error(func: &str) -> anyhow::Error {
+    let err = unsafe { GetLastError() };
+    anyhow::anyhow!("{}: {}", func, get_error_string(err))
 }
 /// Return an Err from the current function with GetLastError info in it.
 macro_rules! win_bail {
@@ -199,6 +203,17 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
             process_info.as_mut_ptr(),
         ) == 0
         {
+            let err = GetLastError();
+            if err == ERROR_INVALID_PARAMETER {
+                if cmdline.is_empty() {
+                    anyhow::bail!("CreateProcess failed: command is empty");
+                }
+                if let Some(first_char) = cmdline.bytes().nth(0) {
+                    if first_char == b' ' || first_char == b'\t' {
+                        anyhow::bail!("CreateProcess failed: command has leading whitespace");
+                    }
+                }
+            }
             win_bail!(CreateProcessA);
         }
         drop(pipe_write);
@@ -236,4 +251,38 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
     };
 
     Ok(termination)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Simple command that is expected to succeed.
+    #[test]
+    fn run_echo() -> anyhow::Result<()> {
+        let mut output = Vec::new();
+        run_command("cmd /c echo hello", |buf| output.extend_from_slice(buf))?;
+        assert_eq!(output, b"hello\r\n");
+        Ok(())
+    }
+
+    /// Expect empty command to be specially handled in errors.
+    #[test]
+    fn empty_command() -> anyhow::Result<()> {
+        let mut output = Vec::new();
+        let err =
+            run_command("", |buf| output.extend_from_slice(buf)).expect_err("expected failure");
+        assert!(err.to_string().contains("command is empty"));
+        Ok(())
+    }
+
+    /// Expect leading whitespace to be specially handled in errors.
+    #[test]
+    fn initial_space() -> anyhow::Result<()> {
+        let mut output = Vec::new();
+        let err = run_command(" cmd /c echo hello", |buf| output.extend_from_slice(buf))
+            .expect_err("expected failure");
+        assert!(err.to_string().contains("command has leading whitespace"));
+        Ok(())
+    }
 }
