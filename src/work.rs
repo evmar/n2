@@ -296,6 +296,7 @@ impl BuildStates {
     }
 }
 
+#[derive(Clone)]
 pub struct Options {
     pub failures_left: Option<usize>,
     pub parallelism: usize,
@@ -309,13 +310,10 @@ pub struct Work<'a> {
     graph: Graph,
     db: db::Writer,
     progress: &'a mut dyn Progress,
-    failures_left: Option<usize>,
-    explain: bool,
-    adopt: bool,
+    options: Options,
     file_state: FileState,
     last_hashes: Hashes,
     build_states: BuildStates,
-    runner: task::Runner,
 }
 
 impl<'a> Work<'a> {
@@ -333,13 +331,10 @@ impl<'a> Work<'a> {
             graph,
             db,
             progress,
-            failures_left: options.failures_left,
-            explain: options.explain,
-            adopt: options.adopt,
+            options: options.clone(),
             file_state,
             last_hashes,
             build_states: BuildStates::new(build_count, pools),
-            runner: task::Runner::new(options.parallelism),
         }
     }
 
@@ -580,7 +575,7 @@ impl<'a> Work<'a> {
         // If any files are missing, the build is dirty without needing
         // to consider hashes.
         if let Some(missing) = file_missing {
-            if self.explain {
+            if self.options.explain {
                 self.progress.log(&format!(
                     "explain: {}: input {} missing",
                     build.location,
@@ -598,7 +593,7 @@ impl<'a> Work<'a> {
         // assume that we've always checked inputs after we've run a build.
         let prev_hash = match self.last_hashes.get(id) {
             None => {
-                if self.explain {
+                if self.options.explain {
                     self.progress.log(&format!(
                         "explain: {}: no previous state known",
                         build.location
@@ -611,7 +606,7 @@ impl<'a> Work<'a> {
 
         let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
         if prev_hash != hash {
-            if self.explain {
+            if self.options.explain {
                 self.progress
                     .log(&format!("explain: {}: manifest changed", build.location));
                 self.progress.log(&hash::explain_hash_build(
@@ -650,6 +645,7 @@ impl<'a> Work<'a> {
         signal::register_sigint();
         let mut tasks_done = 0;
         let mut tasks_failed = 0;
+        let mut runner = task::Runner::new(self.options.parallelism);
         while self.build_states.unfinished() {
             self.progress.update(&self.build_states.counts);
 
@@ -664,7 +660,7 @@ impl<'a> Work<'a> {
             //   loop.
 
             let mut made_progress = false;
-            while self.runner.can_start_more() {
+            while runner.can_start_more() {
                 let id = match self.build_states.pop_queued() {
                     Some(id) => id,
                     None => break,
@@ -672,7 +668,7 @@ impl<'a> Work<'a> {
                 let build = &self.graph.builds[id];
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
-                self.runner.start(id, build);
+                runner.start(id, build);
                 self.progress.task_state(id, build, None);
                 made_progress = true;
             }
@@ -682,7 +678,7 @@ impl<'a> Work<'a> {
                     // Not dirty; go directly to the Done state.
                     self.ready_dependents(id);
                 } else {
-                    if self.adopt {
+                    if self.options.adopt {
                         // Act as if the target already finished.
                         self.record_finished(
                             id,
@@ -704,7 +700,7 @@ impl<'a> Work<'a> {
                 continue;
             }
 
-            if !self.runner.is_running() {
+            if !runner.is_running() {
                 if tasks_failed > 0 {
                     // No more progress can be made, hopefully due to tasks that failed.
                     break;
@@ -712,7 +708,7 @@ impl<'a> Work<'a> {
                 panic!("BUG: no work to do and runner not running");
             }
 
-            let task = self.runner.wait();
+            let task = runner.wait();
             let build = &self.graph.builds[task.buildid];
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);
@@ -723,7 +719,7 @@ impl<'a> Work<'a> {
                 .task_state(task.buildid, build, Some(&task.result));
             match task.result.termination {
                 process::Termination::Failure => {
-                    if let Some(failures_left) = &mut self.failures_left {
+                    if let Some(failures_left) = &mut self.options.failures_left {
                         *failures_left -= 1;
                         if *failures_left == 0 {
                             return Ok(None);
