@@ -1,5 +1,5 @@
 rule printy
-  command = ./prints.sh $out
+  command = prints.bat $out
 
 build print1: printy
 build print2: printy
