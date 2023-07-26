@@ -27,6 +27,9 @@ pub trait Progress {
     /// Called as individual build tasks progress through build states.
     fn update(&mut self, counts: &StateCounts);
 
+    /// Called when a task's last line of output changes
+    fn task_output(&mut self, id: BuildId, line: Vec<u8>);
+
     /// Called when a task starts or completes.
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>);
 
@@ -41,6 +44,8 @@ struct Task {
     start: Instant,
     /// Build status message for the task.
     message: String,
+    /// Last line of output from the task.
+    last_line: Option<String>,
 }
 
 /// Progress implementation for "dumb" console, without any overprinting.
@@ -65,6 +70,10 @@ impl DumbConsoleProgress {
 
 impl Progress for DumbConsoleProgress {
     fn update(&mut self, _counts: &StateCounts) {
+        // ignore
+    }
+
+    fn task_output(&mut self, _id: BuildId, _line: Vec<u8>) {
         // ignore
     }
 
@@ -172,6 +181,10 @@ impl Progress for FancyConsoleProgress {
         self.state.lock().unwrap().update(counts);
     }
 
+    fn task_output(&mut self, id: BuildId, line: Vec<u8>) {
+        self.state.lock().unwrap().task_output(id, line);
+    }
+
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
         self.state.lock().unwrap().task_state(id, build, result);
     }
@@ -212,6 +225,11 @@ impl FancyState {
         self.dirty();
     }
 
+    fn task_output(&mut self, id: BuildId, line: Vec<u8>) {
+        let task = self.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        task.last_line = Some(String::from_utf8_lossy(&line).into_owned());
+    }
+
     fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
         match result {
             None => {
@@ -224,6 +242,7 @@ impl FancyState {
                     id,
                     start: Instant::now(),
                     message: message.to_string(),
+                    last_line: None,
                 });
             }
             Some(result) => {
@@ -298,6 +317,17 @@ impl FancyState {
             let delta = now.duration_since(task.start).as_secs() as usize;
             println!("{}", task_message(&task.message, delta, max_cols));
             lines += 1;
+            if let Some(line) = &task.last_line {
+                println!(
+                    "{}",
+                    if line.len() >= max_cols {
+                        &line[..max_cols]
+                    } else {
+                        line
+                    }
+                );
+                lines += 1;
+            }
         }
 
         if self.tasks.len() > max_tasks {

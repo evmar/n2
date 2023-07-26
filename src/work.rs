@@ -708,7 +708,9 @@ impl<'a> Work<'a> {
                 panic!("BUG: no work to do and runner not running");
             }
 
-            let task = runner.wait();
+            let task = runner.wait(|id, line| {
+                self.progress.task_output(id, line);
+            });
             let build = &self.graph.builds[task.buildid];
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);

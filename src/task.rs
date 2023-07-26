@@ -173,9 +173,14 @@ impl ThreadIds {
     }
 }
 
+enum Message {
+    Output((BuildId, Vec<u8>)),
+    Done(FinishedTask),
+}
+
 pub struct Runner {
-    finished_send: mpsc::Sender<FinishedTask>,
-    finished_recv: mpsc::Receiver<FinishedTask>,
+    tx: mpsc::Sender<Message>,
+    rx: mpsc::Receiver<Message>,
     pub running: usize,
     tids: ThreadIds,
     parallelism: usize,
@@ -185,8 +190,8 @@ impl Runner {
     pub fn new(parallelism: usize) -> Self {
         let (tx, rx) = mpsc::channel();
         Runner {
-            finished_send: tx,
-            finished_recv: rx,
+            tx,
+            rx,
             running: 0,
             tids: ThreadIds::default(),
             parallelism,
@@ -208,7 +213,7 @@ impl Runner {
         let parse_showincludes = build.parse_showincludes;
 
         let tid = self.tids.claim();
-        let tx = self.finished_send.clone();
+        let tx = self.tx.clone();
         std::thread::spawn(move || {
             let start = Instant::now();
             let result = run_task(
@@ -216,7 +221,9 @@ impl Runner {
                 depfile.as_deref(),
                 parse_showincludes,
                 rspfile.as_ref(),
-                |_line| {},
+                |line| {
+                    let _ = tx.send(Message::Output((id, line.to_owned())));
+                },
             )
             .unwrap_or_else(|err| TaskResult {
                 termination: process::Termination::Failure,
@@ -232,17 +239,23 @@ impl Runner {
                 result,
             };
             // The send will only fail if the receiver disappeared, e.g. due to shutting down.
-            let _ = tx.send(task);
+            let _ = tx.send(Message::Done(task));
         });
         self.running += 1;
     }
 
     /// Wait for a build to complete.  May block for a long time.
-    pub fn wait(&mut self) -> FinishedTask {
-        let task = self.finished_recv.recv().unwrap();
-        self.tids.release(task.tid);
-        self.running -= 1;
-        task
+    pub fn wait(&mut self, mut output: impl FnMut(BuildId, Vec<u8>)) -> FinishedTask {
+        loop {
+            match self.rx.recv().unwrap() {
+                Message::Output((bid, line)) => output(bid, line),
+                Message::Done(task) => {
+                    self.tids.release(task.tid);
+                    self.running -= 1;
+                    return task;
+                }
+            }
+        }
     }
 }
 
