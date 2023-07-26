@@ -87,6 +87,24 @@ fn extract_showincludes(output: Vec<u8>) -> (Vec<String>, Vec<u8>) {
     (includes, filtered_output)
 }
 
+/// Find the span of the last line of text in buf, ignoring trailing empty
+/// lines.
+fn find_last_line(buf: &[u8]) -> &[u8] {
+    fn is_nl(c: u8) -> bool {
+        c == b'\r' || c == b'\n'
+    }
+
+    let end = match buf.iter().rposition(|&c| !is_nl(c)) {
+        Some(pos) => pos + 1,
+        None => buf.len(),
+    };
+    let start = match buf[..end].iter().rposition(|&c| is_nl(c)) {
+        Some(pos) => pos + 1,
+        None => 0,
+    };
+    &buf[start..end]
+}
+
 /// Executes a build task as a subprocess.
 /// Returns an Err() if we failed outside of the process itself.
 /// This is run as a separate thread from the main n2 process and will block
@@ -97,13 +115,16 @@ fn run_task(
     depfile: Option<&Path>,
     parse_showincludes: bool,
     rspfile: Option<&RspFile>,
+    mut last_line_cb: impl FnMut(&[u8]),
 ) -> anyhow::Result<TaskResult> {
     if let Some(rspfile) = rspfile {
         write_rspfile(rspfile)?;
     }
+
     let mut output = Vec::new();
     let termination = process::run_command(cmdline, |buf| {
         output.extend_from_slice(buf);
+        last_line_cb(find_last_line(&output));
     })?;
 
     let mut discovered_deps = None;
@@ -195,6 +216,7 @@ impl Runner {
                 depfile.as_deref(),
                 parse_showincludes,
                 rspfile.as_ref(),
+                |_line| {},
             )
             .unwrap_or_else(|err| TaskResult {
                 termination: process::Termination::Failure,
@@ -247,5 +269,20 @@ other text
 more text
 "
         );
+    }
+
+    #[test]
+    fn find_last() {
+        assert_eq!(find_last_line(b""), b"");
+        assert_eq!(find_last_line(b"\n"), b"");
+
+        assert_eq!(find_last_line(b"hello"), b"hello");
+        assert_eq!(find_last_line(b"hello\n"), b"hello");
+
+        assert_eq!(find_last_line(b"hello\nt"), b"t");
+        assert_eq!(find_last_line(b"hello\nt\n"), b"t");
+
+        assert_eq!(find_last_line(b"hello\n\n"), b"hello");
+        assert_eq!(find_last_line(b"hello\nt\n\n"), b"t");
     }
 }
