@@ -318,14 +318,13 @@ impl FancyState {
             println!("{}", task_message(&task.message, delta, max_cols));
             lines += 1;
             if let Some(line) = &task.last_line {
-                println!(
-                    "{}",
-                    if line.len() >= max_cols {
-                        &line[..max_cols]
-                    } else {
-                        line
-                    }
-                );
+                let max_len = max_cols - 2;
+                let substring = if line.len() >= max_len {
+                    &line[..max_len]
+                } else {
+                    line
+                };
+                println!("  {}", substring);
                 lines += 1;
             }
         }
