@@ -166,3 +166,74 @@ example, we need to be able to grab the next `Ready` build to work on it, so
 there's a `VecDeque` holding those, while builds that go into the `Queued` state
 queue into separate run pools, and builds that are `Running` are just tracked
 with an integer counter on the run pool.
+
+## Spawning subprocesses
+
+Ninja (and n2) use `posix_spawn` to spawn subprocesses (on non-Windows). I saw a
+blog post recently that called `posix_spawn` something like a bloated wrapper
+for simpler primitives, but another view on it is is that `posix_spawn` has the
+platform-local libc's author's best knowledge about how to safely run processes.
+
+In particular, I was surprised to learn that Rust's built-in process spawning
+library [leaks file descriptors](https://github.com/evmar/n2/issues/14). (See
+also [the upstream Rust bug](https://github.com/rust-lang/rust/issues/95584),
+which says Cargo also ran into this.)
+
+## Subprocess command lines
+
+Ninja (and n2) model the commands they execute as strings, in that the build
+file language has you construct a `command = ...` string. However, on Unixes
+commands are fundamentally arrays of arguments. To convert a string to an array
+there must be some sort of parsing, and for this purpose we use `/bin/sh` to
+execute subcommands.
+
+`/bin/sh` is well-specified by POSIX and has the semantics everyone expects for
+how commands work, from quoting to `$FOO`-style environment expansion to
+`a && b` job control, pipelines, and so on. And it's also used everywhere on
+Unixes so it is fast.
+
+However it has some downsides, particularly in that it means the person
+generating the `.ninja` file has to know about these rules as well. For example,
+consider a build rule like this:
+
+```
+build foo$ bar baz: ...
+  command = pummel $in
+```
+
+Per the Ninja syntax rules (which are _not_ the shell rules), that build has two
+inputs, the files `foo bar` and `baz`. The Ninja variable `$in` then expands to
+the string `foo bar baz`, and once the shell parses the command line the
+`pummel` command receives three arguments in argv, `foo`, `bar`, and `baz`.
+which is not what you wanted.
+
+For these kinds of problems there are further shell tricks around handling
+spaces like how the string `"$@"` is expanded. In Ninja's case, we have the
+escape hatch that the `.ninja` file author can just provide the extra text
+explicitly, like in
+[this bug report and workaround](https://github.com/ninja-build/ninja/issues/1312).
+It's pretty unsatisfying though.
+
+In principle, it might be a better design for the Ninja language to instead have
+an array type that would allow us to construct an argv array directly. This
+would avoid shell-related quoting issues and save us a `/bin/sh` invocation on
+each process spawn. However, this is a pretty large departure from how Ninja
+currently works.
+
+Additionally, on Windows the platform behavior is reversed. On Windows command
+lines are fundamentally strings, and it's up to each executable to interpret
+those strings as they want. (Does this seem like a recipe for bugs? Yes it does.
+See [this blog post](https://neugierig.org/software/blog/2011/10/quoting.html)'s
+"Command lines" section for more on this.) So even if Ninja did work with arrays
+we'd then need some sort of stringification for Windows.
+
+On the subject of Windows: Ninja (and n2) spawn processes directly without an
+intervening shell. This has the consequence that commands like
+`my-compiler && echo hello` do not what you'd expect; the opposite of the Ninja
+behavior on Unixes. The `build.ninja` author instead has to themselves write out
+`cmd /c my-command` if they want the shell involved. We did this only because
+(in my recollection) the overhead of spawning `cmd` on Windows was noticeable.
+And further, `cmd` randomly limits its argument to 8kb.
+
+PS: in writing this section I noticed that cmd has
+[terrifying quoting rules](https://stackoverflow.com/questions/355988/how-do-i-deal-with-quote-characters-when-using-cmd-exe).
