@@ -18,7 +18,8 @@ Here are some things n2 improves over Ninja:
 ## Missing
 
 - Windows is incomplete.
-  - Ninja has special handling of backslashed paths that [n2 doesn't yet follow](https://github.com/evmar/n2/issues/42).
+  - Ninja has special handling of backslashed paths that
+    [n2 doesn't yet follow](https://github.com/evmar/n2/issues/42).
 - Dynamic dependencies.
 - `console` pool. n2 currently just treats `console` as an ordinary pool of
   depth 1, and only shows console output after the task completes. In practice
