@@ -198,12 +198,12 @@ consider a build rule like this:
 
 ```
 build foo$ bar baz: ...
-  command = pummel $in
+  command = pummel $out
 ```
 
 Per the Ninja syntax rules (which are _not_ the shell rules), that build has two
-inputs, the files `foo bar` and `baz`. The Ninja variable `$in` then expands to
-the string `foo bar baz`, and once the shell parses the command line the
+outputs, the files `foo bar` and `baz`. The Ninja variable `$out` then expands
+to the string `foo bar baz`, and once the shell parses the command line the
 `pummel` command receives three arguments in argv: `foo`, `bar`, and `baz`,
 which is not what you wanted.
 
