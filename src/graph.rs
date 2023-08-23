@@ -174,6 +174,11 @@ pub struct Build {
 
     /// Output files.
     pub outs: BuildOuts,
+
+    /// True if output of command should be hidden on successful completion.
+    pub hide_success: bool,
+    /// True if last line of output should not be shown in status.
+    pub hide_last_line: bool,
 }
 impl Build {
     pub fn new(loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
@@ -188,6 +193,8 @@ impl Build {
             ins,
             discovered_ins: Vec::new(),
             outs,
+            hide_success: false,
+            hide_last_line: false,
         }
     }
 
