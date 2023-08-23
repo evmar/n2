@@ -215,6 +215,7 @@ impl Runner {
         let depfile = build.depfile.clone().map(PathBuf::from);
         let rspfile = build.rspfile.clone();
         let parse_showincludes = build.parse_showincludes;
+        let hide_last_line = build.hide_last_line;
 
         let tid = self.tids.claim();
         let tx = self.tx.clone();
@@ -226,7 +227,9 @@ impl Runner {
                 parse_showincludes,
                 rspfile.as_ref(),
                 |line| {
-                    let _ = tx.send(Message::Output((id, line.to_owned())));
+                    if !hide_last_line {
+                        let _ = tx.send(Message::Output((id, line.to_owned())));
+                    }
                 },
             )
             .unwrap_or_else(|err| TaskResult {

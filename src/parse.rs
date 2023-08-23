@@ -157,6 +157,8 @@ impl<'text> Parser<'text> {
                     | "rspfile"
                     | "rspfile_content"
                     | "msvc_deps_prefix"
+                    | "hide_success"
+                    | "hide_last_line"
             )
         })?;
         Ok(Rule { name, vars })

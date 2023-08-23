@@ -180,7 +180,7 @@ impl FancyState {
         // Show task name, status, and output.
         let buf = &mut self.pending;
         match result.termination {
-            Termination::Success if result.output.is_empty() => {
+            Termination::Success if result.output.is_empty() || build.hide_success => {
                 // Common case: don't show anything.
                 return;
             }
