@@ -27,13 +27,13 @@ pub trait Progress {
     /// Called as individual build tasks progress through build states.
     fn update(&mut self, counts: &StateCounts);
 
-    /// Called when a task starts or completes.
+    /// Called when a task starts.
     fn task_started(&mut self, id: BuildId, build: &Build);
 
-    /// Called when a task's last line of output changes
+    /// Called when a task's last line of output changes.
     fn task_output(&mut self, id: BuildId, line: Vec<u8>);
 
-    /// Called when a task starts or completes.
+    /// Called when a task completes.
     fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult);
 
     /// Log some (debug) information, without corrupting the progress display.
