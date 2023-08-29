@@ -242,6 +242,7 @@ impl FancyState {
     fn task_output(&mut self, id: BuildId, line: Vec<u8>) {
         let task = self.tasks.iter_mut().find(|t| t.id == id).unwrap();
         task.last_line = Some(String::from_utf8_lossy(&line).into_owned());
+        self.dirty();
     }
 
     fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
