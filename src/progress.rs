@@ -27,11 +27,14 @@ pub trait Progress {
     /// Called as individual build tasks progress through build states.
     fn update(&mut self, counts: &StateCounts);
 
+    /// Called when a task starts or completes.
+    fn task_started(&mut self, id: BuildId, build: &Build);
+
     /// Called when a task's last line of output changes
     fn task_output(&mut self, id: BuildId, line: Vec<u8>);
 
     /// Called when a task starts or completes.
-    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>);
+    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult);
 
     /// Log some (debug) information, without corrupting the progress display.
     fn log(&mut self, msg: &str);
@@ -73,42 +76,35 @@ impl Progress for DumbConsoleProgress {
         // ignore
     }
 
+    fn task_started(&mut self, id: BuildId, build: &Build) {
+        self.log(if self.verbose {
+            build.cmdline.as_ref().unwrap()
+        } else {
+            build_message(build)
+        });
+        self.last_started = Some(id);
+    }
+
     fn task_output(&mut self, _id: BuildId, _line: Vec<u8>) {
         // ignore
     }
 
-    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
-        match result {
-            None => {
-                // Starting.
-                self.log(if self.verbose {
-                    build.cmdline.as_ref().unwrap()
+    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
+        match result.termination {
+            Termination::Success => {
+                if result.output.is_empty() {
+                    // Common success case, no need to print.
+                } else if self.last_started == Some(id) {
+                    // We just printed the command, don't print it again.
                 } else {
-                    build_message(build)
-                });
-                self.last_started = Some(id);
-            }
-            Some(result) => {
-                // Finished.
-                match result.termination {
-                    Termination::Success => {
-                        if result.output.is_empty() {
-                            // Common success case, no need to print.
-                        } else if self.last_started == Some(id) {
-                            // We just printed the command, don't print it again.
-                        } else {
-                            self.log(build_message(build))
-                        }
-                    }
-                    Termination::Interrupted => {
-                        self.log(&format!("interrupted: {}", build_message(build)))
-                    }
-                    Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
-                };
-                if !result.output.is_empty() {
-                    std::io::stdout().write_all(&result.output).unwrap();
+                    self.log(build_message(build))
                 }
             }
+            Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),
+            Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
+        };
+        if !result.output.is_empty() {
+            std::io::stdout().write_all(&result.output).unwrap();
         }
     }
 
@@ -181,12 +177,16 @@ impl Progress for FancyConsoleProgress {
         self.state.lock().unwrap().update(counts);
     }
 
+    fn task_started(&mut self, id: BuildId, build: &Build) {
+        self.state.lock().unwrap().task_started(id, build);
+    }
+
     fn task_output(&mut self, id: BuildId, line: Vec<u8>) {
         self.state.lock().unwrap().task_output(id, line);
     }
 
-    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
-        self.state.lock().unwrap().task_state(id, build, result);
+    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
+        self.state.lock().unwrap().task_finished(id, build, result);
     }
 
     fn log(&mut self, msg: &str) {
@@ -225,47 +225,41 @@ impl FancyState {
         self.dirty();
     }
 
+    fn task_started(&mut self, id: BuildId, build: &Build) {
+        if self.verbose {
+            self.log(build.cmdline.as_ref().unwrap());
+        }
+        let message = build_message(build);
+        self.tasks.push_back(Task {
+            id,
+            start: Instant::now(),
+            message: message.to_string(),
+            last_line: None,
+        });
+        self.dirty();
+    }
+
     fn task_output(&mut self, id: BuildId, line: Vec<u8>) {
         let task = self.tasks.iter_mut().find(|t| t.id == id).unwrap();
         task.last_line = Some(String::from_utf8_lossy(&line).into_owned());
     }
 
-    fn task_state(&mut self, id: BuildId, build: &Build, result: Option<&TaskResult>) {
-        match result {
-            None => {
-                // Task starting.
-                if self.verbose {
-                    self.log(build.cmdline.as_ref().unwrap());
-                }
-                let message = build_message(build);
-                self.tasks.push_back(Task {
-                    id,
-                    start: Instant::now(),
-                    message: message.to_string(),
-                    last_line: None,
-                });
-            }
-            Some(result) => {
-                // Task completed.
-                self.tasks
-                    .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
-                match result.termination {
-                    Termination::Success => {
-                        if result.output.is_empty() {
-                            // Common case: don't show anything.
-                        } else {
-                            self.log(build_message(build))
-                        }
-                    }
-                    Termination::Interrupted => {
-                        self.log(&format!("interrupted: {}", build_message(build)))
-                    }
-                    Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
-                };
-                if !result.output.is_empty() {
-                    std::io::stdout().write_all(&result.output).unwrap();
+    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
+        self.tasks
+            .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
+        match result.termination {
+            Termination::Success => {
+                if result.output.is_empty() {
+                    // Common case: don't show anything.
+                } else {
+                    self.log(build_message(build))
                 }
             }
+            Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),
+            Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
+        };
+        if !result.output.is_empty() {
+            std::io::stdout().write_all(&result.output).unwrap();
         }
         self.dirty();
     }

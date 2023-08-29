@@ -669,7 +669,7 @@ impl<'a> Work<'a> {
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
                 runner.start(id, build);
-                self.progress.task_state(id, build, None);
+                self.progress.task_started(id, build);
                 made_progress = true;
             }
 
@@ -718,7 +718,7 @@ impl<'a> Work<'a> {
             });
 
             self.progress
-                .task_state(task.buildid, build, Some(&task.result));
+                .task_finished(task.buildid, build, &task.result);
             match task.result.termination {
                 process::Termination::Failure => {
                     if let Some(failures_left) = &mut self.options.failures_left {
