@@ -44,7 +44,7 @@ impl PosixSpawnFileActions {
         fd: i32,
         path: &std::ffi::CStr,
         oflag: i32,
-        mode: u16,
+        mode: libc::mode_t,
     ) -> anyhow::Result<()> {
         unsafe {
             check_posix(
