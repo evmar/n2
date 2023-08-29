@@ -154,19 +154,22 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
         std::process::ExitStatus::from_raw(status)
     };
 
-    let mut termination = Termination::Success;
-    if !status.success() {
-        termination = Termination::Failure;
-        if let Some(sig) = status.signal() {
-            match sig {
-                libc::SIGINT => {
-                    output_cb("interrupted".as_bytes());
-                    termination = Termination::Interrupted;
-                }
-                _ => output_cb(format!("signal {}", sig).as_bytes()),
+    let termination = if status.success() {
+        Termination::Success
+    } else if let Some(sig) = status.signal() {
+        match sig {
+            libc::SIGINT => {
+                output_cb("interrupted".as_bytes());
+                Termination::Interrupted
+            }
+            _ => {
+                output_cb(format!("signal {}", sig).as_bytes());
+                Termination::Failure
             }
         }
-    }
+    } else {
+        Termination::Failure
+    };
 
     Ok(termination)
 }
