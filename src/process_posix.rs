@@ -92,7 +92,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
     // be done with the existing std::process API.
     let (pid, mut pipe) = unsafe {
         let mut pipe: [libc::c_int; 2] = std::mem::zeroed();
-        check_posix("pipe", libc::pipe(&mut pipe as *mut i32))?;
+        check_posix("pipe", libc::pipe(pipe.as_mut_ptr()))?;
 
         let mut actions = PosixSpawnFileActions::new()?;
         // open /dev/null over stdin
@@ -146,6 +146,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
         }
         output_cb(&buf[0..n]);
     }
+    drop(pipe);
 
     let status = unsafe {
         let mut status: i32 = 0;
