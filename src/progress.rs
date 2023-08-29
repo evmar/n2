@@ -36,7 +36,10 @@ pub trait Progress {
     /// Called when a task completes.
     fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult);
 
-    /// Log some (debug) information, without corrupting the progress display.
+    /// Log a line of output without corrupting the progress display.
+    /// This line is persisted beyond further progress updates.  For example,
+    /// used when a task fails; we want the final output to show that failed
+    /// task's output even if we do more work after it fails.
     fn log(&mut self, msg: &str);
 }
 
