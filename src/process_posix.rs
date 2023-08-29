@@ -39,6 +39,27 @@ impl PosixSpawnFileActions {
         &mut self.0
     }
 
+    fn addopen(
+        &mut self,
+        fd: i32,
+        path: &std::ffi::CStr,
+        oflag: i32,
+        mode: u16,
+    ) -> anyhow::Result<()> {
+        unsafe {
+            check_posix(
+                "posix_spawn_file_actions_addopen",
+                libc::posix_spawn_file_actions_addopen(
+                    self.as_ptr(),
+                    fd,
+                    path.as_ptr(),
+                    oflag,
+                    mode,
+                ),
+            )
+        }
+    }
+
     fn adddup2(&mut self, fd: i32, newfd: i32) -> anyhow::Result<()> {
         unsafe {
             check_posix(
@@ -74,6 +95,13 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
         check_posix("pipe", libc::pipe(&mut pipe as *mut i32))?;
 
         let mut actions = PosixSpawnFileActions::new()?;
+        // open /dev/null over stdin
+        actions.addopen(
+            0,
+            std::ffi::CStr::from_bytes_with_nul_unchecked(b"/dev/null\0"),
+            libc::O_RDONLY,
+            0,
+        )?;
         // stdout/stderr => pipe
         actions.adddup2(pipe[1], 1)?;
         actions.adddup2(pipe[1], 2)?;
