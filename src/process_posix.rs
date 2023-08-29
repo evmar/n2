@@ -43,7 +43,7 @@ impl PosixSpawnFileActions {
         unsafe {
             check_posix(
                 "posix_spawn_file_actions_adddup2",
-                libc::posix_spawn_file_actions_adddup2(&mut self.0, fd, newfd),
+                libc::posix_spawn_file_actions_adddup2(self.as_ptr(), fd, newfd),
             )
         }
     }
@@ -52,7 +52,7 @@ impl PosixSpawnFileActions {
         unsafe {
             check_posix(
                 "posix_spawn_file_actions_addclose",
-                libc::posix_spawn_file_actions_addclose(&mut self.0, fd),
+                libc::posix_spawn_file_actions_addclose(self.as_ptr(), fd),
             )
         }
     }
@@ -82,12 +82,12 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
         actions.addclose(pipe[1])?;
 
         let mut pid: libc::pid_t = 0;
-        let path = "/bin/sh\0".as_ptr() as *const i8;
+        let path = std::ffi::CStr::from_bytes_with_nul_unchecked(b"/bin/sh\0");
         let cmdline_nul = std::ffi::CString::new(cmdline).unwrap();
         let argv: [*const i8; 4] = [
-            path,
-            "-c\0".as_ptr() as *const i8,
-            cmdline_nul.as_ptr() as *const i8,
+            path.as_ptr(),
+            b"-c\0".as_ptr() as *const i8,
+            cmdline_nul.as_ptr(),
             std::ptr::null(),
         ];
 
@@ -95,7 +95,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
             "posix_spawn",
             libc::posix_spawn(
                 &mut pid,
-                path,
+                path.as_ptr(),
                 actions.as_ptr(),
                 std::ptr::null(),
                 std::mem::transmute(&argv),
