@@ -112,9 +112,9 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
         let mut pid: libc::pid_t = 0;
         let path = std::ffi::CStr::from_bytes_with_nul_unchecked(b"/bin/sh\0");
         let cmdline_nul = std::ffi::CString::new(cmdline).unwrap();
-        let argv: [*const i8; 4] = [
+        let argv: [*const libc::c_char; 4] = [
             path.as_ptr(),
-            b"-c\0".as_ptr() as *const i8,
+            b"-c\0".as_ptr() as *const _,
             cmdline_nul.as_ptr(),
             std::ptr::null(),
         ];
@@ -126,7 +126,9 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
                 path.as_ptr(),
                 actions.as_ptr(),
                 std::ptr::null(),
-                std::mem::transmute(&argv),
+                // posix_spawn wants mutable argv:
+                // https://stackoverflow.com/questions/50596439/can-string-literals-be-passed-in-posix-spawns-argv
+                argv.as_ptr() as *const *mut _,
                 environ,
             ),
         )?;
