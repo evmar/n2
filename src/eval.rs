@@ -28,6 +28,7 @@ impl<T: AsRef<str>> EvalString<T> {
     pub fn new(parts: Vec<EvalPart<T>>) -> Self {
         EvalString(parts)
     }
+
     pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
         let mut val = String::new();
         for part in &self.0 {
@@ -46,6 +47,7 @@ impl<T: AsRef<str>> EvalString<T> {
         val
     }
 }
+
 impl EvalString<&str> {
     pub fn into_owned(self) -> EvalString<String> {
         EvalString(
@@ -78,19 +80,26 @@ impl<'a> Env for Vars<'a> {
     }
 }
 
-/// A single scope's worth of variable definitions, before $-expansion.
-/// For variables attached to a rule we keep them unexpanded in memory because
-/// they may be expanded in multiple different ways depending on which rule uses
-/// them.
-impl Env for SmallMap<&str, EvalString<String>> {
+// Impl for Loader.rules
+impl Env for SmallMap<String, EvalString<String>> {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
-        // TODO(#83): this is wrong, it should consider envs.
+        // TODO(#83): this is wrong in that it doesn't include envs.
+        // This can occur when you have e.g.
+        //   rule foo
+        //     bar = $baz
+        //   build ...: foo
+        //     x = $bar
+        // When evaluating the value of `x`, we find `bar` in the rule but
+        // then need to pick the right env to evaluate $baz.  But we also don't
+        // wanna generically always use all available envs because we don't
+        // wanna get into evaluation cycles.
         self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
     }
 }
-impl Env for SmallMap<String, EvalString<String>> {
+
+// Impl for the variables attached to a build.
+impl Env for SmallMap<&str, String> {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
-        // TODO(#83): this is wrong, it should consider envs.
-        self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
+        self.get(var).map(|val| Cow::Borrowed(val.as_str()))
     }
 }

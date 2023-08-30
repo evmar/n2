@@ -289,7 +289,6 @@ build out: custom
     )?;
 
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
-    // WRONG(#83): this should be `echo 123 hello 123`.
-    assert_output_contains(&out, "echo  hello 123");
+    assert_output_contains(&out, "echo 123 hello 123");
     Ok(())
 }

@@ -105,14 +105,22 @@ impl Loader {
             graph: &self.graph,
             build: &build,
         };
-        let build_vars = &b.vars;
-        let envs: [&dyn eval::Env; 4] = [&implicit_vars, build_vars, rule, env];
 
-        let lookup = |key: &str| {
-            build_vars
-                .get(key)
-                .or_else(|| rule.get(key))
-                .map(|var| var.evaluate(&envs))
+        // Expand all build-scoped variable values, as they may be referred to in rules.
+        let mut build_vars = SmallMap::default();
+        for &(name, ref val) in b.vars.iter() {
+            let val = val.evaluate(&[&implicit_vars, &build_vars, env]);
+            build_vars.insert(name, val);
+        }
+
+        let envs: [&dyn eval::Env; 4] = [&implicit_vars, &build_vars, rule, env];
+        let lookup = |key: &str| -> Option<String> {
+            // Look up `key = ...` binding in build and rule block.
+            let val = match build_vars.get(key) {
+                Some(val) => val.clone(),
+                None => rule.get(key)?.evaluate(&envs),
+            };
+            Some(val)
         };
 
         let cmdline = lookup("command");
