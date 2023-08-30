@@ -267,3 +267,29 @@ build out: echo
 
     Ok(())
 }
+
+// Repro for issue #83.
+#[cfg(unix)]
+#[test]
+fn eval_twice() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            TOUCH_RULE,
+            "
+var = 123
+rule custom
+  command = $cmd $var
+build out: custom
+  cmd = echo $var hello
+",
+        ]
+        .join("\n"),
+    )?;
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    // WRONG(#83): this should be `echo 123 hello 123`.
+    assert_output_contains(&out, "echo  hello 123");
+    Ok(())
+}
