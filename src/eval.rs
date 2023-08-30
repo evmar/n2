@@ -82,9 +82,15 @@ impl<'a> Env for Vars<'a> {
 /// For variables attached to a rule we keep them unexpanded in memory because
 /// they may be expanded in multiple different ways depending on which rule uses
 /// them.
-pub type LazyVars = SmallMap<String, EvalString<String>>;
-impl Env for LazyVars {
+impl Env for SmallMap<&str, EvalString<String>> {
     fn get_var(&self, var: &str) -> Option<Cow<str>> {
+        // TODO(#83): this is wrong, it should consider envs.
+        self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
+    }
+}
+impl Env for SmallMap<String, EvalString<String>> {
+    fn get_var(&self, var: &str) -> Option<Cow<str>> {
+        // TODO(#83): this is wrong, it should consider envs.
         self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
     }
 }

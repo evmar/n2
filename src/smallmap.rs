@@ -38,10 +38,6 @@ impl<K: PartialEq, V> SmallMap<K, V> {
         None
     }
 
-    pub fn iter(&self) -> std::slice::Iter<(K, V)> {
-        self.0.iter()
-    }
-
     pub fn iter_mut(&mut self) -> std::slice::IterMut<(K, V)> {
         self.0.iter_mut()
     }

@@ -6,14 +6,19 @@
 //! text, marked with the lifetime `'text`.
 
 use crate::{
-    eval::{EvalPart, EvalString, LazyVars, Vars},
+    eval::{EvalPart, EvalString, Vars},
     scanner::{ParseError, ParseResult, Scanner},
+    smallmap::SmallMap,
 };
 use std::path::Path;
 
+/// A list of variable bindings, as expressed with syntax like:
+///   key = $val
+pub type VarList<'text> = SmallMap<&'text str, EvalString<String>>;
+
 pub struct Rule<'text> {
     pub name: &'text str,
-    pub vars: LazyVars,
+    pub vars: VarList<'text>,
 }
 
 pub struct Build<'text, Path> {
@@ -25,7 +30,7 @@ pub struct Build<'text, Path> {
     pub explicit_ins: usize,
     pub implicit_ins: usize,
     pub order_only_ins: usize,
-    pub vars: LazyVars,
+    pub vars: VarList<'text>,
 }
 
 #[derive(Debug)]
@@ -127,14 +132,14 @@ impl<'text> Parser<'text> {
         self.read_eval()
     }
 
-    fn read_scoped_vars(&mut self) -> ParseResult<LazyVars> {
-        let mut vars = LazyVars::default();
+    fn read_scoped_vars(&mut self) -> ParseResult<VarList<'text>> {
+        let mut vars = VarList::default();
         while self.scanner.peek() == ' ' {
             self.scanner.skip_spaces();
             let name = self.read_ident()?;
             self.scanner.skip_spaces();
             let val = self.read_vardef()?;
-            vars.insert(name.to_owned(), val.into_owned());
+            vars.insert(name, val.into_owned());
         }
         Ok(vars)
     }
@@ -153,8 +158,8 @@ impl<'text> Parser<'text> {
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars()?;
         let mut depth = 0;
-        for (key, val) in vars.iter() {
-            match key.as_str() {
+        for (key, val) in vars.into_iter() {
+            match key {
                 "depth" => {
                     let val = val.evaluate(&[]);
                     depth = match val.parse::<usize>() {

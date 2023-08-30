@@ -46,7 +46,8 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 struct Loader {
     graph: graph::Graph,
     default: Vec<FileId>,
-    rules: HashMap<String, eval::LazyVars>,
+    /// rule name -> list of (key, val)
+    rules: HashMap<String, SmallMap<String, eval::EvalString<String>>>,
     pools: SmallMap<String, usize>,
 }
 
@@ -65,9 +66,7 @@ impl Loader {
     fn new() -> Self {
         let mut loader = Loader::default();
 
-        loader
-            .rules
-            .insert("phony".to_owned(), eval::LazyVars::default());
+        loader.rules.insert("phony".to_owned(), SmallMap::default());
 
         loader
     }
@@ -177,7 +176,11 @@ impl Loader {
                     self.default.extend(defaults);
                 }
                 Statement::Rule(rule) => {
-                    self.rules.insert(rule.name.to_owned(), rule.vars);
+                    let mut vars: SmallMap<String, eval::EvalString<String>> = SmallMap::default();
+                    for (name, val) in rule.vars.into_iter() {
+                        vars.insert(name.to_owned(), val);
+                    }
+                    self.rules.insert(rule.name.to_owned(), vars);
                 }
                 Statement::Build(build) => self.add_build(filename.clone(), &parser.vars, build)?,
                 Statement::Pool(pool) => {
