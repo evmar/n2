@@ -20,6 +20,43 @@ fn check_posix(func: &str, ret: libc::c_int) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Wraps libc::posix_spawnattr_t, in particular to implement Drop.
+struct PosixSpawnAttr(libc::posix_spawnattr_t);
+
+impl PosixSpawnAttr {
+    fn new() -> anyhow::Result<Self> {
+        unsafe {
+            let mut attr: libc::posix_spawnattr_t = std::mem::zeroed();
+            check_posix(
+                "posix_spawnattr_init",
+                libc::posix_spawnattr_init(&mut attr),
+            )?;
+            Ok(Self(attr))
+        }
+    }
+
+    fn as_ptr(&mut self) -> *mut libc::posix_spawnattr_t {
+        &mut self.0
+    }
+
+    fn setflags(&mut self, flags: libc::c_short) -> anyhow::Result<()> {
+        unsafe {
+            check_posix(
+                "posix_spawnattr_setflags",
+                libc::posix_spawnattr_setflags(self.as_ptr(), flags),
+            )
+        }
+    }
+}
+
+impl Drop for PosixSpawnAttr {
+    fn drop(&mut self) {
+        unsafe {
+            libc::posix_spawnattr_destroy(self.as_ptr());
+        }
+    }
+}
+
 /// Wraps libc::posix_spawn_file_actions_t, in particular to implement Drop.
 struct PosixSpawnFileActions(libc::posix_spawn_file_actions_t);
 
@@ -85,14 +122,38 @@ impl Drop for PosixSpawnFileActions {
     }
 }
 
+/// Create an anonymous pipe as in libc::pipe(), but using pipe2() when available
+/// to set CLOEXEC flag.
+fn pipe2() -> anyhow::Result<[libc::c_int; 2]> {
+    // Compare to: https://doc.rust-lang.org/src/std/sys/unix/pipe.rs.html
+    unsafe {
+        let mut pipe: [libc::c_int; 2] = std::mem::zeroed();
+
+        // Mac: specially handled below with POSIX_SPAWN_CLOEXEC_DEFAULT
+        #[cfg(target_os = "macos")]
+        check_posix("pipe", libc::pipe(pipe.as_mut_ptr()))?;
+
+        // Assume all non-Mac have pipe2; we can refine this on user feedback.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        check_posix("pipe", libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC))?;
+
+        Ok(pipe)
+    }
+}
+
 pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::Result<Termination> {
     // Spawn the subprocess using posix_spawn with output redirected to the pipe.
     // We don't use Rust's process spawning because of issue #14 and because
     // we want to feed both stdout and stderr into the same pipe, which cannot
     // be done with the existing std::process API.
     let (pid, mut pipe) = unsafe {
-        let mut pipe: [libc::c_int; 2] = std::mem::zeroed();
-        check_posix("pipe", libc::pipe(pipe.as_mut_ptr()))?;
+        let pipe = pipe2()?;
+
+        let mut attr = PosixSpawnAttr::new()?;
+
+        // Apple-specific extension: close any open fds.
+        #[cfg(target_os = "macos")]
+        attr.setflags(libc::POSIX_SPAWN_CLOEXEC_DEFAULT as _)?;
 
         let mut actions = PosixSpawnFileActions::new()?;
         // open /dev/null over stdin
@@ -125,7 +186,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
                 &mut pid,
                 path.as_ptr(),
                 actions.as_ptr(),
-                std::ptr::null(),
+                attr.as_ptr(),
                 // posix_spawn wants mutable argv:
                 // https://stackoverflow.com/questions/50596439/can-string-literals-be-passed-in-posix-spawns-argv
                 argv.as_ptr() as *const *mut _,
