@@ -569,6 +569,14 @@ impl<'a> Work<'a> {
         // A phony build can never be dirty.
         let phony = build.cmdline.is_none();
         if phony {
+            self.record_finished(
+                id,
+                task::TaskResult {
+                    termination: process::Termination::Success,
+                    output: vec![],
+                    discovered_deps: None,
+                },
+            )?;
             return Ok(false);
         }
 
