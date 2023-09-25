@@ -404,7 +404,8 @@ impl<'a> Work<'a> {
                         // were present, then we'd already have file_state for this
                         // file and wouldn't get here.
                         anyhow::bail!(
-                            "used generated file {}, but has no dependency path to it",
+                            "{}: used generated file {}, but has no dependency path to it",
+                            build.location,
                             file.name
                         );
                     }
@@ -445,7 +446,7 @@ impl<'a> Work<'a> {
         if deps_changed {
             if let Some(missing) = self.ensure_input_files(id, true)? {
                 anyhow::bail!(
-                    "{} depfile references nonexistent {}",
+                    "{}: depfile references nonexistent {}",
                     self.graph.builds[id].location,
                     self.graph.file(missing).name
                 );
@@ -544,10 +545,14 @@ impl<'a> Work<'a> {
         // and if we're checking if it's dirty we are visiting it the first
         // time, so we stat unconditionally.
         // This is looking at if the outputs are already present.
-        for &id in self.graph.builds[id].outs() {
+        let build = &self.graph.builds[id];
+        for &id in build.outs() {
             let file = self.graph.file(id);
             if self.file_state.get(id).is_some() {
-                panic!("expected no file state for {}", file.name);
+                panic!(
+                    "{}: expected no file state for {}",
+                    build.location, file.name
+                );
             }
             let mtime = self.file_state.stat(id, file.path())?;
             if mtime == MTime::Missing {
