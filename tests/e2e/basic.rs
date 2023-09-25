@@ -292,3 +292,26 @@ build out: custom
     assert_output_contains(&out, "echo 123 hello 123");
     Ok(())
 }
+
+// Repro for issue #84.
+#[test]
+fn phony_depends() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            "
+rule touch
+  command = touch outfile",
+            "
+build out1: touch
+build out2: phony out1
+build out3: phony out2
+",
+        ]
+        .join("\n"),
+    )?;
+    space.run_expect(&mut n2_command(vec!["out3"]))?;
+    space.read("outfile")?;
+    Ok(())
+}

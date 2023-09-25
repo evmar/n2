@@ -362,6 +362,11 @@ impl FileState {
         self.0.set_grow(id, Some(mtime), None);
         Ok(mtime)
     }
+
+    /// Set a file to Missing.  This is used for outputs of phony rules.
+    pub fn set_missing(&mut self, id: FileId) {
+        self.0.set_grow(id, Some(MTime::Missing), None);
+    }
 }
 
 #[derive(Default)]

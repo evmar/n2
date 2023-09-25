@@ -513,24 +513,10 @@ impl<'a> Work<'a> {
     /// Otherwise returns the missing id if any expected but not required files,
     /// e.g. outputs, are missing, implying that the build needs to be executed.
     fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
-        let phony = self.graph.builds[id].cmdline.is_none();
-        // TODO: do we just return true immediately if phony?
-        // There are likely weird interactions with builds that depend on
-        // a phony output, despite that not really making sense.
-
-        // True if we need to work around
-        //   https://github.com/ninja-build/ninja/issues/1779
-        // which is a bug that a phony rule with a missing input
-        // dependency doesn't fail the build.
-        // TODO: key this behavior off of the "ninja compat" flag.
-        // TODO: reconsider how phony deps work, maybe we should always promote
-        // phony deps to order-only?
-        let workaround_missing_phony_deps = phony;
-
         // Ensure we have state for all input files.
         if let Some(missing) = self.ensure_input_files(id, false)? {
             let file = self.graph.file(missing);
-            if file.input.is_none() && !workaround_missing_phony_deps {
+            if file.input.is_none() {
                 let build = &self.graph.builds[id];
                 anyhow::bail!("{}: input {} missing", build.location, file.name);
             }
@@ -564,21 +550,44 @@ impl<'a> Work<'a> {
         Ok(None)
     }
 
+    /// Like check_build_files_missing, but for phony rules, which have
+    /// different behavior for both inputs and outputs.
+    fn check_build_files_missing_phony(&mut self, id: BuildId) {
+        // We don't consider the input files.  This works around
+        //   https://github.com/ninja-build/ninja/issues/1779
+        // which is a bug that a phony rule with a missing input
+        // dependency doesn't fail the build.
+        // TODO: key this behavior off of the "ninja compat" flag.
+        // TODO: reconsider how phony deps work, maybe we should always promote
+        // phony deps to order-only?
+
+        // Maintain the invariant that we have stat info for all outputs.
+        // This build didn't run anything so the output is not expected to
+        // exist.
+        // TODO: what should happen if a rule uses a phony output as its own input?
+        // The Ninja manual suggests you can use phony rules to aggregate outputs
+        // together, so we might need to create some sort of fake mtime here?
+        let build = &self.graph.builds[id];
+        for &id in build.outs() {
+            self.file_state.set_missing(id);
+        }
+    }
+
     /// Check a ready build for whether it needs to run, returning true if so.
     /// Prereq: any dependent input is already generated.
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
-        let file_missing = self.check_build_files_missing(id)?;
-
         let build = &self.graph.builds[id];
-
-        // A phony build can never be dirty.
         let phony = build.cmdline.is_none();
-        if phony {
-            return Ok(false);
-        }
+        let file_missing = if phony {
+            self.check_build_files_missing_phony(id);
+            return Ok(false); // Do not need to run.
+        } else {
+            self.check_build_files_missing(id)?
+        };
 
         // If any files are missing, the build is dirty without needing
         // to consider hashes.
+        let build = &self.graph.builds[id];
         if let Some(missing) = file_missing {
             if self.options.explain {
                 self.progress.log(&format!(
