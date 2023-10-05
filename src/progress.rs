@@ -95,10 +95,8 @@ impl Progress for DumbConsoleProgress {
     fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
         match result.termination {
             Termination::Success => {
-                if result.output.is_empty() {
-                    // Common success case, no need to print.
-                } else if self.last_started == Some(id) {
-                    // We just printed the command, don't print it again.
+                if result.output.is_empty() || self.last_started == Some(id) {
+                    // Output is empty, or we just printed the command, don't print it again.
                 } else {
                     self.log(build_message(build))
                 }

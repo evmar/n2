@@ -691,21 +691,19 @@ impl<'a> Work<'a> {
                 if !self.check_build_dirty(id)? {
                     // Not dirty; go directly to the Done state.
                     self.ready_dependents(id);
+                } else if self.options.adopt {
+                    // Act as if the target already finished.
+                    self.record_finished(
+                        id,
+                        task::TaskResult {
+                            termination: process::Termination::Success,
+                            output: vec![],
+                            discovered_deps: None,
+                        },
+                    )?;
+                    self.ready_dependents(id);
                 } else {
-                    if self.options.adopt {
-                        // Act as if the target already finished.
-                        self.record_finished(
-                            id,
-                            task::TaskResult {
-                                termination: process::Termination::Success,
-                                output: vec![],
-                                discovered_deps: None,
-                            },
-                        )?;
-                        self.ready_dependents(id);
-                    } else {
-                        self.build_states.enqueue(id, &self.graph.builds[id])?;
-                    }
+                    self.build_states.enqueue(id, &self.graph.builds[id])?;
                 }
                 made_progress = true;
             }
@@ -762,7 +760,7 @@ impl<'a> Work<'a> {
         // "interrupted by user" and exit with success, and in that case we
         // don't want n2 to print a "succeeded" message afterwards.
         let success = tasks_failed == 0 && !signal::was_interrupted();
-        Ok(success.then(|| tasks_done))
+        Ok(success.then_some(tasks_done))
     }
 }
 

@@ -138,7 +138,7 @@ struct Args {
 }
 
 fn run_impl() -> anyhow::Result<i32> {
-    let mut fake_ninja_compat = Path::new(&std::env::args().nth(0).unwrap())
+    let mut fake_ninja_compat = Path::new(&std::env::args().next().unwrap())
         .file_name()
         .unwrap()
         == std::ffi::OsStr::new(&format!("ninja{}", std::env::consts::EXE_SUFFIX));

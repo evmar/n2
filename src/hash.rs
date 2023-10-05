@@ -21,7 +21,7 @@ pub struct BuildHash(pub u64);
 /// implement it a second time for "-d explain" debug purposes.
 trait Manifest {
     /// Write a list of files+mtimes.  desc is used only for "-d explain" output.
-    fn write_files<'a>(
+    fn write_files(
         &mut self,
         desc: &str,
         files: &GraphFiles,
@@ -133,27 +133,27 @@ impl Manifest for ExplainHash {
         file_state: &FileState,
         ids: &[FileId],
     ) {
-        write!(&mut self.text, "{desc}:\n").unwrap();
+        writeln!(&mut self.text, "{desc}:").unwrap();
         for &id in ids {
             let (name, mtime) = get_fileid_status(files, file_state, id);
             let millis = mtime
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-            write!(&mut self.text, "  {millis} {name}\n").unwrap();
+            writeln!(&mut self.text, "  {millis} {name}").unwrap();
         }
     }
 
     fn write_rsp(&mut self, rspfile: &RspFile) {
-        write!(&mut self.text, "rspfile path: {}\n", rspfile.path.display()).unwrap();
+        writeln!(&mut self.text, "rspfile path: {}", rspfile.path.display()).unwrap();
 
         let mut h = DefaultHasher::new();
         h.write(rspfile.content.as_bytes());
-        write!(&mut self.text, "rspfile hash: {:x}\n", h.finish()).unwrap();
+        writeln!(&mut self.text, "rspfile hash: {:x}", h.finish()).unwrap();
     }
 
     fn write_cmdline(&mut self, cmdline: &str) {
-        write!(&mut self.text, "cmdline: {}\n", cmdline).unwrap();
+        writeln!(&mut self.text, "cmdline: {}", cmdline).unwrap();
     }
 }
 

@@ -7,8 +7,8 @@ use std::io::Write;
 
 pub struct Criterion {}
 impl Criterion {
-    fn bench_function(&mut self, _name: &str, _f: impl Fn(&mut Criterion) -> ()) {}
-    fn iter(&mut self, _f: impl Fn() -> ()) {}
+    fn bench_function(&mut self, _name: &str, _f: impl Fn(&mut Criterion)) {}
+    fn iter(&mut self, _f: impl Fn()) {}
 }
 
 pub fn bench_canon(c: &mut Criterion) {

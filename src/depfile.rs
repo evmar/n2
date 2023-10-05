@@ -95,7 +95,7 @@ mod tests {
     }
 
     fn test_for_crlf(input: &str, test: fn(String)) {
-        let crlf = input.replace("\n", "\r\n");
+        let crlf = input.replace('\n', "\r\n");
         for test_case in [String::from(input), crlf] {
             test(test_case);
         }
