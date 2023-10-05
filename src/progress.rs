@@ -318,7 +318,7 @@ impl FancyState {
             if let Some(line) = &task.last_line {
                 let max_len = max_cols - 2;
                 let substring = if line.len() >= max_len {
-                    &line[..max_len]
+                    &line[..char_boundary(line, max_len)]
                 } else {
                     line
                 };
@@ -354,6 +354,16 @@ fn task_message(message: &str, seconds: usize, max_cols: usize) -> String {
     }
     out.push_str(&time_note);
     out
+}
+
+fn char_boundary(s: &str, mut max: usize) -> usize {
+    if max >= s.len() {
+        return max;
+    }
+    while !s.is_char_boundary(max) {
+        max -= 1;
+    }
+    max
 }
 
 /// Render a StateCounts as an ASCII progress bar.
