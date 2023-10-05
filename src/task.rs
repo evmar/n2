@@ -208,7 +208,7 @@ impl Runner {
 
     pub fn start(&mut self, id: BuildId, build: &Build) {
         let cmdline = build.cmdline.clone().unwrap();
-        let depfile = build.depfile.clone().map(|path| PathBuf::from(path));
+        let depfile = build.depfile.clone().map(PathBuf::from);
         let rspfile = build.rspfile.clone();
         let parse_showincludes = build.parse_showincludes;
 
