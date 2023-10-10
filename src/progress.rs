@@ -317,12 +317,7 @@ impl FancyState {
             lines += 1;
             if let Some(line) = &task.last_line {
                 let max_len = max_cols - 2;
-                let substring = if line.len() >= max_len {
-                    &line[..char_boundary(line, max_len)]
-                } else {
-                    line
-                };
-                println!("  {}", substring);
+                println!("  {}", truncate(line, max_len));
                 lines += 1;
             }
         }
@@ -356,14 +351,14 @@ fn task_message(message: &str, seconds: usize, max_cols: usize) -> String {
     out
 }
 
-fn char_boundary(s: &str, mut max: usize) -> usize {
+fn truncate(s: &str, mut max: usize) -> &str {
     if max >= s.len() {
-        return max;
+        return s;
     }
     while !s.is_char_boundary(max) {
         max -= 1;
     }
-    max
+    &s[..max]
 }
 
 /// Render a StateCounts as an ASCII progress bar.
@@ -447,5 +442,14 @@ mod tests {
     fn task_rendering_with_time() {
         assert_eq!(task_message("building foo.o", 5, 80), "building foo.o (5s)");
         assert_eq!(task_message("building foo.o", 5, 10), "bu... (5s)");
+    }
+
+    #[test]
+    fn truncate_utf8() {
+        let text = "utf8 progress bar: ━━━━━━━━━━━━";
+        for len in 10..text.len() {
+            // test passes if this doesn't panic
+            truncate(text, len);
+        }
     }
 }
