@@ -317,6 +317,10 @@ impl GraphFiles {
             id
         })
     }
+
+    pub fn all_ids(&self) -> impl Iterator<Item = FileId> {
+        (0..self.by_id.next_id().0).map(|id| FileId(id))
+    }
 }
 
 /// MTime info gathered for a file.  This also models "file is absent".

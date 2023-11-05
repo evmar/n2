@@ -7,7 +7,7 @@ fn empty_file() -> anyhow::Result<()> {
     let out = space.run(&mut n2_command(vec![]))?;
     assert_eq!(
         std::str::from_utf8(&out.stdout)?,
-        "n2: error: no path specified and no default\n"
+        "no path specified and no default target; building everything\n"
     );
     Ok(())
 }

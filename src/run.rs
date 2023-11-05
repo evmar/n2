@@ -77,7 +77,9 @@ fn build(
             work.want_file(target)?;
         }
     } else {
-        anyhow::bail!("no path specified and no default");
+        work.progress
+            .log("no path specified and no default target; building everything");
+        work.want_every_file(build_file_target)?;
     }
 
     let tasks = trace::scope("work.run", || work.run())?;

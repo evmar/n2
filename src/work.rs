@@ -241,11 +241,11 @@ impl BuildStates {
             anyhow::bail!(err);
         }
 
-        stack.push(id);
         if let Some(bid) = graph.file(id).input {
+            stack.push(id);
             self.want_build(graph, stack, bid)?;
+            stack.pop();
         }
-        stack.pop();
         Ok(())
     }
 
@@ -309,7 +309,7 @@ pub struct Options {
 pub struct Work<'a> {
     graph: Graph,
     db: db::Writer,
-    progress: &'a mut dyn Progress,
+    pub progress: &'a mut dyn Progress,
     options: Options,
     file_state: FileState,
     last_hashes: Hashes,
@@ -345,6 +345,18 @@ impl<'a> Work<'a> {
     pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
         let mut stack = Vec::new();
         self.build_states.want_file(&self.graph, &mut stack, id)
+    }
+
+    pub fn want_every_file(&mut self, exclude: Option<FileId>) -> anyhow::Result<()> {
+        for id in self.graph.files.all_ids() {
+            if let Some(exclude) = exclude {
+                if id == exclude {
+                    continue;
+                }
+            }
+            self.want_file(id)?;
+        }
+        Ok(())
     }
 
     /// Check whether a given build is ready, generally after one of its inputs
