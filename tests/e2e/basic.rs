@@ -5,10 +5,7 @@ fn empty_file() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write("build.ninja", "")?;
     let out = space.run(&mut n2_command(vec![]))?;
-    assert_eq!(
-        std::str::from_utf8(&out.stdout)?,
-        "no path specified and no default target; building everything\n"
-    );
+    assert_eq!(std::str::from_utf8(&out.stdout)?, "n2: no work to do\n");
     Ok(())
 }
 

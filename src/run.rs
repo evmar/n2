@@ -77,8 +77,6 @@ fn build(
             work.want_file(target)?;
         }
     } else {
-        work.progress
-            .log("no path specified and no default target; building everything");
         work.want_every_file(build_file_target)?;
     }
 
