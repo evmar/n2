@@ -93,7 +93,7 @@ impl<'text> Parser<'text> {
                 ' ' | '\t' => return self.scanner.parse_error("unexpected whitespace"),
                 _ => {
                     let ident = self.read_ident()?;
-                    self.scanner.skip_spaces();
+                    self.skip_spaces();
                     match ident {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
                         "build" => return Ok(Some(Statement::Build(self.read_build(loader)?))),
@@ -125,19 +125,21 @@ impl<'text> Parser<'text> {
         }
     }
 
+    /// Read the `= ...` part of a variable definition.
     fn read_vardef(&mut self) -> ParseResult<EvalString<&'text str>> {
-        self.scanner.skip_spaces();
+        self.skip_spaces();
         self.scanner.expect('=')?;
-        self.scanner.skip_spaces();
+        self.skip_spaces();
         self.read_eval()
     }
 
+    /// Read a collection of `  foo = bar` variables, with leading indent.
     fn read_scoped_vars(&mut self) -> ParseResult<VarList<'text>> {
         let mut vars = VarList::default();
         while self.scanner.peek() == ' ' {
             self.scanner.skip_spaces();
             let name = self.read_ident()?;
-            self.scanner.skip_spaces();
+            self.skip_spaces();
             let val = self.read_vardef()?;
             vars.insert(name, val.into_owned());
         }
@@ -184,10 +186,10 @@ impl<'text> Parser<'text> {
         loader: &mut L,
         v: &mut Vec<L::Path>,
     ) -> ParseResult<()> {
-        self.scanner.skip_spaces();
+        self.skip_spaces();
         while let Some(path) = self.read_path(loader)? {
             v.push(path);
-            self.scanner.skip_spaces();
+            self.skip_spaces();
         }
         Ok(())
     }
@@ -204,7 +206,7 @@ impl<'text> Parser<'text> {
         }
 
         self.scanner.expect(':')?;
-        self.scanner.skip_spaces();
+        self.skip_spaces();
         let rule = self.read_ident()?;
 
         let mut ins = Vec::new();
@@ -246,10 +248,7 @@ impl<'text> Parser<'text> {
 
     fn read_default<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Vec<L::Path>> {
         let mut defaults = Vec::new();
-        while let Some(path) = self.read_path(loader)? {
-            defaults.push(path);
-            self.scanner.skip_spaces();
-        }
+        self.read_paths_to(loader, &mut defaults)?;
         if defaults.is_empty() {
             return self.scanner.parse_error("expected path");
         }
@@ -407,6 +406,25 @@ impl<'text> Parser<'text> {
             }
         })
     }
+
+    fn skip_spaces(&mut self) {
+        loop {
+            match self.scanner.read() {
+                ' ' => {}
+                '$' => {
+                    if self.scanner.peek() != '\n' {
+                        self.scanner.back();
+                        return;
+                    }
+                    self.scanner.next();
+                }
+                _ => {
+                    self.scanner.back();
+                    return;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -464,6 +482,17 @@ mod tests {
                 name: "x.y",
                 vars: _
             })
+        ));
+    }
+
+    #[test]
+    fn parse_trailing_newline() {
+        let mut buf = "build$\n foo$\n : $\n  touch $\n\n".as_bytes().to_vec();
+        let mut parser = Parser::new(&mut buf);
+        let stmt = parser.read(&mut StringLoader {}).unwrap().unwrap();
+        assert!(matches!(
+            stmt,
+            Statement::Build(Build { rule: "touch", .. })
         ));
     }
 }
