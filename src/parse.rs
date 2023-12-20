@@ -30,6 +30,7 @@ pub struct Build<'text, Path> {
     pub explicit_ins: usize,
     pub implicit_ins: usize,
     pub order_only_ins: usize,
+    pub validation_ins: usize,
     pub vars: VarList<'text>,
 }
 
@@ -215,7 +216,8 @@ impl<'text> Parser<'text> {
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            if self.scanner.peek() == '|' {
+            let peek = self.scanner.peek();
+            if peek == '|' || peek == '@' {
                 self.scanner.back();
             } else {
                 self.read_paths_to(loader, &mut ins)?;
@@ -225,10 +227,21 @@ impl<'text> Parser<'text> {
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            self.scanner.expect('|')?;
-            self.read_paths_to(loader, &mut ins)?;
+            if self.scanner.peek() == '@' {
+                self.scanner.back();
+            } else {
+                self.scanner.expect('|')?;
+                self.read_paths_to(loader, &mut ins)?;
+            }
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
+
+        if self.scanner.peek() == '|' {
+            self.scanner.next();
+            self.scanner.expect('@')?;
+            self.read_paths_to(loader, &mut ins)?;
+        }
+        let validation_ins = ins.len() - order_only_ins - implicit_ins - explicit_ins;
 
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
@@ -242,6 +255,7 @@ impl<'text> Parser<'text> {
             explicit_ins,
             implicit_ins,
             order_only_ins,
+            validation_ins,
             vars,
         })
     }

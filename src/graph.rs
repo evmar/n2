@@ -80,8 +80,9 @@ pub struct BuildIns {
     pub ids: Vec<FileId>,
     pub explicit: usize,
     pub implicit: usize,
-    // order_only count implied by other counts.
-    // pub order_only: usize,
+    pub order_only: usize,
+    // validation count implied by other counts.
+    // pub validation: usize,
 }
 
 /// Output files from a Build.
@@ -204,7 +205,15 @@ impl Build {
     /// Note that we don't order on discovered_ins, because they're not allowed to
     /// affect build order.
     pub fn ordering_ins(&self) -> &[FileId] {
-        &self.ins.ids
+        &self.ins.ids[0..(self.ins.order_only + self.ins.explicit + self.ins.implicit)]
+    }
+
+    /// Inputs that are needed before validating information.
+    /// Validation inputs will be built whenever this Build is built, but this Build will not
+    /// wait for them to complete before running. The validation inputs can fail to build, which
+    /// will cause the overall build to fail.
+    pub fn validation_ins(&self) -> &[FileId] {
+        &self.ins.ids[(self.ins.order_only + self.ins.explicit + self.ins.implicit)..]
     }
 
     /// Potentially update discovered_ins with a new set of deps, returning true if they changed.

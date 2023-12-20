@@ -82,7 +82,8 @@ impl Loader {
             ids: b.ins,
             explicit: b.explicit_ins,
             implicit: b.implicit_ins,
-            // order_only is unused
+            order_only: b.order_only_ins,
+            // validation is implied by the other counts
         };
         let outs = graph::BuildOuts {
             ids: b.outs,
