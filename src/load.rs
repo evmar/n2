@@ -8,9 +8,9 @@ use crate::{
     {db, eval, graph, parse, trace},
 };
 use anyhow::{anyhow, bail};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::{borrow::Cow, path::Path};
 
 /// A variable lookup environment for magic $in/$out variables.
 struct BuildImplicitVars<'a> {
@@ -49,6 +49,7 @@ struct Loader {
     /// rule name -> list of (key, val)
     rules: HashMap<String, SmallMap<String, eval::EvalString<String>>>,
     pools: SmallMap<String, usize>,
+    builddir: Option<String>,
 }
 
 impl parse::Loader for Loader {
@@ -196,6 +197,7 @@ impl Loader {
                 }
             };
         }
+        self.builddir = parser.vars.get("builddir").cloned();
         Ok(())
     }
 }
@@ -221,7 +223,14 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
     })?;
     let mut hashes = graph::Hashes::default();
     let db = trace::scope("db::open", || {
-        db::open(".n2_db", &mut loader.graph, &mut hashes)
+        let mut db_path = PathBuf::from(".n2_db");
+        if let Some(builddir) = &loader.builddir {
+            db_path = Path::new(&builddir).join(db_path);
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+        };
+        db::open(&db_path, &mut loader.graph, &mut hashes)
     })
     .map_err(|err| anyhow!("load .n2_db: {}", err))?;
     Ok(State {

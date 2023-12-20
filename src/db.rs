@@ -12,6 +12,7 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::mem::MaybeUninit;
+use std::path::Path;
 
 const VERSION: u32 = 1;
 
@@ -111,7 +112,7 @@ pub struct Writer {
 }
 
 impl Writer {
-    fn create(path: &str) -> std::io::Result<Self> {
+    fn create(path: &Path) -> std::io::Result<Self> {
         let f = std::fs::File::create(path)?;
         let mut w = Writer {
             ids: IdMap::default(),
@@ -333,7 +334,7 @@ impl<'a> Reader<'a> {
 }
 
 /// Opens or creates an on-disk database, loading its state into the provided Graph.
-pub fn open(path: &str, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
+pub fn open(path: &Path, graph: &mut Graph, hashes: &mut Hashes) -> anyhow::Result<Writer> {
     match std::fs::OpenOptions::new()
         .read(true)
         .append(true)

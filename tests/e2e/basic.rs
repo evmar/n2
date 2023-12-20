@@ -312,3 +312,22 @@ build out3: phony out2
     space.read("outfile")?;
     Ok(())
 }
+
+// builddir controls where .n2_db is written.
+#[test]
+fn builddir() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            "builddir = foo",
+            TOUCH_RULE,
+            "build $builddir/bar: touch",
+            "",
+        ]
+        .join("\n"),
+    )?;
+    space.run_expect(&mut n2_command(vec!["foo/bar"]))?;
+    space.read("foo/.n2_db")?;
+    Ok(())
+}
