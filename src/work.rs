@@ -216,6 +216,13 @@ impl BuildStates {
             self.want_file(graph, stack, id)?;
             ready = ready && graph.file(id).input.is_none();
         }
+        for &id in build.validation_ins() {
+            // This build doesn't technically depend on the validation inputs, so
+            // allocate a new stack. Validation inputs could in theory depend on this build's
+            // outputs.
+            let mut stack = Vec::new();
+            self.want_file(graph, &mut stack, id)?;
+        }
 
         if ready {
             self.set(id, build, BuildState::Ready);

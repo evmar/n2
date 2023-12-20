@@ -4,6 +4,7 @@ mod basic;
 mod discovered;
 mod missing;
 mod regen;
+mod validations;
 
 pub fn n2_binary() -> std::path::PathBuf {
     std::env::current_exe()
@@ -70,6 +71,10 @@ impl TestSpace {
 
     pub fn metadata(&self, path: &str) -> std::io::Result<std::fs::Metadata> {
         std::fs::metadata(self.dir.path().join(path))
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        self.dir.path()
     }
 
     /// Invoke n2, returning process output.
