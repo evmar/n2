@@ -6,6 +6,7 @@ use std::ffi::c_void;
 use std::io::Read;
 use std::os::windows::io::{FromRawHandle, OwnedHandle};
 use std::os::windows::prelude::AsRawHandle;
+use std::pin::{pin, Pin};
 use windows_sys::Win32::{
     Foundation::*,
     Security::SECURITY_ATTRIBUTES,
@@ -83,9 +84,17 @@ impl Drop for ProcessInformation {
     }
 }
 
-/// Wrapper for PROC_THREAD_ATTRIBUTE_LIST.  This is a type whose size we discover at runtime.
-struct ProcThreadAttributeList(Box<[u8]>);
-impl ProcThreadAttributeList {
+/// Wrapper for PROC_THREAD_ATTRIBUTE_LIST.
+/// Per MSDN: attribute values "must persist until the attribute list is
+/// destroyed using the DeleteProcThreadAttributeList function", which is
+/// captured by the 'a lifetime.
+struct ProcThreadAttributeList<'a> {
+    /// The PROC_THREAD_ATTRIBUTE_LIST; this is a type whose size we discover at runtime.
+    raw: Box<[u8]>,
+    /// The inherit_handles pointer.
+    _marker: std::marker::PhantomData<&'a [HANDLE]>,
+}
+impl<'a> ProcThreadAttributeList<'a> {
     fn new(count: usize) -> anyhow::Result<Self> {
         unsafe {
             let mut size = 0;
@@ -107,11 +116,15 @@ impl ProcThreadAttributeList {
             {
                 win_bail!(InitializeProcThreadAttributeList);
             }
-            Ok(Self(buf))
+            Ok(Self {
+                raw: buf,
+                _marker: std::marker::PhantomData,
+            })
         }
     }
 
-    fn inherit_handles(&mut self, handles: &[HANDLE]) -> anyhow::Result<()> {
+    /// Mark some handles as to be inherited.
+    fn inherit_handles(&mut self, handles: Pin<&'a [HANDLE]>) -> anyhow::Result<()> {
         unsafe {
             if UpdateProcThreadAttribute(
                 self.as_mut_ptr(),
@@ -130,11 +143,11 @@ impl ProcThreadAttributeList {
     }
 
     fn as_mut_ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        self.0.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST
+        self.raw.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST
     }
 }
 
-impl Drop for ProcThreadAttributeList {
+impl<'a> Drop for ProcThreadAttributeList<'a> {
     fn drop(&mut self) {
         unsafe { DeleteProcThreadAttributeList(self.as_mut_ptr()) };
     }
@@ -181,8 +194,9 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
 
         // Safely inherit in/out handles.
         // https://devblogs.microsoft.com/oldnewthing/20111216-00/?p=8873
+        let handles = pin!([startup_info.StartupInfo.hStdInput, raw_pipe_write]);
         let mut attrs = ProcThreadAttributeList::new(1)?;
-        attrs.inherit_handles(&[startup_info.StartupInfo.hStdInput, raw_pipe_write])?;
+        attrs.inherit_handles(handles)?;
         startup_info.lpAttributeList = attrs.as_mut_ptr();
 
         let mut process_info = ProcessInformation::new();
