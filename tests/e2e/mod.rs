@@ -6,6 +6,8 @@ mod missing;
 mod regen;
 mod validations;
 
+use anyhow::anyhow;
+
 pub fn n2_binary() -> std::path::PathBuf {
     std::env::current_exe()
         .expect("test binary path")
@@ -65,8 +67,9 @@ impl TestSpace {
     }
 
     /// Read a file from the working space.
-    pub fn read(&self, path: &str) -> std::io::Result<Vec<u8>> {
-        std::fs::read(self.dir.path().join(path))
+    pub fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
+        let path = self.dir.path().join(path);
+        std::fs::read(&path).map_err(|err| anyhow!("read {}: {}", path.display(), err))
     }
 
     pub fn metadata(&self, path: &str) -> std::io::Result<std::fs::Metadata> {

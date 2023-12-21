@@ -290,16 +290,14 @@ build out: custom
     Ok(())
 }
 
-// Repro for issue #84.
+// Repro for issue #84: phony depending on phony.
 #[test]
 fn phony_depends() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(
         "build.ninja",
         &[
-            "
-rule touch
-  command = touch outfile",
+            TOUCH_RULE,
             "
 build out1: touch
 build out2: phony out1
@@ -309,7 +307,7 @@ build out3: phony out2
         .join("\n"),
     )?;
     space.run_expect(&mut n2_command(vec!["out3"]))?;
-    space.read("outfile")?;
+    space.read("out1")?;
     Ok(())
 }
 
