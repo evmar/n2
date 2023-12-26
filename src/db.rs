@@ -11,7 +11,6 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
-use std::mem::MaybeUninit;
 use std::path::Path;
 
 const VERSION: u32 = 1;
@@ -40,37 +39,14 @@ pub struct IdMap {
     db_ids: HashMap<FileId, Id>,
 }
 
-/// Buffer that accumulates a single record's worth of writes.
-/// Caller calls various .write_*() methods and then flush()es it to a Write.
-/// We use this instead of a BufWrite because we want to write one full record
-/// at a time if possible.
-struct WriteBuf {
-    buf: [MaybeUninit<u8>; 16 << 10],
-    len: usize,
-}
+/// RecordWriter buffers writes into a Vec<u8>.
+/// We attempt to write a full record per underlying finish() to lessen the chance of writing partial records.
+#[derive(Default)]
+struct RecordWriter(Vec<u8>);
 
-impl WriteBuf {
-    fn new() -> Self {
-        WriteBuf {
-            buf: unsafe { MaybeUninit::uninit().assume_init() },
-            len: 0,
-        }
-    }
-
-    // Perf note: I tinkered with these writes in godbolt and using
-    // copy_from_slice generated better code than alternatives that did
-    // different kinds of indexing.
-
+impl RecordWriter {
     fn write(&mut self, buf: &[u8]) {
-        // Safety: self.buf and buf are non-overlapping; bounds checks.
-        unsafe {
-            let ptr = self.buf.as_mut_ptr().add(self.len);
-            self.len += buf.len();
-            if self.len > self.buf.len() {
-                panic!("oversized WriteBuf");
-            }
-            std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr as *mut u8, buf.len());
-        }
+        self.0.extend_from_slice(buf);
     }
 
     fn write_u16(&mut self, n: u16) {
@@ -97,11 +73,8 @@ impl WriteBuf {
         self.write_u24(id.0);
     }
 
-    fn flush<W: Write>(self, w: &mut W) -> std::io::Result<()> {
-        // Safety: invariant is that self.buf up to self.len is initialized.
-        let buf: &[u8] = unsafe { std::mem::transmute(&self.buf[..self.len]) };
-        w.write_all(buf)?;
-        Ok(())
+    fn finish(&self, w: &mut impl Write) -> std::io::Result<()> {
+        w.write_all(&self.0)
     }
 }
 
@@ -114,10 +87,7 @@ pub struct Writer {
 impl Writer {
     fn create(path: &Path) -> std::io::Result<Self> {
         let f = std::fs::File::create(path)?;
-        let mut w = Writer {
-            ids: IdMap::default(),
-            w: f,
-        };
+        let mut w = Self::from_opened(IdMap::default(), f);
         w.write_signature()?;
         Ok(w)
     }
@@ -127,7 +97,7 @@ impl Writer {
     }
 
     fn write_signature(&mut self) -> std::io::Result<()> {
-        write!(&mut self.w, "n2db")?;
+        self.w.write_all("n2db".as_bytes())?;
         self.w.write_all(&u32::to_le_bytes(VERSION))
     }
 
@@ -135,9 +105,9 @@ impl Writer {
         if name.len() >= 0b1000_0000_0000_0000 {
             panic!("filename too long");
         }
-        let mut buf = WriteBuf::new();
-        buf.write_str(name);
-        buf.flush(&mut self.w)
+        let mut w = RecordWriter::default();
+        w.write_str(&name);
+        w.finish(&mut self.w)
     }
 
     fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> std::io::Result<Id> {
@@ -160,25 +130,24 @@ impl Writer {
         hash: BuildHash,
     ) -> std::io::Result<()> {
         let build = &graph.builds[id];
-        let mut buf = WriteBuf::new();
+        let mut w = RecordWriter::default();
         let outs = build.outs();
         let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
-        buf.write_u16(mark);
+        w.write_u16(mark);
         for &out in outs {
             let id = self.ensure_id(graph, out)?;
-            buf.write_id(id);
+            w.write_id(id);
         }
 
         let deps = build.discovered_ins();
-        buf.write_u16(deps.len() as u16);
+        w.write_u16(deps.len() as u16);
         for &dep in deps {
             let id = self.ensure_id(graph, dep)?;
-            buf.write_id(id);
+            w.write_id(id);
         }
 
-        buf.write_u64(hash.0);
-
-        buf.flush(&mut self.w)
+        w.write_u64(hash.0);
+        w.finish(&mut self.w)
     }
 }
 
