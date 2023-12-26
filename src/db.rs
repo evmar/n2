@@ -11,7 +11,6 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
-use std::mem::MaybeUninit;
 use std::path::Path;
 
 const VERSION: u32 = 1;
@@ -40,90 +39,56 @@ pub struct IdMap {
     db_ids: HashMap<FileId, Id>,
 }
 
-/// Buffer that accumulates a single record's worth of writes.
-/// Caller calls various .write_*() methods and then flush()es it to a Write.
-/// We use this instead of a BufWrite because we want to write one full record
-/// at a time if possible.
-struct WriteBuf {
-    buf: [MaybeUninit<u8>; 16 << 10],
-    len: usize,
+fn write_u16(buf: &mut Vec<u8>, n: u16) {
+    buf.extend_from_slice(&n.to_le_bytes());
 }
 
-impl WriteBuf {
-    fn new() -> Self {
-        WriteBuf {
-            buf: unsafe { MaybeUninit::uninit().assume_init() },
-            len: 0,
-        }
-    }
+fn write_u24(buf: &mut Vec<u8>, n: u32) {
+    buf.extend_from_slice(&n.to_le_bytes()[..3]);
+}
 
-    // Perf note: I tinkered with these writes in godbolt and using
-    // copy_from_slice generated better code than alternatives that did
-    // different kinds of indexing.
+fn write_u64(buf: &mut Vec<u8>, n: u64) {
+    buf.extend_from_slice(&n.to_le_bytes());
+}
 
-    fn write(&mut self, buf: &[u8]) {
-        // Safety: self.buf and buf are non-overlapping; bounds checks.
-        unsafe {
-            let ptr = self.buf.as_mut_ptr().add(self.len);
-            self.len += buf.len();
-            if self.len > self.buf.len() {
-                panic!("oversized WriteBuf");
-            }
-            std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr as *mut u8, buf.len());
-        }
-    }
+fn write_str(buf: &mut Vec<u8>, s: &str) {
+    write_u16(buf, s.len() as u16);
+    buf.extend_from_slice(s.as_bytes());
+}
 
-    fn write_u16(&mut self, n: u16) {
-        self.write(&n.to_le_bytes());
+fn write_id(buf: &mut Vec<u8>, id: Id) {
+    if id.0 > (1 << 24) {
+        panic!("too many fileids");
     }
-
-    fn write_u24(&mut self, n: u32) {
-        self.write(&n.to_le_bytes()[..3]);
-    }
-
-    fn write_u64(&mut self, n: u64) {
-        self.write(&n.to_le_bytes());
-    }
-
-    fn write_str(&mut self, s: &str) {
-        self.write_u16(s.len() as u16);
-        self.write(s.as_bytes());
-    }
-
-    fn write_id(&mut self, id: Id) {
-        if id.0 > (1 << 24) {
-            panic!("too many fileids");
-        }
-        self.write_u24(id.0);
-    }
-
-    fn flush<W: Write>(self, w: &mut W) -> std::io::Result<()> {
-        // Safety: invariant is that self.buf up to self.len is initialized.
-        let buf: &[u8] = unsafe { std::mem::transmute(&self.buf[..self.len]) };
-        w.write_all(buf)?;
-        Ok(())
-    }
+    write_u24(buf, id.0);
 }
 
 /// An opened database, ready for writes.
 pub struct Writer {
     ids: IdMap,
     w: File,
+
+    /// A buffer for accumulating record writes.
+    /// We attempt to write a full record per underlying write() to lessen the chance of writing partial records.
+    path_buf: Vec<u8>,
+    build_buf: Vec<u8>,
 }
 
 impl Writer {
     fn create(path: &Path) -> std::io::Result<Self> {
         let f = std::fs::File::create(path)?;
-        let mut w = Writer {
-            ids: IdMap::default(),
-            w: f,
-        };
+        let mut w = Self::from_opened(IdMap::default(), f);
         w.write_signature()?;
         Ok(w)
     }
 
     fn from_opened(ids: IdMap, w: File) -> Self {
-        Writer { ids, w }
+        Writer {
+            ids,
+            w,
+            path_buf: Vec::with_capacity(8 << 10),
+            build_buf: Vec::with_capacity(8 << 10),
+        }
     }
 
     fn write_signature(&mut self) -> std::io::Result<()> {
@@ -135,9 +100,9 @@ impl Writer {
         if name.len() >= 0b1000_0000_0000_0000 {
             panic!("filename too long");
         }
-        let mut buf = WriteBuf::new();
-        buf.write_str(name);
-        buf.flush(&mut self.w)
+        self.path_buf.clear();
+        write_str(&mut self.path_buf, name);
+        self.w.write_all(&self.path_buf)
     }
 
     fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> std::io::Result<Id> {
@@ -160,25 +125,24 @@ impl Writer {
         hash: BuildHash,
     ) -> std::io::Result<()> {
         let build = &graph.builds[id];
-        let mut buf = WriteBuf::new();
+        self.build_buf.clear();
         let outs = build.outs();
         let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
-        buf.write_u16(mark);
+        write_u16(&mut self.build_buf, mark);
         for &out in outs {
             let id = self.ensure_id(graph, out)?;
-            buf.write_id(id);
+            write_id(&mut self.build_buf, id);
         }
 
         let deps = build.discovered_ins();
-        buf.write_u16(deps.len() as u16);
+        write_u16(&mut self.build_buf, deps.len() as u16);
         for &dep in deps {
             let id = self.ensure_id(graph, dep)?;
-            buf.write_id(id);
+            write_id(&mut self.build_buf, id);
         }
 
-        buf.write_u64(hash.0);
-
-        buf.flush(&mut self.w)
+        write_u64(&mut self.build_buf, hash.0);
+        self.w.write_all(&self.build_buf)
     }
 }
 
