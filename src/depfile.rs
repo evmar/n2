@@ -84,6 +84,7 @@ mod tests {
     use super::*;
 
     fn must_parse(buf: &mut Vec<u8>) -> Deps {
+        buf.push(0);
         let mut scanner = Scanner::new(buf);
         match parse(&mut scanner) {
             Err(err) => {

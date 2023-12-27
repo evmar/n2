@@ -16,8 +16,10 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(buf: &'a mut Vec<u8>) -> Self {
-        buf.push(0);
+    pub fn new(buf: &'a [u8]) -> Self {
+        if !buf.ends_with(b"\0") {
+            panic!("Scanner requires nul-terminated buf");
+        }
         Scanner {
             buf,
             ofs: 0,

@@ -70,7 +70,7 @@ pub trait Loader {
 }
 
 impl<'text> Parser<'text> {
-    pub fn new(buf: &'text mut Vec<u8>) -> Parser<'text> {
+    pub fn new(buf: &'text [u8]) -> Parser<'text> {
         Parser {
             scanner: Scanner::new(buf),
             vars: Vars::default(),
@@ -455,6 +455,12 @@ impl Loader for StringLoader {
 mod tests {
     use super::*;
 
+    fn test_case_buffer(test_case: &str) -> Vec<u8> {
+        let mut buf = test_case.as_bytes().to_vec();
+        buf.push(0);
+        buf
+    }
+
     fn test_for_line_endings(input: &[&str], test: fn(&str)) {
         let test_case_lf = input.join("\n");
         let test_case_crlf = input.join("\r\n");
@@ -466,7 +472,7 @@ mod tests {
     #[test]
     fn parse_defaults() {
         test_for_line_endings(&["var = 3", "default a b$var c", ""], |test_case| {
-            let mut buf = test_case.as_bytes().to_vec();
+            let mut buf = test_case_buffer(test_case);
             let mut parser = Parser::new(&mut buf);
             let default = match parser.read(&mut StringLoader {}).unwrap().unwrap() {
                 Statement::Default(d) => d,
@@ -478,7 +484,7 @@ mod tests {
 
     #[test]
     fn parse_dot_in_eval() {
-        let mut buf = "x = $y.z\n".as_bytes().to_vec();
+        let mut buf = test_case_buffer("x = $y.z\n");
         let mut parser = Parser::new(&mut buf);
         parser.read(&mut StringLoader {}).unwrap();
         let x = parser.vars.get("x").unwrap();
@@ -487,7 +493,7 @@ mod tests {
 
     #[test]
     fn parse_dot_in_rule() {
-        let mut buf = "rule x.y\n  command = x\n".as_bytes().to_vec();
+        let mut buf = test_case_buffer("rule x.y\n  command = x\n");
         let mut parser = Parser::new(&mut buf);
         let stmt = parser.read(&mut StringLoader {}).unwrap().unwrap();
         assert!(matches!(
@@ -501,7 +507,7 @@ mod tests {
 
     #[test]
     fn parse_trailing_newline() {
-        let mut buf = "build$\n foo$\n : $\n  touch $\n\n".as_bytes().to_vec();
+        let mut buf = test_case_buffer("build$\n foo$\n : $\n  touch $\n\n");
         let mut parser = Parser::new(&mut buf);
         let stmt = parser.read(&mut StringLoader {}).unwrap().unwrap();
         assert!(matches!(

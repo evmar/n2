@@ -42,7 +42,8 @@ fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
         Ok(b) => b,
         Err(e) => bail!("read {}: {}", path.display(), e),
     };
-    let mut scanner = Scanner::new(&mut bytes);
+    bytes.push(0);
+    let mut scanner = Scanner::new(&bytes);
     let parsed_deps = depfile::parse(&mut scanner)
         .map_err(|err| anyhow!(scanner.format_parse_error(path, err)))?;
     // TODO verify deps refers to correct output

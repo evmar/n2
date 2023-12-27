@@ -159,17 +159,18 @@ impl Loader {
 
     fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
         let path = self.graph.file(id).path().to_path_buf();
-        let bytes = match trace::scope("fs::read", || std::fs::read(&path)) {
+        let mut bytes = match trace::scope("fs::read", || std::fs::read(&path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path.display(), e),
         };
-        self.parse(path, bytes)
+        bytes.push(0);
+        self.parse(path, &bytes)
     }
 
-    fn parse(&mut self, path: PathBuf, mut bytes: Vec<u8>) -> anyhow::Result<()> {
+    fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
 
-        let mut parser = parse::Parser::new(&mut bytes);
+        let mut parser = parse::Parser::new(&bytes);
         loop {
             let stmt = match parser
                 .read(self)
@@ -245,10 +246,11 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
 
 /// Parse a single file's content.
 #[cfg(test)]
-pub fn parse(name: &str, content: Vec<u8>) -> anyhow::Result<graph::Graph> {
+pub fn parse(name: &str, mut content: Vec<u8>) -> anyhow::Result<graph::Graph> {
+    content.push(0);
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || {
-        loader.parse(PathBuf::from(name), content)
+        loader.parse(PathBuf::from(name), &content)
     })?;
     Ok(loader.graph)
 }
