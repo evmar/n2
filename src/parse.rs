@@ -14,19 +14,19 @@ use std::path::Path;
 
 /// A list of variable bindings, as expressed with syntax like:
 ///   key = $val
-pub type VarList<'text> = SmallMap<&'text str, EvalString<String>>;
+pub type VarList<'text> = SmallMap<&'text str, EvalString<&'text str>>;
 
 pub struct Rule<'text> {
     pub name: &'text str,
     pub vars: VarList<'text>,
 }
 
-pub struct Build<'text, Path> {
+pub struct Build<'text> {
     pub rule: &'text str,
     pub line: usize,
-    pub outs: Vec<Path>,
+    pub outs: Vec<EvalString<&'text str>>,
     pub explicit_outs: usize,
-    pub ins: Vec<Path>,
+    pub ins: Vec<EvalString<&'text str>>,
     pub explicit_ins: usize,
     pub implicit_ins: usize,
     pub order_only_ins: usize,
@@ -40,21 +40,21 @@ pub struct Pool<'text> {
     pub depth: usize,
 }
 
-pub enum Statement<'text, Path> {
+pub enum Statement<'text> {
     Rule(Rule<'text>),
-    Build(Build<'text, Path>),
-    Default(Vec<Path>),
-    Include(Path),
-    Subninja(Path),
+    Build(Build<'text>),
+    Default(Vec<EvalString<&'text str>>),
+    Include(EvalString<&'text str>),
+    Subninja(EvalString<&'text str>),
     Pool(Pool<'text>),
 }
 
 pub struct Parser<'text> {
     scanner: Scanner<'text>,
     pub vars: Vars<'text>,
-    /// Reading paths is very hot when parsing, so we always read into this buffer
-    /// and then immediately pass in to Loader::path() to canonicalize it in-place.
-    path_buf: Vec<u8>,
+    /// Reading EvalStrings is very hot when parsing, so we always read into
+    /// this buffer and then clone it afterwards.
+    eval_buf: Vec<EvalPart<&'text str>>,
 }
 
 /// Loader maps path strings (as found in build.ninja files) into an arbitrary
@@ -74,7 +74,7 @@ impl<'text> Parser<'text> {
         Parser {
             scanner: Scanner::new(buf),
             vars: Vars::default(),
-            path_buf: Vec::with_capacity(64),
+            eval_buf: Vec::with_capacity(16),
         }
     }
 
@@ -82,10 +82,7 @@ impl<'text> Parser<'text> {
         self.scanner.format_parse_error(filename, err)
     }
 
-    pub fn read<L: Loader>(
-        &mut self,
-        loader: &mut L,
-    ) -> ParseResult<Option<Statement<'text, L::Path>>> {
+    pub fn read(&mut self) -> ParseResult<Option<Statement<'text>>> {
         loop {
             match self.scanner.peek() {
                 '\0' => return Ok(None),
@@ -97,26 +94,20 @@ impl<'text> Parser<'text> {
                     self.skip_spaces();
                     match ident {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
-                        "build" => return Ok(Some(Statement::Build(self.read_build(loader)?))),
-                        "default" => {
-                            return Ok(Some(Statement::Default(self.read_default(loader)?)))
-                        }
+                        "build" => return Ok(Some(Statement::Build(self.read_build()?))),
+                        "default" => return Ok(Some(Statement::Default(self.read_default()?))),
                         "include" => {
-                            let id = match self.read_path(loader)? {
-                                None => return self.scanner.parse_error("expected path"),
-                                Some(p) => p,
-                            };
-                            return Ok(Some(Statement::Include(id)));
+                            return Ok(Some(Statement::Include(self.read_eval(false)?)));
                         }
                         "subninja" => {
-                            let id = match self.read_path(loader)? {
-                                None => return self.scanner.parse_error("expected path"),
-                                Some(p) => p,
-                            };
-                            return Ok(Some(Statement::Subninja(id)));
+                            return Ok(Some(Statement::Subninja(self.read_eval(false)?)));
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
+                            // TODO: The evaluation of global variables should
+                            // be moved out of the parser, so that we can run
+                            // multiple parsers in parallel and then evaluate
+                            // all the variables in series at the end.
                             let val = self.read_vardef()?.evaluate(&[&self.vars]);
                             self.vars.insert(ident, val);
                         }
@@ -131,7 +122,16 @@ impl<'text> Parser<'text> {
         self.skip_spaces();
         self.scanner.expect('=')?;
         self.skip_spaces();
-        self.read_eval()
+        // read_eval will error out if there's nothing to read
+        if self.scanner.peek_newline() {
+            self.scanner.skip('\r');
+            self.scanner.expect('\n')?;
+            return Ok(EvalString::new(Vec::new()));
+        }
+        let result = self.read_eval(false);
+        self.scanner.skip('\r');
+        self.scanner.expect('\n')?;
+        result
     }
 
     /// Read a collection of `  foo = bar` variables, with leading indent.
@@ -149,7 +149,7 @@ impl<'text> Parser<'text> {
             }
             self.skip_spaces();
             let val = self.read_vardef()?;
-            vars.insert(name, val.into_owned());
+            vars.insert(name, val);
         }
         Ok(vars)
     }
@@ -193,28 +193,30 @@ impl<'text> Parser<'text> {
         Ok(Pool { name, depth })
     }
 
-    fn read_paths_to<L: Loader>(
+    fn read_unevaluated_paths_to(
         &mut self,
-        loader: &mut L,
-        v: &mut Vec<L::Path>,
+        v: &mut Vec<EvalString<&'text str>>,
     ) -> ParseResult<()> {
         self.skip_spaces();
-        while let Some(path) = self.read_path(loader)? {
-            v.push(path);
+        while self.scanner.peek() != ':'
+            && self.scanner.peek() != '|'
+            && !self.scanner.peek_newline()
+        {
+            v.push(self.read_eval(true)?);
             self.skip_spaces();
         }
         Ok(())
     }
 
-    fn read_build<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Build<'text, L::Path>> {
+    fn read_build(&mut self) -> ParseResult<Build<'text>> {
         let line = self.scanner.line;
         let mut outs = Vec::new();
-        self.read_paths_to(loader, &mut outs)?;
+        self.read_unevaluated_paths_to(&mut outs)?;
         let explicit_outs = outs.len();
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            self.read_paths_to(loader, &mut outs)?;
+            self.read_unevaluated_paths_to(&mut outs)?;
         }
 
         self.scanner.expect(':')?;
@@ -222,7 +224,7 @@ impl<'text> Parser<'text> {
         let rule = self.read_ident()?;
 
         let mut ins = Vec::new();
-        self.read_paths_to(loader, &mut ins)?;
+        self.read_unevaluated_paths_to(&mut ins)?;
         let explicit_ins = ins.len();
 
         if self.scanner.peek() == '|' {
@@ -231,7 +233,7 @@ impl<'text> Parser<'text> {
             if peek == '|' || peek == '@' {
                 self.scanner.back();
             } else {
-                self.read_paths_to(loader, &mut ins)?;
+                self.read_unevaluated_paths_to(&mut ins)?;
             }
         }
         let implicit_ins = ins.len() - explicit_ins;
@@ -242,7 +244,7 @@ impl<'text> Parser<'text> {
                 self.scanner.back();
             } else {
                 self.scanner.expect('|')?;
-                self.read_paths_to(loader, &mut ins)?;
+                self.read_unevaluated_paths_to(&mut ins)?;
             }
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
@@ -250,7 +252,7 @@ impl<'text> Parser<'text> {
         if self.scanner.peek() == '|' {
             self.scanner.next();
             self.scanner.expect('@')?;
-            self.read_paths_to(loader, &mut ins)?;
+            self.read_unevaluated_paths_to(&mut ins)?;
         }
         let validation_ins = ins.len() - order_only_ins - implicit_ins - explicit_ins;
 
@@ -271,9 +273,9 @@ impl<'text> Parser<'text> {
         })
     }
 
-    fn read_default<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Vec<L::Path>> {
+    fn read_default(&mut self) -> ParseResult<Vec<EvalString<&'text str>>> {
         let mut defaults = Vec::new();
-        self.read_paths_to(loader, &mut defaults)?;
+        self.read_unevaluated_paths_to(&mut defaults)?;
         if defaults.is_empty() {
             return self.scanner.parse_error("expected path");
         }
@@ -310,79 +312,77 @@ impl<'text> Parser<'text> {
         Ok(self.scanner.slice(start, end))
     }
 
-    fn read_eval(&mut self) -> ParseResult<EvalString<&'text str>> {
-        // Guaranteed at least one part.
-        let mut parts = Vec::with_capacity(1);
+    /// Reads an EvalString. Stops at either a newline, or ' ', ':', '|' if
+    /// stop_at_path_separators is set, without consuming the character that
+    /// caused it to stop.
+    fn read_eval(&mut self, stop_at_path_separators: bool) -> ParseResult<EvalString<&'text str>> {
+        self.eval_buf.clear();
         let mut ofs = self.scanner.ofs;
-        let end = loop {
-            match self.scanner.read() {
-                '\0' => return self.scanner.parse_error("unexpected EOF"),
-                '\n' => break self.scanner.ofs - 1,
-                '\r' if self.scanner.peek() == '\n' => {
-                    self.scanner.next();
-                    break self.scanner.ofs - 2;
-                }
-                '$' => {
-                    let end = self.scanner.ofs - 1;
-                    if end > ofs {
-                        parts.push(EvalPart::Literal(self.scanner.slice(ofs, end)));
+        // This match block is copied twice, with the only difference being the check for
+        // spaces, colons, and pipes in the stop_at_path_separators version. We could remove the
+        // duplication by adding a match branch like `' ' | ':' | '|' if stop_at_path_separators =>`
+        // or even moving the `if stop_at_path_separators` inside of the match body, but both of
+        // those options are ~10% slower on a benchmark test of running the loader on llvm-cmake
+        // ninja files.
+        let end = if stop_at_path_separators {
+            loop {
+                match self.scanner.read() {
+                    '\0' => return self.scanner.parse_error("unexpected EOF"),
+                    ' ' | ':' | '|' | '\n' => {
+                        self.scanner.back();
+                        break self.scanner.ofs;
                     }
-                    parts.push(self.read_escape()?);
-                    ofs = self.scanner.ofs;
+                    '\r' if self.scanner.peek() == '\n' => {
+                        self.scanner.back();
+                        break self.scanner.ofs;
+                    }
+                    '$' => {
+                        let end = self.scanner.ofs - 1;
+                        if end > ofs {
+                            self.eval_buf
+                                .push(EvalPart::Literal(self.scanner.slice(ofs, end)));
+                        }
+                        let escape = self.read_escape()?;
+                        self.eval_buf.push(escape);
+                        ofs = self.scanner.ofs;
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+        } else {
+            loop {
+                match self.scanner.read() {
+                    '\0' => return self.scanner.parse_error("unexpected EOF"),
+                    '\n' => {
+                        self.scanner.back();
+                        break self.scanner.ofs;
+                    }
+                    '\r' if self.scanner.peek() == '\n' => {
+                        self.scanner.back();
+                        break self.scanner.ofs;
+                    }
+                    '$' => {
+                        let end = self.scanner.ofs - 1;
+                        if end > ofs {
+                            self.eval_buf
+                                .push(EvalPart::Literal(self.scanner.slice(ofs, end)));
+                        }
+                        let escape = self.read_escape()?;
+                        self.eval_buf.push(escape);
+                        ofs = self.scanner.ofs;
+                    }
+                    _ => {}
+                }
             }
         };
         if end > ofs {
-            parts.push(EvalPart::Literal(self.scanner.slice(ofs, end)));
+            self.eval_buf
+                .push(EvalPart::Literal(self.scanner.slice(ofs, end)));
         }
-        Ok(EvalString::new(parts))
-    }
-
-    fn read_path<L: Loader>(&mut self, loader: &mut L) -> ParseResult<Option<L::Path>> {
-        self.path_buf.clear();
-        loop {
-            let c = self.scanner.read();
-            match c {
-                '\0' => {
-                    self.scanner.back();
-                    return self.scanner.parse_error("unexpected EOF");
-                }
-                '$' => {
-                    let part = self.read_escape()?;
-                    match part {
-                        EvalPart::Literal(l) => self.path_buf.extend_from_slice(l.as_bytes()),
-                        EvalPart::VarRef(v) => {
-                            if let Some(v) = self.vars.get(v) {
-                                self.path_buf.extend_from_slice(v.as_bytes());
-                            }
-                        }
-                    }
-                }
-                ':' | '|' | ' ' | '\n' | '\r' => {
-                    // Basically any character is allowed in paths, but we want to parse e.g.
-                    //   build foo: bar | baz
-                    // such that the colon is not part of the 'foo' path and such that '|' is
-                    // not read as a path.
-                    // Those characters can be embedded by escaping, e.g. "$:".
-                    self.scanner.back();
-                    break;
-                }
-                c => {
-                    self.path_buf.push(c as u8);
-                }
-            }
+        if self.eval_buf.is_empty() {
+            return self.scanner.parse_error(format!("Expected a string"));
         }
-        if self.path_buf.is_empty() {
-            return Ok(None);
-        }
-        // Performance: this is some of the hottest code in n2 so we cut some corners.
-        // Safety: see discussion of unicode safety in doc/development.md.
-        // I looked into switching this to BStr but it would require changing
-        // a lot of other code to BStr too.
-        let path_str = unsafe { std::str::from_utf8_unchecked_mut(&mut self.path_buf) };
-        let path = loader.path(path_str);
-        Ok(Some(path))
+        Ok(EvalString::new(self.eval_buf.clone()))
     }
 
     /// Read a variable name as found after a '$' in an eval.
@@ -453,16 +453,6 @@ impl<'text> Parser<'text> {
 }
 
 #[cfg(test)]
-struct StringLoader {}
-#[cfg(test)]
-impl Loader for StringLoader {
-    type Path = String;
-    fn path(&mut self, path: &mut str) -> Self::Path {
-        path.to_string()
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -485,11 +475,18 @@ mod tests {
         test_for_line_endings(&["var = 3", "default a b$var c", ""], |test_case| {
             let mut buf = test_case_buffer(test_case);
             let mut parser = Parser::new(&mut buf);
-            let default = match parser.read(&mut StringLoader {}).unwrap().unwrap() {
+            let default = match parser.read().unwrap().unwrap() {
                 Statement::Default(d) => d,
                 _ => panic!("expected default"),
             };
-            assert_eq!(default, vec!["a", "b3", "c"]);
+            assert_eq!(
+                default,
+                vec![
+                    EvalString::new(vec![EvalPart::Literal("a")]),
+                    EvalString::new(vec![EvalPart::Literal("b"), EvalPart::VarRef("var")]),
+                    EvalString::new(vec![EvalPart::Literal("c")]),
+                ]
+            );
         });
     }
 
@@ -497,7 +494,7 @@ mod tests {
     fn parse_dot_in_eval() {
         let mut buf = test_case_buffer("x = $y.z\n");
         let mut parser = Parser::new(&mut buf);
-        parser.read(&mut StringLoader {}).unwrap();
+        parser.read().unwrap();
         let x = parser.vars.get("x").unwrap();
         assert_eq!(x, ".z");
     }
@@ -506,7 +503,7 @@ mod tests {
     fn parse_dot_in_rule() {
         let mut buf = test_case_buffer("rule x.y\n  command = x\n");
         let mut parser = Parser::new(&mut buf);
-        let stmt = parser.read(&mut StringLoader {}).unwrap().unwrap();
+        let stmt = parser.read().unwrap().unwrap();
         assert!(matches!(
             stmt,
             Statement::Rule(Rule {
@@ -520,7 +517,7 @@ mod tests {
     fn parse_trailing_newline() {
         let mut buf = test_case_buffer("build$\n foo$\n : $\n  touch $\n\n");
         let mut parser = Parser::new(&mut buf);
-        let stmt = parser.read(&mut StringLoader {}).unwrap().unwrap();
+        let stmt = parser.read().unwrap().unwrap();
         assert!(matches!(
             stmt,
             Statement::Build(Build { rule: "touch", .. })

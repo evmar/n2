@@ -2,17 +2,18 @@
 //! `c++ $in -o $out`, and mechanisms for expanding those into plain strings.
 
 use crate::smallmap::SmallMap;
+use std::borrow::Borrow;
 use std::{borrow::Cow, collections::HashMap};
 
 /// An environment providing a mapping of variable name to variable value.
-/// A given EvalString may be expanded with multiple environments as possible
-/// context.
+/// This represents one "frame" of evaluation context, a given EvalString may
+/// need multiple environments in order to be fully expanded.
 pub trait Env {
-    fn get_var(&self, var: &str) -> Option<Cow<str>>;
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>>;
 }
 
 /// One token within an EvalString, either literal text or a variable reference.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EvalPart<T: AsRef<str>> {
     Literal(T),
     VarRef(T),
@@ -22,29 +23,38 @@ pub enum EvalPart<T: AsRef<str>> {
 /// This is generic to support EvalString<&str>, which is used for immediately-
 /// expanded evals, like top-level bindings, and EvalString<String>, which is
 /// used for delayed evals like in `rule` blocks.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
 impl<T: AsRef<str>> EvalString<T> {
     pub fn new(parts: Vec<EvalPart<T>>) -> Self {
         EvalString(parts)
     }
 
-    pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
-        let mut val = String::new();
+    fn evaluate_inner(&self, result: &mut String, envs: &[&dyn Env]) {
         for part in &self.0 {
             match part {
-                EvalPart::Literal(s) => val.push_str(s.as_ref()),
+                EvalPart::Literal(s) => result.push_str(s.as_ref()),
                 EvalPart::VarRef(v) => {
-                    for env in envs {
+                    for (i, env) in envs.iter().enumerate() {
                         if let Some(v) = env.get_var(v.as_ref()) {
-                            val.push_str(&v);
+                            v.evaluate_inner(result, &envs[i + 1..]);
                             break;
                         }
                     }
                 }
             }
         }
-        val
+    }
+
+    /// evalulate turns the EvalString into a regular String, looking up the
+    /// values of variable references in the provided Envs. It will look up
+    /// its variables in the earliest Env that has them, and then those lookups
+    /// will be recursively expanded starting from the env after the one that
+    /// had the first successful lookup.
+    pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
+        let mut result = String::new();
+        self.evaluate_inner(&mut result, envs);
+        result
     }
 }
 
@@ -62,6 +72,34 @@ impl EvalString<&str> {
     }
 }
 
+impl EvalString<String> {
+    pub fn as_cow(&self) -> EvalString<Cow<str>> {
+        EvalString(
+            self.0
+                .iter()
+                .map(|part| match part {
+                    EvalPart::Literal(s) => EvalPart::Literal(Cow::Borrowed(s.as_ref())),
+                    EvalPart::VarRef(s) => EvalPart::VarRef(Cow::Borrowed(s.as_ref())),
+                })
+                .collect(),
+        )
+    }
+}
+
+impl EvalString<&str> {
+    pub fn as_cow(&self) -> EvalString<Cow<str>> {
+        EvalString(
+            self.0
+                .iter()
+                .map(|part| match part {
+                    EvalPart::Literal(s) => EvalPart::Literal(Cow::Borrowed(*s)),
+                    EvalPart::VarRef(s) => EvalPart::VarRef(Cow::Borrowed(*s)),
+                })
+                .collect(),
+        )
+    }
+}
+
 /// A single scope's worth of variable definitions.
 #[derive(Debug, Default)]
 pub struct Vars<'text>(HashMap<&'text str, String>);
@@ -70,36 +108,34 @@ impl<'text> Vars<'text> {
     pub fn insert(&mut self, key: &'text str, val: String) {
         self.0.insert(key, val);
     }
-    pub fn get(&self, key: &'text str) -> Option<&String> {
+    pub fn get(&self, key: &str) -> Option<&String> {
         self.0.get(key)
     }
 }
 impl<'a> Env for Vars<'a> {
-    fn get_var(&self, var: &str) -> Option<Cow<str>> {
-        self.0.get(var).map(|str| Cow::Borrowed(str.as_str()))
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+        Some(EvalString::new(vec![EvalPart::Literal(
+            std::borrow::Cow::Borrowed(self.get(var)?),
+        )]))
     }
 }
 
-// Impl for Loader.rules
-impl Env for SmallMap<String, EvalString<String>> {
-    fn get_var(&self, var: &str) -> Option<Cow<str>> {
-        // TODO(#83): this is wrong in that it doesn't include envs.
-        // This can occur when you have e.g.
-        //   rule foo
-        //     bar = $baz
-        //   build ...: foo
-        //     x = $bar
-        // When evaluating the value of `x`, we find `bar` in the rule but
-        // then need to pick the right env to evaluate $baz.  But we also don't
-        // wanna generically always use all available envs because we don't
-        // wanna get into evaluation cycles.
-        self.get(var).map(|val| Cow::Owned(val.evaluate(&[])))
+impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<String>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+        Some(self.get(var)?.as_cow())
     }
 }
 
-// Impl for the variables attached to a build.
+impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<&str>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+        Some(self.get(var)?.as_cow())
+    }
+}
+
 impl Env for SmallMap<&str, String> {
-    fn get_var(&self, var: &str) -> Option<Cow<str>> {
-        self.get(var).map(|val| Cow::Borrowed(val.as_str()))
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+        Some(EvalString::new(vec![EvalPart::Literal(
+            std::borrow::Cow::Borrowed(self.get(var)?),
+        )]))
     }
 }
