@@ -2,6 +2,7 @@
 
 use crate::{
     canon::{canon_path, canon_path_fast},
+    eval::{EvalPart, EvalString},
     graph::{FileId, RspFile},
     parse::Statement,
     smallmap::SmallMap,
@@ -30,12 +31,14 @@ impl<'a> BuildImplicitVars<'a> {
     }
 }
 impl<'a> eval::Env for BuildImplicitVars<'a> {
-    fn get_var(&self, var: &str) -> Option<Cow<str>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+        let string_to_evalstring =
+            |s: String| Some(EvalString::new(vec![EvalPart::Literal(Cow::Owned(s))]));
         match var {
-            "in" => Some(Cow::Owned(self.file_list(self.build.explicit_ins(), ' '))),
-            "in_newline" => Some(Cow::Owned(self.file_list(self.build.explicit_ins(), '\n'))),
-            "out" => Some(Cow::Owned(self.file_list(self.build.explicit_outs(), ' '))),
-            "out_newline" => Some(Cow::Owned(self.file_list(self.build.explicit_outs(), '\n'))),
+            "in" => string_to_evalstring(self.file_list(self.build.explicit_ins(), ' ')),
+            "in_newline" => string_to_evalstring(self.file_list(self.build.explicit_ins(), '\n')),
+            "out" => string_to_evalstring(self.file_list(self.build.explicit_outs(), ' ')),
+            "out_newline" => string_to_evalstring(self.file_list(self.build.explicit_outs(), '\n')),
             _ => None,
         }
     }
@@ -72,21 +75,38 @@ impl Loader {
         loader
     }
 
+    fn evaluate_path(&mut self, path: EvalString<&str>, envs: &[&dyn eval::Env]) -> FileId {
+        use parse::Loader;
+        let mut evaluated = path.evaluate(envs);
+        self.path(&mut evaluated)
+    }
+
+    fn evaluate_paths(
+        &mut self,
+        paths: Vec<EvalString<&str>>,
+        envs: &[&dyn eval::Env],
+    ) -> Vec<FileId> {
+        paths
+            .into_iter()
+            .map(|path| self.evaluate_path(path, envs))
+            .collect()
+    }
+
     fn add_build(
         &mut self,
         filename: std::rc::Rc<PathBuf>,
         env: &eval::Vars,
-        b: parse::Build<FileId>,
+        b: parse::Build,
     ) -> anyhow::Result<()> {
         let ins = graph::BuildIns {
-            ids: b.ins,
+            ids: self.evaluate_paths(b.ins, &[&b.vars, env]),
             explicit: b.explicit_ins,
             implicit: b.implicit_ins,
             order_only: b.order_only_ins,
             // validation is implied by the other counts
         };
         let outs = graph::BuildOuts {
-            ids: b.outs,
+            ids: self.evaluate_paths(b.outs, &[&b.vars, env]),
             explicit: b.explicit_outs,
         };
         let mut build = graph::Build::new(
@@ -108,21 +128,14 @@ impl Loader {
             build: &build,
         };
 
-        // Expand all build-scoped variable values, as they may be referred to in rules.
-        let mut build_vars = SmallMap::default();
-        for &(name, ref val) in b.vars.iter() {
-            let val = val.evaluate(&[&implicit_vars, &build_vars, env]);
-            build_vars.insert(name, val);
-        }
-
-        let envs: [&dyn eval::Env; 4] = [&implicit_vars, &build_vars, rule, env];
+        // temp variable in order to not move all of b into the closure
+        let build_vars = &b.vars;
         let lookup = |key: &str| -> Option<String> {
             // Look up `key = ...` binding in build and rule block.
-            let val = match build_vars.get(key) {
-                Some(val) => val.clone(),
-                None => rule.get(key)?.evaluate(&envs),
-            };
-            Some(val)
+            Some(match rule.get(key) {
+                Some(val) => val.evaluate(&[&implicit_vars, build_vars, env]),
+                None => build_vars.get(key)?.evaluate(&[env]),
+            })
         };
 
         let cmdline = lookup("command");
@@ -167,29 +180,47 @@ impl Loader {
         self.parse(path, &bytes)
     }
 
+    fn evaluate_and_read_file(
+        &mut self,
+        file: EvalString<&str>,
+        envs: &[&dyn eval::Env],
+    ) -> anyhow::Result<()> {
+        let evaluated = self.evaluate_path(file, envs);
+        self.read_file(evaluated)
+    }
+
     pub fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
 
         let mut parser = parse::Parser::new(&bytes);
+
         loop {
             let stmt = match parser
-                .read(self)
+                .read()
                 .map_err(|err| anyhow!(parser.format_parse_error(&filename, err)))?
             {
                 None => break,
                 Some(s) => s,
             };
             match stmt {
-                Statement::Include(id) => trace::scope("include", || self.read_file(id))?,
+                Statement::Include(id) => trace::scope("include", || {
+                    self.evaluate_and_read_file(id, &[&parser.vars])
+                })?,
                 // TODO: implement scoping for subninja
-                Statement::Subninja(id) => trace::scope("subninja", || self.read_file(id))?,
+                Statement::Subninja(id) => trace::scope("subninja", || {
+                    self.evaluate_and_read_file(id, &[&parser.vars])
+                })?,
                 Statement::Default(defaults) => {
-                    self.default.extend(defaults);
+                    let evaluated = self.evaluate_paths(defaults, &[&parser.vars]);
+                    self.default.extend(evaluated);
                 }
                 Statement::Rule(rule) => {
                     let mut vars: SmallMap<String, eval::EvalString<String>> = SmallMap::default();
                     for (name, val) in rule.vars.into_iter() {
-                        vars.insert(name.to_owned(), val);
+                        // TODO: We should not need to call .into_owned() here
+                        // if we keep the contents of all included files in
+                        // memory.
+                        vars.insert(name.to_owned(), val.into_owned());
                     }
                     self.rules.insert(rule.name.to_owned(), vars);
                 }

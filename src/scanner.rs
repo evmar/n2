@@ -33,6 +33,16 @@ impl<'a> Scanner<'a> {
     pub fn peek(&self) -> char {
         unsafe { *self.buf.get_unchecked(self.ofs) as char }
     }
+    pub fn peek_newline(&self) -> bool {
+        if self.peek() == '\n' {
+            return true;
+        }
+        if self.ofs >= self.buf.len() - 1 {
+            return false;
+        }
+        let peek2 = unsafe { *self.buf.get_unchecked(self.ofs + 1) as char };
+        self.peek() == '\r' && peek2 == '\n'
+    }
     pub fn next(&mut self) {
         if self.peek() == '\n' {
             self.line += 1;
