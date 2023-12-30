@@ -29,27 +29,60 @@ impl n2::parse::Loader for NoOpLoader {
     }
 }
 
-pub fn bench_parse(c: &mut Criterion) {
-    let mut input: Vec<u8> = Vec::new();
-    for i in 0..50 {
+fn generate_build_ninja() -> Vec<u8> {
+    let mut buf: Vec<u8> = Vec::new();
+    for i in 0..1000 {
         write!(
-            input,
+            buf,
             "build $out/foo/bar{}.o: cc $src/long/file/name{}.cc
-        depfile = $out/foo/bar{}.o.d
-",
+  depfile = $out/foo/bar{}.o.d\n",
             i, i, i
         )
         .unwrap();
     }
-    input.push(0);
+    buf
+}
 
+fn bench_parse_synthetic(c: &mut Criterion) {
     let mut loader = NoOpLoader {};
-    c.bench_function("parse", |b| {
+    let mut input = generate_build_ninja();
+    input.push(0);
+    c.bench_function("parse synthetic build.ninja", |b| {
         b.iter(|| {
             let mut parser = n2::parse::Parser::new(&input);
-            parser.read(&mut loader).unwrap();
+            loop {
+                if parser.read(&mut loader).unwrap().is_none() {
+                    break;
+                }
+            }
         })
     });
+}
+
+fn bench_parse_file(c: &mut Criterion, mut input: Vec<u8>) {
+    let mut loader = NoOpLoader {};
+    input.push(0);
+    c.bench_function("parse benches/build.ninja", |b| {
+        b.iter(|| {
+            let mut parser = n2::parse::Parser::new(&input);
+            loop {
+                if parser.read(&mut loader).unwrap().is_none() {
+                    break;
+                }
+            }
+        })
+    });
+}
+
+pub fn bench_parse(c: &mut Criterion) {
+    match std::fs::read("benches/build.ninja") {
+        Ok(input) => bench_parse_file(c, input),
+        Err(err) => {
+            eprintln!("failed to read benches/build.ninja: {}", err);
+            eprintln!("using synthetic build.ninja");
+            bench_parse_synthetic(c)
+        }
+    };
 }
 
 criterion_group!(benches, bench_canon, bench_parse);
