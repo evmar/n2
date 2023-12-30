@@ -1,15 +1,5 @@
-use n2::canon::canon_path;
-//use n2::parse::Parser;
+use criterion::{criterion_group, criterion_main, Criterion};
 use std::io::Write;
-
-// This code used Criterion, but Criterion had a massive set of dependencies,
-// was slow to compile, and clunky to actually use, so I disabled it for now.
-
-pub struct Criterion {}
-impl Criterion {
-    fn bench_function(&mut self, _name: &str, _f: impl Fn(&mut Criterion)) {}
-    fn iter(&mut self, _f: impl Fn()) {}
-}
 
 pub fn bench_canon(c: &mut Criterion) {
     // TODO switch to canon_path_fast
@@ -17,7 +7,7 @@ pub fn bench_canon(c: &mut Criterion) {
         b.iter(|| {
             let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\
                 CMakeFiles/OrcV2CBindingsVeryLazy.dir/OrcV2CBindingsVeryLazy.c.o";
-            canon_path(path);
+            n2::canon::canon_path(path);
         })
     });
 
@@ -26,9 +16,17 @@ pub fn bench_canon(c: &mut Criterion) {
             let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\
                 ../../../\
                 CMakeFiles/OrcV2CBindingsVeryLazy.dir/OrcV2CBindingsVeryLazy.c.o";
-            canon_path(path);
+            n2::canon::canon_path(path);
         })
     });
+}
+
+struct NoOpLoader {}
+impl n2::parse::Loader for NoOpLoader {
+    type Path = ();
+    fn path(&mut self, _path: &mut str) -> Self::Path {
+        ()
+    }
 }
 
 pub fn bench_parse(c: &mut Criterion) {
@@ -43,16 +41,16 @@ pub fn bench_parse(c: &mut Criterion) {
         )
         .unwrap();
     }
+    input.push(0);
 
+    let mut loader = NoOpLoader {};
     c.bench_function("parse", |b| {
         b.iter(|| {
-            // TODO: no clone
-            // let mut inp = input.clone();
-            // let mut parser = Parser::new(&mut inp);
-            // parser.read().unwrap();
+            let mut parser = n2::parse::Parser::new(&input);
+            parser.read(&mut loader).unwrap();
         })
     });
 }
 
-// criterion_group!(benches, bench_canon, bench_parse);
-// criterion_main!(benches);
+criterion_group!(benches, bench_canon, bench_parse);
+criterion_main!(benches);

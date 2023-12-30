@@ -6,7 +6,7 @@ mod eval;
 mod graph;
 mod hash;
 mod load;
-mod parse;
+pub mod parse;
 mod process;
 #[cfg(unix)]
 mod process_posix;

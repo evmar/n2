@@ -35,6 +35,11 @@ jemallocator = "0.5.0"
 
 [dev-dependencies]
 tempfile = "3.6.0"
+criterion = { version = "0.5.1", features = ["html_reports"] }
+
+[[bench]]
+name = "parse"
+harness = false
 
 [profile.release]
 debug = true
