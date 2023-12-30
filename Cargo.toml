@@ -36,6 +36,7 @@ jemallocator = "0.5.0"
 [dev-dependencies]
 tempfile = "3.6.0"
 criterion = { version = "0.5.1", features = ["html_reports"] }
+filetime = "0.2"
 
 [profile.release]
 debug = true

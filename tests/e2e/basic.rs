@@ -227,6 +227,7 @@ rule touch_in
         &[&touch_input_rule, "build out: touch_in in", ""].join("\n"),
     )?;
     space.write("in", "")?;
+    space.sub_mtime("in", std::time::Duration::from_secs(1))?;
 
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "ran 1 task");
