@@ -37,10 +37,17 @@ jemallocator = "0.5.0"
 tempfile = "3.6.0"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 
+[profile.release]
+debug = true
+lto = true
+
 [[bench]]
 name = "parse"
 harness = false
 
-[profile.release]
-debug = true
-lto = true
+# For Criterion reasons, we need bench=false for our lib/bin.
+[lib]
+bench = false
+[[bin]]
+name = "n2"
+bench = false
