@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::io::Write;
+use n2::parse::Loader;
+use std::{io::Write, path::PathBuf, str::FromStr};
 
 pub fn bench_canon(c: &mut Criterion) {
     // TODO switch to canon_path_fast
@@ -31,6 +32,7 @@ impl n2::parse::Loader for NoOpLoader {
 
 fn generate_build_ninja() -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
+    write!(buf, "rule cc\n    command = touch $out",).unwrap();
     for i in 0..1000 {
         write!(
             buf,
@@ -85,5 +87,18 @@ pub fn bench_parse(c: &mut Criterion) {
     };
 }
 
-criterion_group!(benches, bench_canon, bench_parse);
+fn bench_load_synthetic(c: &mut Criterion) {
+    let mut input = generate_build_ninja();
+    input.push(0);
+    c.bench_function("load synthetic build.ninja", |b| {
+        b.iter(|| {
+            let mut loader = n2::load::Loader::new();
+            loader
+                .parse(PathBuf::from_str("build.ninja").unwrap(), &input)
+                .unwrap();
+        })
+    });
+}
+
+criterion_group!(benches, bench_canon, bench_parse, bench_load_synthetic);
 criterion_main!(benches);

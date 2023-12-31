@@ -43,7 +43,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 
 /// Internal state used while loading.
 #[derive(Default)]
-struct Loader {
+pub struct Loader {
     graph: graph::Graph,
     default: Vec<FileId>,
     /// rule name -> list of (key, val)
@@ -64,7 +64,7 @@ impl parse::Loader for Loader {
 }
 
 impl Loader {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut loader = Loader::default();
 
         loader.rules.insert("phony".to_owned(), SmallMap::default());
@@ -167,7 +167,7 @@ impl Loader {
         self.parse(path, &bytes)
     }
 
-    fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
+    pub fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
 
         let mut parser = parse::Parser::new(&bytes);

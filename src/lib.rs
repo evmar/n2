@@ -5,7 +5,7 @@ mod depfile;
 mod eval;
 mod graph;
 mod hash;
-mod load;
+pub mod load;
 pub mod parse;
 mod process;
 #[cfg(unix)]
