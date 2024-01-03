@@ -44,6 +44,7 @@ impl<T: Copy> StackStack<T> {
 /// Returns the new length of the path, guaranteed <= the original length.
 #[must_use]
 pub fn canon_path_fast(path: &mut str) -> usize {
+    assert!(!path.is_empty());
     // Safety: this traverses the path buffer to move data around.
     // We maintain the invariant that *dst always points to a point within
     // the buffer, and that src is always checked against end before reading.
@@ -51,6 +52,7 @@ pub fn canon_path_fast(path: &mut str) -> usize {
         let mut components = StackStack::<*mut u8>::new();
         let mut dst = path.as_mut_ptr();
         let mut src = path.as_ptr();
+        let start = path.as_mut_ptr();
         let end = src.add(path.len());
 
         if src == end {
@@ -124,7 +126,12 @@ pub fn canon_path_fast(path: &mut str) -> usize {
             }
         }
 
-        dst.offset_from(path.as_ptr()) as usize
+        if dst == start {
+            *start = b'.';
+            1
+        } else {
+            dst.offset_from(start) as usize
+        }
     }
 }
 
@@ -160,6 +167,11 @@ mod tests {
         assert_canon_path_eq("./foo", "foo");
         assert_canon_path_eq("foo/.", "foo/");
         assert_canon_path_eq("foo/./bar", "foo/bar");
+        assert_canon_path_eq("./", ".");
+        assert_canon_path_eq("./.", ".");
+        assert_canon_path_eq("././", ".");
+        assert_canon_path_eq("././.", ".");
+        assert_canon_path_eq(".", ".");
     }
 
     #[test]
@@ -176,5 +188,10 @@ mod tests {
         assert_canon_path_eq("../foo", "../foo");
         assert_canon_path_eq("../foo/../bar", "../bar");
         assert_canon_path_eq("../../bar", "../../bar");
+        assert_canon_path_eq("./../foo", "../foo");
+        assert_canon_path_eq("foo/..", ".");
+        assert_canon_path_eq("foo/../", ".");
+        assert_canon_path_eq("foo/../../", "../");
+        assert_canon_path_eq("foo/../../bar", "../bar");
     }
 }
