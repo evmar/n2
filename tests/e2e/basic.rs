@@ -330,3 +330,22 @@ fn builddir() -> anyhow::Result<()> {
     space.read("foo/.n2_db")?;
     Ok(())
 }
+
+#[test]
+fn bad_rule_variable() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule my_rule
+    command = touch $out
+    my_var = foo
+
+build out: my_rule
+",
+    )?;
+
+    let out = space.run(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "unexpected variable \"my_var\"");
+    Ok(())
+}

@@ -135,11 +135,18 @@ impl<'text> Parser<'text> {
     }
 
     /// Read a collection of `  foo = bar` variables, with leading indent.
-    fn read_scoped_vars(&mut self) -> ParseResult<VarList<'text>> {
+    fn read_scoped_vars(
+        &mut self,
+        variable_name_validator: fn(var: &str) -> bool,
+    ) -> ParseResult<VarList<'text>> {
         let mut vars = VarList::default();
         while self.scanner.peek() == ' ' {
             self.scanner.skip_spaces();
             let name = self.read_ident()?;
+            if !variable_name_validator(name) {
+                self.scanner
+                    .parse_error(format!("unexpected variable {:?}", name))?;
+            }
             self.skip_spaces();
             let val = self.read_vardef()?;
             vars.insert(name, val.into_owned());
@@ -151,7 +158,22 @@ impl<'text> Parser<'text> {
         let name = self.read_ident()?;
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
-        let vars = self.read_scoped_vars()?;
+        let vars = self.read_scoped_vars(|var| {
+            matches!(
+                var,
+                "command"
+                    | "depfile"
+                    | "dyndep"
+                    | "description"
+                    | "deps"
+                    | "generator"
+                    | "pool"
+                    | "restat"
+                    | "rspfile"
+                    | "rspfile_content"
+                    | "msvc_deps_prefix"
+            )
+        })?;
         Ok(Rule { name, vars })
     }
 
@@ -159,24 +181,13 @@ impl<'text> Parser<'text> {
         let name = self.read_ident()?;
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
-        let vars = self.read_scoped_vars()?;
+        let vars = self.read_scoped_vars(|var| matches!(var, "depth"))?;
         let mut depth = 0;
-        for (key, val) in vars.into_iter() {
-            match key {
-                "depth" => {
-                    let val = val.evaluate(&[]);
-                    depth = match val.parse::<usize>() {
-                        Ok(d) => d,
-                        Err(err) => {
-                            return self.scanner.parse_error(format!("pool depth: {}", err))
-                        }
-                    }
-                }
-                _ => {
-                    return self
-                        .scanner
-                        .parse_error(format!("unexpected pool attribute {:?}", key));
-                }
+        if let Some((_, val)) = vars.into_iter().next() {
+            let val = val.evaluate(&[]);
+            depth = match val.parse::<usize>() {
+                Ok(d) => d,
+                Err(err) => return self.scanner.parse_error(format!("pool depth: {}", err)),
             }
         }
         Ok(Pool { name, depth })
@@ -245,7 +256,7 @@ impl<'text> Parser<'text> {
 
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
-        let vars = self.read_scoped_vars()?;
+        let vars = self.read_scoped_vars(|_| true)?;
         Ok(Build {
             rule,
             line,
