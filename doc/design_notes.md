@@ -237,3 +237,65 @@ And further, `cmd` randomly limits its argument to 8kb.
 
 PS: in writing this section I noticed that cmd has
 [terrifying quoting rules](https://stackoverflow.com/questions/355988/how-do-i-deal-with-quote-characters-when-using-cmd-exe).
+
+## Variable scope
+
+Ninja syntactic structures (`build`, `rule`) are at some level just
+lists of key-value bindings that ultimately combine to set properties on
+individual build steps, such as the `command = ...` command line.
+
+Additionally, bindings can be referenced by other bindings via the `$foo` or
+`${foo}` syntax.  This means variable lookup can recurse through a hierarchy of
+scopes.  The intent was this was simple enough that the
+behavior is straightforward, which in retrospect's insight really just means
+"underspecified".  (Forgive me! I hacked Ninja together in a few weekends and
+made the common mistake of "this is so simple I don't really need to think it
+through".)
+
+Aside from a conceptual model of the system's rules, ultimately what matters is
+what Ninja files in the wild do, which per [Hyrum's Law](https://www.hyrumslaw.com/)
+contain whatever the Ninja implementation allows.  However, I don't think it's
+really worth fleshing out all the idiosyncracies of Ninja's implementation as long
+as existing builds work.
+
+Consider the following build file:
+
+```
+var = $A
+
+rule r
+  command = $B
+
+var = $C
+
+build output-$D: r input-$E
+  var2 = $F
+  var2 = $G
+```
+
+These are the scopes to consider, in order of nesting:
+1. The toplevel scope, the unindented lines marked `$A` and `$C`.
+1. The build variable scope, the indented lines in the `build` block.
+1. The build file list scope, the implicit `$in` etc. variables.
+1. The rule scope, the indented lines in the `rule` block.
+
+In summary, lookup for bindings in each can refer to the scopes above them in the
+list.
+
+Working it through on this example:
+
+- Lookup for a toplevel binding (line `$A` and `$C`) uses the scope
+of toplevel bindings.  Consequence: the binding on line `$C` can refer
+to the first, e.g. if you wrote `var = ${var}2`.
+
+- Lookup for a build variable (for the value of `$F` and `$G`) also only refer
+to toplevel bindings.  (Lookup for line `$G` will not see the binding in line `$F`,
+which differs from toplevel, whoops.)
+
+- Lookup for input/output files (`output-$D`, `input-$E`) refer to build scope
+(the value bound in line `$G`, which shadows line `$F`), and then toplevel.
+
+- Lookup for rule variables can refer to `$in`/`$out`, build scope, then toplevel.
+
+All the lookups happen when the `build` block is visited, which means even
+if the `rule` block referenced `var` it would see the binding from line `$C`.
