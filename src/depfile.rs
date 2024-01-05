@@ -36,9 +36,16 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
     let start = scanner.ofs;
     loop {
         match scanner.read() {
-            '\0' | ' ' | ':' | '\r' | '\n' => {
+            '\0' | ' ' | '\r' | '\n' => {
                 scanner.back();
                 break;
+            }
+            ':' => {
+                let peek = scanner.peek();
+                if peek != '\\' && peek != '/' {
+                    scanner.back();
+                    break;
+                }
             }
             '\\' => {
                 let peek = scanner.peek();
@@ -151,6 +158,15 @@ mod tests {
         let mut file = b"build/browse.o   : src/browse.cc".to_vec();
         let deps = must_parse(&mut file);
         assert_eq!(deps.target, "build/browse.o");
+        assert_eq!(deps.deps.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_windows_dep_path() {
+        let mut file = b"odd/path.o: C:/odd\\path.c".to_vec();
+        let deps = must_parse(&mut file);
+        assert_eq!(deps.target, "odd/path.o");
+        assert_eq!(deps.deps[0], "C:/odd\\path.c");
         assert_eq!(deps.deps.len(), 1);
     }
 }
