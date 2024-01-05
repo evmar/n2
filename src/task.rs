@@ -40,8 +40,15 @@ pub struct TaskResult {
 fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
     let mut bytes = match std::fs::read(path) {
         Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => bail!("read {}: {}", path.display(), e),
     };
+
+    // Treat missing dep file as empty.
+    if bytes.len() == 0 {
+        return Ok(Vec::new());
+    }
+
     bytes.push(0);
     let mut scanner = Scanner::new(&bytes);
     let parsed_deps = depfile::parse(&mut scanner)
@@ -298,5 +305,15 @@ more text
 
         assert_eq!(find_last_line(b"hello\n\n"), b"hello");
         assert_eq!(find_last_line(b"hello\nt\n\n"), b"t");
+    }
+
+    #[test]
+    fn missing_deps() {
+        let deps = match read_depfile(Path::new("/missing/dep/file")) {
+            Err(_) => panic!("Missing file shouldn't return error"),
+            anyhow::Result::Ok(d) => d,
+        };
+
+        assert_eq!(deps.len(), 0);
     }
 }
