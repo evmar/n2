@@ -240,25 +240,23 @@ PS: in writing this section I noticed that cmd has
 
 ## Variable scope
 
-Ninja syntactic structures (`build`, `rule`) are at some level just
-lists of key-value bindings that ultimately combine to set properties on
-individual build steps, such as the `command = ...` command line.
+Ninja syntactic structures (`build`, `rule`) are at some level just lists of
+key-value bindings that ultimately combine to set properties on individual build
+steps, such as the `command = ...` command line.
 
 Additionally, bindings can be referenced by other bindings via the `$foo` or
-`${foo}` syntax.  This means variable lookup can recurse through a hierarchy of
-scopes.  The intent was this was simple enough that the
-behavior is straightforward, which in retrospect's insight really just means
-"underspecified".  (Forgive me! I hacked Ninja together in a few weekends and
-made the common mistake of "this is so simple I don't really need to think it
-through".)
+`${foo}` syntax. This means variable lookup traverses through a hierarchy of
+scopes. The intent was this was simple enough that the behavior is
+straightforward, which in retrospect's insight really just means
+"underspecified". (Forgive me! I hacked Ninja together in a few weekends and
+made the all too easy mistake of "this is so simple I don't really need to think
+it through".)
 
-Aside from a conceptual model of the system's rules, ultimately what matters is
-what Ninja files in the wild do, which per [Hyrum's Law](https://www.hyrumslaw.com/)
-contain whatever the Ninja implementation allows.  However, I don't think it's
-really worth fleshing out all the idiosyncracies of Ninja's implementation as long
-as existing builds work.
+### Basics
 
-Consider the following build file:
+First, here's a high level description that conveys the idea but omits details.
+
+Consider a build file like the following:
 
 ```
 var = $A
@@ -266,36 +264,45 @@ var = $A
 rule r
   command = $B
 
-var = $C
-
-build output-$D: r input-$E
-  var2 = $F
-  var2 = $G
+build output-$C: r
+  var2 = $D
 ```
 
-These are the scopes to consider, in order of nesting:
-1. The toplevel scope, the unindented lines marked `$A` and `$C`.
-1. The build variable scope, the indented lines in the `build` block.
-1. The build file list scope, the implicit `$in` etc. variables.
-1. The rule scope, the indented lines in the `rule` block.
+The `build` block stamps out a build step using the rule `r`, and the properties
+of that build step are found by looking up attributes like `command`.
 
-In summary, lookup for bindings in each can refer to the scopes above them in the
-list.
+When evaluating the expressions marked `$A`/`$B`/`$C`/`$D` above, these are the
+scopes to consider, in order of nesting:
 
-Working it through on this example:
+1. The toplevel scope, which defines `var` above.
+1. The build variable scope, which defines `var2` above.
+1. The build file list scope, which defines the implicit `$in` etc. variables.
+1. The rule scope, which defines `command` above.
 
-- Lookup for a toplevel binding (line `$A` and `$C`) uses the scope
-of toplevel bindings.  Consequence: the binding on line `$C` can refer
-to the first, e.g. if you wrote `var = ${var}2`.
+References found in each may refer to the scopes above in the list. For example,
+at the time the `command = ...` is evaluated, the in-scope variables include
+`$in`, `$var2`, and `$var`.
 
-- Lookup for a build variable (for the value of `$F` and `$G`) also only refer
-to toplevel bindings.  (Lookup for line `$G` will not see the binding in line `$F`,
-which differs from toplevel, whoops.)
+### Details
 
-- Lookup for input/output files (`output-$D`, `input-$E`) refer to build scope
-(the value bound in line `$G`, which shadows line `$F`), and then toplevel.
+Unfortunately, [Hyrum's Law](https://www.hyrumslaw.com/) means that Ninja files
+in the wild depend on whatever the Ninja implementation allows, which is more
+complex than the above. I don't think it's really worth fleshing out all the
+idiosyncracies of Ninja's implementation as long as existing builds work, but
+some details do matter.
 
-- Lookup for rule variables can refer to `$in`/`$out`, build scope, then toplevel.
+In particular, Ninja has particular behaviors around variable references found
+within the same scope. Consider:
 
-All the lookups happen when the `build` block is visited, which means even
-if the `rule` block referenced `var` it would see the binding from line `$C`.
+```
+var = 1
+var = ${var}2
+rule ...
+  command = echo $depfile
+  depfile = abc
+```
+
+In Ninja, the value of `var` is `12`: the assignment proceeds from top down. But
+within a `rule` block, the variable lookup of `$depfile` instead refers forward
+to `abc`, which means there is a possibility of circular references, along with
+logic that attempts to detect and warn in those cases(!).
