@@ -89,6 +89,11 @@ But if any of those files are missing we call the step dirty without bothering
 to compute a hash. In this manner we never compute a hash involving any missing
 files.
 
+Further, CMake generates Ninja files that claim a build step generates a
+[depfile](https://ninja-build.org/manual.html#_depfile) when it doesn't. Ninja
+treats this as an empty depfile, not an error. (See
+[#80](https://github.com/evmar/n2/issues/80).)
+
 ## Parsing
 
 Parsing .ninja files is part of the critical path for n2, because it must be
