@@ -31,12 +31,15 @@ fn skip_spaces(scanner: &mut Scanner) -> ParseResult<()> {
 }
 
 /// Read one path from the input scanner.
+/// Note: treats colon as a valid character in a path because of Windows-style
+/// paths, but this means that the inital `output: ...` path will include the
+/// trailing colon.
 fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
     skip_spaces(scanner)?;
     let start = scanner.ofs;
     loop {
         match scanner.read() {
-            '\0' | ' ' | ':' | '\r' | '\n' => {
+            '\0' | ' ' | '\r' | '\n' => {
                 scanner.back();
                 break;
             }
@@ -64,7 +67,13 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
         Some(o) => o,
     };
     scanner.skip_spaces();
-    scanner.expect(':')?;
+    let target = match target.strip_suffix(':') {
+        None => {
+            scanner.expect(':')?;
+            target
+        }
+        Some(target) => target,
+    };
     let mut deps = Vec::new();
     while let Some(p) = read_path(scanner)? {
         deps.push(p);
@@ -79,16 +88,19 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::path::Path;
 
-    use super::*;
-
-    fn must_parse(buf: &mut Vec<u8>) -> Deps {
+    fn try_parse(buf: &mut Vec<u8>) -> Result<Deps, String> {
         buf.push(0);
         let mut scanner = Scanner::new(buf);
-        match parse(&mut scanner) {
+        parse(&mut scanner).map_err(|err| scanner.format_parse_error(Path::new("test"), err))
+    }
+
+    fn must_parse(buf: &mut Vec<u8>) -> Deps {
+        match try_parse(buf) {
             Err(err) => {
-                println!("{}", scanner.format_parse_error(Path::new("test"), err));
+                println!("{}", err);
                 panic!("failed parse");
             }
             Ok(d) => d,
@@ -152,5 +164,25 @@ mod tests {
         let deps = must_parse(&mut file);
         assert_eq!(deps.target, "build/browse.o");
         assert_eq!(deps.deps.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_windows_dep_path() {
+        let mut file = b"odd/path.o: C:/odd\\path.c".to_vec();
+        let deps = must_parse(&mut file);
+        assert_eq!(deps.target, "odd/path.o");
+        assert_eq!(deps.deps[0], "C:/odd\\path.c");
+        assert_eq!(deps.deps.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_missing_colon() {
+        let mut file = b"foo bar".to_vec();
+        let err = try_parse(&mut file).unwrap_err();
+        assert!(
+            err.starts_with("parse error: expected ':'"),
+            "expected parse error, got {:?}",
+            err
+        );
     }
 }
