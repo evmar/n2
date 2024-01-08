@@ -472,30 +472,21 @@ impl<'a> Work<'a> {
             }
         }
 
-        let build = &self.graph.builds[id];
-
-        let input_was_missing = build
+        let input_was_missing = self.graph.builds[id]
             .dirtying_ins()
             .iter()
             .any(|&id| self.file_state.get(id).unwrap() == MTime::Missing);
 
-        // Stat all the outputs.  This step just finished, so we need to update
-        // any cached state of the output files to reflect their new state.
-        let mut output_missing = false;
-        for &id in build.outs() {
-            let file = self.graph.file(id);
-            let mtime = self.file_state.stat(id, file.path())?;
-            if mtime == MTime::Missing {
-                output_missing = true;
-            }
-        }
+        // Update any cached state of the output files to reflect their new state.
+        let output_was_missing = self.stat_all_outputs(id)?.is_some();
 
-        if input_was_missing || output_missing {
+        if input_was_missing || output_was_missing {
             // If a file is missing, don't record the build in in the db.
             // It will be considered dirty next time anyway due to the missing file.
             return Ok(());
         }
 
+        let build = &self.graph.builds[id];
         let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
         self.db.write_build(&self.graph, id, hash)?;
 
@@ -525,6 +516,22 @@ impl<'a> Work<'a> {
         }
     }
 
+    /// Stat all the outputs of a build.
+    /// Called before it's run (for determining whether it's up to date) and
+    /// after (to see if it touched any outputs).
+    fn stat_all_outputs(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
+        let build = &self.graph.builds[id];
+        let mut missing = None;
+        for &id in build.outs() {
+            let file = self.graph.file(id);
+            let mtime = self.file_state.stat(id, file.path())?;
+            if mtime == MTime::Missing && missing.is_none() {
+                missing = Some(id);
+            }
+        }
+        Ok(missing)
+    }
+
     /// Stat all the input/output files for a given build in anticipation of
     /// deciding whether it needs to be run again.
     /// Prereq: any dependent input is already generated.
@@ -545,24 +552,13 @@ impl<'a> Work<'a> {
             return Ok(Some(missing));
         }
 
-        // Stat all the outputs.
+        // Ensure we have state for all output files.
         // We know this build is solely responsible for updating these outputs,
         // and if we're checking if it's dirty we are visiting it the first
         // time, so we stat unconditionally.
         // This is looking at if the outputs are already present.
-        let build = &self.graph.builds[id];
-        for &id in build.outs() {
-            let file = self.graph.file(id);
-            if self.file_state.get(id).is_some() {
-                panic!(
-                    "{}: expected no file state for {}",
-                    build.location, file.name
-                );
-            }
-            let mtime = self.file_state.stat(id, file.path())?;
-            if mtime == MTime::Missing {
-                return Ok(Some(id));
-            }
+        if let Some(missing) = self.stat_all_outputs(id)? {
+            return Ok(Some(missing));
         }
 
         // All files accounted for.
@@ -570,8 +566,8 @@ impl<'a> Work<'a> {
     }
 
     /// Like check_build_files_missing, but for phony rules, which have
-    /// different behavior for both inputs and outputs.
-    fn check_build_files_missing_phony(&mut self, id: BuildId) {
+    /// different behavior for inputs.
+    fn check_build_files_missing_phony(&mut self, id: BuildId) -> anyhow::Result<()> {
         // We don't consider the input files.  This works around
         //   https://github.com/ninja-build/ninja/issues/1779
         // which is a bug that a phony rule with a missing input
@@ -580,16 +576,13 @@ impl<'a> Work<'a> {
         // TODO: reconsider how phony deps work, maybe we should always promote
         // phony deps to order-only?
 
-        // Maintain the invariant that we have stat info for all outputs.
-        // This build didn't run anything so the output is not expected to
-        // exist.
+        // Maintain the invariant that we have stat info for all outputs, but
+        // we generally don't expect them to have been created.
         // TODO: what should happen if a rule uses a phony output as its own input?
         // The Ninja manual suggests you can use phony rules to aggregate outputs
         // together, so we might need to create some sort of fake mtime here?
-        let build = &self.graph.builds[id];
-        for &id in build.outs() {
-            self.file_state.set_missing(id);
-        }
+        self.stat_all_outputs(id)?;
+        Ok(())
     }
 
     /// Check a ready build for whether it needs to run, returning true if so.
@@ -598,8 +591,8 @@ impl<'a> Work<'a> {
         let build = &self.graph.builds[id];
         let phony = build.cmdline.is_none();
         let file_missing = if phony {
-            self.check_build_files_missing_phony(id);
-            return Ok(false); // Do not need to run.
+            self.check_build_files_missing_phony(id)?;
+            return Ok(false); // Phony builds never need to run anything.
         } else {
             self.check_build_files_missing(id)?
         };

@@ -79,3 +79,35 @@ fn missing_phony_input() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn phony_output_on_disk() -> anyhow::Result<()> {
+    // https://github.com/evmar/n2/issues/40
+    // CMake uses a phony rule targeted at a real file as a way of marking
+    // "don't fail the build if this file is missing", but it had the consequence
+    // of confusing our dirty-checking logic.
+
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            TOUCH_RULE,
+            "build out: touch | phony_file",
+            "build phony_file: phony",
+            "",
+        ]
+        .join("\n"),
+    )?;
+
+    // Despite being a target of a phony rule, the file exists on disk.
+    space.write("phony_file", "")?;
+
+    // Expect the first build to generate some state...
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    // ...but a second one should be up to date (#40 was that this ran again).
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "no work to do");
+
+    Ok(())
+}
