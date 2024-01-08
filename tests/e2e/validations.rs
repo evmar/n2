@@ -43,7 +43,7 @@ rule build_fast
 build out: build_fast regular_input |@ validation_input
 build regular_input: build_fast
 build validation_input: build_slow
-  wait_for = regular_input
+  wait_for = out
 ",
     )?;
     space.run_expect(&mut n2_command(vec!["out"]))?;
