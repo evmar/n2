@@ -44,8 +44,8 @@ While building, n2 displays build progress like this:
 
 ```
 [=========================---------       ] 2772/4459 done, 8/930 running
-2s Building foo/bar
-0s Building foo/baz
+Building foo/bar (2s)
+Building foo/baz
 ```
 
 The progress bar always covers all build steps needed for the targets,
@@ -63,8 +63,8 @@ The bar shows three categories of state:
   dependent steps.
 
 The lines below the progress bar show some build steps that are currrently
-running, along with how long they've been running. Their text is controlled by
-the input `build.ninja` file.
+running, along with how long they've been running if it has been a while. Their
+text is controlled by the input `build.ninja` file.
 
 ## More reading
 
