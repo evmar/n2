@@ -84,10 +84,6 @@ impl TestSpace {
         Ok(())
     }
 
-    pub fn path(&self) -> &std::path::Path {
-        self.dir.path()
-    }
-
     /// Invoke n2, returning process output.
     pub fn run(&self, cmd: &mut std::process::Command) -> std::io::Result<std::process::Output> {
         cmd.current_dir(self.dir.path()).output()
