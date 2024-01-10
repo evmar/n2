@@ -1,15 +1,19 @@
 # Snapshot tests
 
-This directory contains real-world outputs from tools that generate Ninja files.
+This directory is for real-world outputs from tools that generate Ninja files.
 
 Because these outputs are large, they aren't checked in to the Ninja tree.
-Instead there is a `snapshot.zip` stored with Git LFS.  Unpack it with
+Instead for now it's a random zip file on Google drive at
+
+https://drive.google.com/file/d/1dlNAaf0XRXjV6UPkNV88JFuOBGJLdyGB/view?usp=sharing
+
+It expects to be unzipped directly into this directory:
 
 ```
 $ unzip snapshot.zip
 ```
 
-## Test data
+## Test data in the zip
 
 ### llvm-cmake
 
@@ -31,4 +35,10 @@ Read llvm/utils/gn/README.rst in LLVM checkout for more, but in brief.
 ```
 $ llvm/utils/gn/get.py
 $ llvm/utils/gn/gn.py gen out/gn
+```
+
+## Reminder to self how I made it
+
+```
+$ zip -r snapshot.zip .gitignore llvm-*
 ```
