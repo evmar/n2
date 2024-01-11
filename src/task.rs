@@ -51,9 +51,9 @@ fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
         .map_err(|err| anyhow!(scanner.format_parse_error(path, err)))?;
     // TODO verify deps refers to correct output
     let deps: Vec<String> = parsed_deps
-        .deps
-        .iter()
-        .map(|&dep| dep.to_string())
+        .values()
+        .flat_map(|x| x.iter())
+        .map(|&dep| dep.to_owned())
         .collect();
     Ok(deps)
 }

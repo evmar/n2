@@ -1,15 +1,9 @@
 //! Parsing of Makefile syntax as found in `.d` files emitted by C compilers.
 
-use crate::scanner::{ParseResult, Scanner};
-
-/// Dependency information for a single target.
-#[derive(Debug)]
-pub struct Deps<'a> {
-    /// Output name, as found in the `.d` input.
-    pub target: &'a str,
-    /// Input names, as found in the `.d` input.
-    pub deps: Vec<&'a str>,
-}
+use crate::{
+    scanner::{ParseResult, Scanner},
+    smallmap::SmallMap,
+};
 
 /// Skip spaces and backslashed newlines.
 fn skip_spaces(scanner: &mut Scanner) -> ParseResult<()> {
@@ -44,8 +38,7 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
                 break;
             }
             '\\' => {
-                let peek = scanner.peek();
-                if peek == '\n' || peek == '\r' {
+                if scanner.peek_newline() {
                     scanner.back();
                     break;
                 }
@@ -61,29 +54,33 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
 }
 
 /// Parse a `.d` file into `Deps`.
-pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Deps<'a>> {
-    let target = match read_path(scanner)? {
-        None => return scanner.parse_error("expected file"),
-        Some(o) => o,
-    };
-    scanner.skip_spaces();
-    let target = match target.strip_suffix(':') {
-        None => {
-            scanner.expect(':')?;
-            target
+pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<SmallMap<&'a str, Vec<&'a str>>> {
+    let mut result = SmallMap::default();
+    loop {
+        while scanner.peek() == ' ' || scanner.peek_newline() {
+            scanner.next();
         }
-        Some(target) => target,
-    };
-    let mut deps = Vec::new();
-    while let Some(p) = read_path(scanner)? {
-        deps.push(p);
+        let target = match read_path(scanner)? {
+            None => break,
+            Some(o) => o,
+        };
+        scanner.skip_spaces();
+        let target = match target.strip_suffix(':') {
+            None => {
+                scanner.expect(':')?;
+                target
+            }
+            Some(target) => target,
+        };
+        let mut deps = Vec::new();
+        while let Some(p) = read_path(scanner)? {
+            deps.push(p);
+        }
+        result.insert(target, deps);
     }
-    scanner.skip('\r');
-    scanner.skip('\n');
-    scanner.skip_spaces();
     scanner.expect('\0')?;
 
-    Ok(Deps { target, deps })
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -91,13 +88,13 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    fn try_parse(buf: &mut Vec<u8>) -> Result<Deps, String> {
+    fn try_parse(buf: &mut Vec<u8>) -> Result<SmallMap<&str, Vec<&str>>, String> {
         buf.push(0);
         let mut scanner = Scanner::new(buf);
         parse(&mut scanner).map_err(|err| scanner.format_parse_error(Path::new("test"), err))
     }
 
-    fn must_parse(buf: &mut Vec<u8>) -> Deps {
+    fn must_parse(buf: &mut Vec<u8>) -> SmallMap<&str, Vec<&str>> {
         match try_parse(buf) {
             Err(err) => {
                 println!("{}", err);
@@ -121,8 +118,13 @@ mod tests {
             |text| {
                 let mut file = text.into_bytes();
                 let deps = must_parse(&mut file);
-                assert_eq!(deps.target, "build/browse.o");
-                assert_eq!(deps.deps.len(), 3);
+                assert_eq!(
+                    deps,
+                    SmallMap::from([(
+                        "build/browse.o",
+                        vec!["src/browse.cc", "src/browse.h", "build/browse_py.h",]
+                    )])
+                );
             },
         );
     }
@@ -132,8 +134,10 @@ mod tests {
         test_for_crlf("build/browse.o: src/browse.cc   \n", |text| {
             let mut file = text.into_bytes();
             let deps = must_parse(&mut file);
-            assert_eq!(deps.target, "build/browse.o");
-            assert_eq!(deps.deps.len(), 1);
+            assert_eq!(
+                deps,
+                SmallMap::from([("build/browse.o", vec!["src/browse.cc",])])
+            );
         });
     }
 
@@ -144,8 +148,13 @@ mod tests {
             |text| {
                 let mut file = text.into_bytes();
                 let deps = must_parse(&mut file);
-                assert_eq!(deps.target, "build/browse.o");
-                assert_eq!(deps.deps.len(), 2);
+                assert_eq!(
+                    deps,
+                    SmallMap::from([(
+                        "build/browse.o",
+                        vec!["src/browse.cc", "build/browse_py.h",]
+                    )])
+                );
             },
         );
     }
@@ -154,25 +163,49 @@ mod tests {
     fn test_parse_without_final_newline() {
         let mut file = b"build/browse.o: src/browse.cc".to_vec();
         let deps = must_parse(&mut file);
-        assert_eq!(deps.target, "build/browse.o");
-        assert_eq!(deps.deps.len(), 1);
+        assert_eq!(
+            deps,
+            SmallMap::from([("build/browse.o", vec!["src/browse.cc",])])
+        );
     }
 
     #[test]
     fn test_parse_spaces_before_colon() {
         let mut file = b"build/browse.o   : src/browse.cc".to_vec();
         let deps = must_parse(&mut file);
-        assert_eq!(deps.target, "build/browse.o");
-        assert_eq!(deps.deps.len(), 1);
+        assert_eq!(
+            deps,
+            SmallMap::from([("build/browse.o", vec!["src/browse.cc",])])
+        );
     }
 
     #[test]
     fn test_parse_windows_dep_path() {
         let mut file = b"odd/path.o: C:/odd\\path.c".to_vec();
         let deps = must_parse(&mut file);
-        assert_eq!(deps.target, "odd/path.o");
-        assert_eq!(deps.deps[0], "C:/odd\\path.c");
-        assert_eq!(deps.deps.len(), 1);
+        assert_eq!(
+            deps,
+            SmallMap::from([("odd/path.o", vec!["C:/odd\\path.c",])])
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_targets() {
+        let mut file = b"
+out/a.o: src/a.c \\
+  src/b.c
+
+out/b.o :
+"
+        .to_vec();
+        let deps = must_parse(&mut file);
+        assert_eq!(
+            deps,
+            SmallMap::from([
+                ("out/a.o", vec!["src/a.c", "src/b.c",]),
+                ("out/b.o", vec![])
+            ])
+        );
     }
 
     #[test]
