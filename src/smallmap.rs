@@ -2,7 +2,7 @@
 //! TODO: this may not be needed at all, but the code used this pattern in a
 //! few places so I figured I may as well name it.
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, fmt::Debug};
 
 /// A map-like object implemented as a list of pairs, for cases where the
 /// number of entries in the map is small.
@@ -48,5 +48,33 @@ impl<K: PartialEq, V> SmallMap<K, V> {
 
     pub fn into_iter(self) -> std::vec::IntoIter<(K, V)> {
         self.0.into_iter()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &V> + '_ {
+        self.0.iter().map(|x| &x.1)
+    }
+}
+
+impl<K: PartialEq, V, const N: usize> std::convert::From<[(K, V); N]> for SmallMap<K, V> {
+    fn from(value: [(K, V); N]) -> Self {
+        let mut result = SmallMap::default();
+        for (k, v) in value {
+            result.insert(k, v);
+        }
+        result
+    }
+}
+
+impl<K: Debug, V: Debug> Debug for SmallMap<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+// Only for tests because it is order-sensitive
+#[cfg(test)]
+impl<K: PartialEq, V: PartialEq> PartialEq for SmallMap<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        return self.0 == other.0;
     }
 }

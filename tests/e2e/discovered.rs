@@ -93,3 +93,67 @@ build out: gendep || in
 
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn multi_output_depfile() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule myrule
+    command = echo \"out: foo\" > out.d && echo \"out2: foo2\" >> out.d && echo >> out.d && echo >> out.d && touch out out2
+    depfile = out.d
+
+build out out2: myrule
+",
+    )?;
+    space.write("foo", "")?;
+    space.write("foo2", "")?;
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "no work");
+    space.write("foo", "x")?;
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    space.write("foo2", "x")?;
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "no work");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn escaped_newline_in_depfile() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule myrule
+    command = echo \"out: foo \\\\\" > out.d && echo \"  foo2\" >> out.d && touch out
+    depfile = out.d
+
+build out: myrule
+",
+    )?;
+    space.write("foo", "")?;
+    space.write("foo2", "")?;
+
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "no work");
+    space.write("foo", "x")?;
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    space.write("foo2", "x")?;
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "ran 1 task");
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "no work");
+    Ok(())
+}
