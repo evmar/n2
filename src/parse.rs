@@ -16,11 +16,13 @@ use std::path::Path;
 ///   key = $val
 pub type VarList<'text> = SmallMap<&'text str, EvalString<&'text str>>;
 
+#[derive(Debug, PartialEq)]
 pub struct Rule<'text> {
     pub name: &'text str,
     pub vars: VarList<'text>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Build<'text> {
     pub rule: &'text str,
     pub line: usize,
@@ -34,12 +36,13 @@ pub struct Build<'text> {
     pub vars: VarList<'text>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Pool<'text> {
     pub name: &'text str,
     pub depth: usize,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Statement<'text> {
     Rule(Rule<'text>),
     Build(Build<'text>),
@@ -47,11 +50,12 @@ pub enum Statement<'text> {
     Include(EvalString<&'text str>),
     Subninja(EvalString<&'text str>),
     Pool(Pool<'text>),
+    VariableAssignment((&'text str, EvalString<&'text str>)),
 }
 
 pub struct Parser<'text> {
     scanner: Scanner<'text>,
-    pub vars: Vars<'text>,
+    buf_len: usize,
     /// Reading EvalStrings is very hot when parsing, so we always read into
     /// this buffer and then clone it afterwards.
     eval_buf: Vec<EvalPart<&'text str>>,
@@ -61,13 +65,34 @@ impl<'text> Parser<'text> {
     pub fn new(buf: &'text [u8]) -> Parser<'text> {
         Parser {
             scanner: Scanner::new(buf),
-            vars: Vars::default(),
+            buf_len: buf.len(),
             eval_buf: Vec::with_capacity(16),
         }
     }
 
     pub fn format_parse_error(&self, filename: &Path, err: ParseError) -> String {
         self.scanner.format_parse_error(filename, err)
+    }
+
+    pub fn read_all(&mut self) -> ParseResult<Vec<Statement<'text>>> {
+        let mut result = Vec::new();
+        while let Some(stmt) = self.read()? {
+            result.push(stmt)
+        }
+        Ok(result)
+    }
+
+    pub fn read_to_channel(&mut self, sender: std::sync::mpsc::Sender<ParseResult<Statement<'text>>>) {
+        loop {
+            match self.read() {
+                Ok(None) => return,
+                Ok(Some(stmt)) => sender.send(Ok(stmt)).unwrap(),
+                Err(e) => {
+                    sender.send(Err(e)).unwrap();
+                    return;
+                },
+            }
+        }
     }
 
     pub fn read(&mut self) -> ParseResult<Option<Statement<'text>>> {
@@ -78,6 +103,18 @@ impl<'text> Parser<'text> {
                 '#' => self.skip_comment()?,
                 ' ' | '\t' => return self.scanner.parse_error("unexpected whitespace"),
                 _ => {
+                    if self.scanner.ofs >= self.buf_len {
+                        // The parsing code expects there to be a null byte at the end of the file,
+                        // to allow the parsing to be more performant and exclude most checks for
+                        // EOF. However, when parsing an individual "chunk" of the manifest, there
+                        // won't be a null byte at the end, the scanner will do an out-of-bounds
+                        // read past the end of the chunk and into the next chunk. When we split
+                        // the file into chunks, we made sure to end all the chunks just before
+                        // identifiers at the start of a new line, so that we can easily detect
+                        // that here.
+                        assert!(self.scanner.ofs == self.buf_len);
+                        return Ok(None)
+                    }
                     let ident = self.read_ident()?;
                     self.skip_spaces();
                     match ident {
@@ -92,12 +129,7 @@ impl<'text> Parser<'text> {
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
-                            // TODO: The evaluation of global variables should
-                            // be moved out of the parser, so that we can run
-                            // multiple parsers in parallel and then evaluate
-                            // all the variables in series at the end.
-                            let val = self.read_vardef()?.evaluate(&[&self.vars]);
-                            self.vars.insert(ident, val);
+                            return Ok(Some(Statement::VariableAssignment((ident, self.read_vardef()?))))
                         }
                     }
                 }
@@ -440,6 +472,50 @@ impl<'text> Parser<'text> {
     }
 }
 
+pub fn split_manifest_into_chunks(buf: &[u8], num_threads: usize) -> Vec<&[u8]> {
+    let min_chunk_size = 1024 * 1024;
+    let chunk_count = num_threads * 2;
+    let chunk_size = std::cmp::max(min_chunk_size, buf.len() / chunk_count + 1);
+    let mut result = Vec::with_capacity(chunk_count);
+    let mut start = 0;
+    while start < buf.len() {
+        let next = std::cmp::min(start + chunk_size, buf.len());
+        let next = find_start_of_next_manifest_chunk(buf, next);
+        result.push(&buf[start..next]);
+        start = next;
+    }
+    result
+}
+
+fn find_start_of_next_manifest_chunk(buf: &[u8], prospective_start: usize) -> usize {
+    let mut idx = prospective_start;
+    loop {
+        // TODO: Replace the search with something that uses SIMD instructions like the memchr crate
+        let Some(nl_index) = &buf[idx..].iter().position(|&b| b == b'\n') else {
+            return buf.len()
+        };
+        idx += nl_index + 1;
+
+        // This newline was escaped, try again. It's possible that this check is too conservative,
+        // for example, you could have:
+        //  - a comment that ends with a "$": "# $\n"
+        //  - an escaped-dollar: "X=$$\n"
+        if idx >= 2 && buf[idx-2] == b'$' ||
+            idx >= 3 && buf[idx-2] == b'\r' && buf[idx-3] == b'$' {
+            continue;
+        }
+
+        // We want chunk boundaries to be at an easy/predictable place for the scanner to stop
+        // at. So only stop at an identifier after a newline.
+        if idx == buf.len() || matches!(
+            buf[idx],
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' | b'.'
+        ) {
+            return idx;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,9 +539,13 @@ mod tests {
         test_for_line_endings(&["var = 3", "default a b$var c", ""], |test_case| {
             let mut buf = test_case_buffer(test_case);
             let mut parser = Parser::new(&mut buf);
+            match parser.read().unwrap().unwrap() {
+                Statement::VariableAssignment(_) => {},
+                stmt => panic!("expected variable assignment, got {:?}", stmt),
+            };
             let default = match parser.read().unwrap().unwrap() {
                 Statement::Default(d) => d,
-                _ => panic!("expected default"),
+                stmt => panic!("expected default, got {:?}", stmt),
             };
             assert_eq!(
                 default,
@@ -482,9 +562,10 @@ mod tests {
     fn parse_dot_in_eval() {
         let mut buf = test_case_buffer("x = $y.z\n");
         let mut parser = Parser::new(&mut buf);
-        parser.read().unwrap();
-        let x = parser.vars.get("x").unwrap();
-        assert_eq!(x, ".z");
+        assert_eq!(parser.read(), Ok(Some(Statement::VariableAssignment(("x",  EvalString::new(vec![
+            EvalPart::VarRef("y"),
+            EvalPart::Literal(".z"),
+        ]))))));
     }
 
     #[test]

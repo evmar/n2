@@ -2,24 +2,24 @@
 
 use crate::{
     canon::{canon_path, canon_path_fast},
-    eval::{EvalPart, EvalString},
+    eval::{EvalPart, EvalString, Vars},
     graph::{FileId, RspFile},
     parse::Statement,
     scanner,
     smallmap::SmallMap,
-    {db, eval, graph, parse, trace},
+    {db, eval, graph, parse, trace}, thread_pool::{self, ThreadPoolExecutor}, scanner::ParseResult,
 };
 use anyhow::{anyhow, bail};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex, cell::UnsafeCell, thread::Thread};
 use std::path::PathBuf;
 use std::{borrow::Cow, path::Path};
 
 /// A variable lookup environment for magic $in/$out variables.
-struct BuildImplicitVars<'a> {
-    graph: &'a graph::Graph,
-    build: &'a graph::Build,
+struct BuildImplicitVars<'text> {
+    graph: &'text graph::Graph,
+    build: &'text graph::Build,
 }
-impl<'a> BuildImplicitVars<'a> {
+impl<'text> BuildImplicitVars<'text> {
     fn file_list(&self, ids: &[FileId], sep: char) -> String {
         let mut out = String::new();
         for &id in ids {
@@ -31,7 +31,7 @@ impl<'a> BuildImplicitVars<'a> {
         out
     }
 }
-impl<'a> eval::Env for BuildImplicitVars<'a> {
+impl<'text> eval::Env for BuildImplicitVars<'text> {
     fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
         let string_to_evalstring =
             |s: String| Some(EvalString::new(vec![EvalPart::Literal(Cow::Owned(s))]));
@@ -45,22 +45,56 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
     }
 }
 
+/// FilePool is a datastucture that is intended to hold onto byte buffers and give out immutable
+/// references to them. But it can also accept new byte buffers while old ones are still lent out.
+/// This requires interior mutability / unsafe code. Appending to a Vec while references to other
+/// elements are held is generally unsafe, because the Vec can reallocate all the prior elements
+/// to a new memory location. But if the elements themselves are Vecs that never change, the
+/// contents of those inner vecs can be referenced safely. This also requires guarding the outer
+/// Vec with a Mutex so that two threads don't append to it at the same time.
+struct FilePool {
+    files: Mutex<UnsafeCell<Vec<Vec<u8>>>>,
+}
+impl FilePool {
+    fn new() -> FilePool {
+        FilePool { files: Mutex::new(UnsafeCell::new(Vec::new())) }
+    }
+    /// Add the file to the file pool, and then return it back to the caller as a slice.
+    /// Returning the Vec instead of a slice would be unsafe, as the Vecs will be reallocated.
+    fn add_file(&self, file: Vec<u8>) -> &[u8] {
+        let files = self.files.lock().unwrap().get();
+        unsafe {
+            (*files).push(file);
+            (*files).last().unwrap().as_slice()
+        }
+    }
+}
+
 /// Internal state used while loading.
-#[derive(Default)]
-pub struct Loader {
+pub struct Loader<'text> {
+    file_pool: &'text FilePool,
+    vars: Vars<'text>,
     graph: graph::Graph,
     default: Vec<FileId>,
     /// rule name -> list of (key, val)
-    rules: HashMap<String, SmallMap<String, eval::EvalString<String>>>,
+    rules: HashMap<&'text str, SmallMap<&'text str, eval::EvalString<&'text str>>>,
     pools: SmallMap<String, usize>,
     builddir: Option<String>,
 }
 
-impl Loader {
-    pub fn new() -> Self {
-        let mut loader = Loader::default();
+impl<'text> Loader<'text> {
+    pub fn new(file_pool: &'text FilePool) -> Self {
+        let mut loader = Loader {
+            file_pool,
+            vars: Vars::default(),
+            graph: graph::Graph::default(),
+            default: Vec::default(),
+            rules: HashMap::default(),
+            pools: SmallMap::default(),
+            builddir: None,
+        };
 
-        loader.rules.insert("phony".to_owned(), SmallMap::default());
+        loader.rules.insert("phony", SmallMap::default());
 
         loader
     }
@@ -94,18 +128,21 @@ impl Loader {
     fn add_build(
         &mut self,
         filename: std::rc::Rc<PathBuf>,
-        env: &eval::Vars,
         b: parse::Build,
     ) -> anyhow::Result<()> {
         let ins = graph::BuildIns {
-            ids: self.evaluate_paths(b.ins, &[&b.vars, env]),
+            ids: b.ins.iter().map(|x| {
+                self.path(x.evaluate(&[&b.vars, &self.vars]))
+            }).collect(),
             explicit: b.explicit_ins,
             implicit: b.implicit_ins,
             order_only: b.order_only_ins,
             // validation is implied by the other counts
         };
         let outs = graph::BuildOuts {
-            ids: self.evaluate_paths(b.outs, &[&b.vars, env]),
+            ids: b.outs.iter().map(|x| {
+                self.path(x.evaluate(&[&b.vars, &self.vars]))
+            }).collect(),
             explicit: b.explicit_outs,
         };
         let mut build = graph::Build::new(
@@ -132,8 +169,8 @@ impl Loader {
         let lookup = |key: &str| -> Option<String> {
             // Look up `key = ...` binding in build and rule block.
             Some(match rule.get(key) {
-                Some(val) => val.evaluate(&[&implicit_vars, build_vars, env]),
-                None => build_vars.get(key)?.evaluate(&[env]),
+                Some(val) => val.evaluate(&[&implicit_vars, build_vars, &self.vars]),
+                None => build_vars.get(key)?.evaluate(&[&self.vars]),
             })
         };
 
@@ -169,66 +206,63 @@ impl Loader {
         self.graph.add_build(build)
     }
 
-    fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
+    fn read_file(&mut self, id: FileId, executor: &ThreadPoolExecutor<'text>) -> anyhow::Result<()> {
         let path = self.graph.file(id).path().to_path_buf();
         let bytes = match trace::scope("read file", || scanner::read_file_with_nul(&path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path.display(), e),
         };
-        self.parse(path, &bytes)
+        self.parse(path, self.file_pool.add_file(bytes), executor)
     }
 
-    fn evaluate_and_read_file(
-        &mut self,
-        file: EvalString<&str>,
-        envs: &[&dyn eval::Env],
-    ) -> anyhow::Result<()> {
-        let evaluated = self.evaluate_path(file, envs);
-        self.read_file(evaluated)
-    }
-
-    pub fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
+    pub fn parse(&mut self, path: PathBuf, bytes: &'text [u8], executor: &ThreadPoolExecutor<'text>) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
 
-        let mut parser = parse::Parser::new(&bytes);
+        let chunks = parse::split_manifest_into_chunks(bytes, executor.get_num_threads().get());
 
-        loop {
-            let stmt = match parser
-                .read()
-                .map_err(|err| anyhow!(parser.format_parse_error(&filename, err)))?
-            {
-                None => break,
-                Some(s) => s,
-            };
+        let mut receivers = Vec::with_capacity(chunks.len());
+
+        for chunk in chunks.into_iter() {
+            let (sender, receiver) = std::sync::mpsc::channel::<ParseResult<Statement<'text>>>();
+            receivers.push(receiver);
+            executor.execute(move || {
+                let mut parser = parse::Parser::new(chunk);
+                parser.read_to_channel(sender);
+            })
+        }
+
+        for stmt in receivers.into_iter().flatten() {
             match stmt {
-                Statement::Include(id) => trace::scope("include", || {
-                    self.evaluate_and_read_file(id, &[&parser.vars])
+                Ok(Statement::VariableAssignment((name, val))) => {
+                    self.vars.insert(name, val.evaluate(&[&self.vars]));
+                },
+                Ok(Statement::Include(id)) => trace::scope("include", || {
+                    let evaluated = self.path(id.evaluate(&[&self.vars]));
+                    self.read_file(evaluated, executor)
                 })?,
                 // TODO: implement scoping for subninja
-                Statement::Subninja(id) => trace::scope("subninja", || {
-                    self.evaluate_and_read_file(id, &[&parser.vars])
+                Ok(Statement::Subninja(id)) => trace::scope("subninja", || {
+                    let evaluated = self.path(id.evaluate(&[&self.vars]));
+                    self.read_file(evaluated, executor)
                 })?,
-                Statement::Default(defaults) => {
-                    let evaluated = self.evaluate_paths(defaults, &[&parser.vars]);
-                    self.default.extend(evaluated);
+                Ok(Statement::Default(defaults)) => {
+                    let it: Vec<FileId> = defaults.into_iter().map(|x| {
+                        self.path(x.evaluate(&[&self.vars]))
+                    }).collect();
+                    self.default.extend(it);
                 }
-                Statement::Rule(rule) => {
-                    let mut vars: SmallMap<String, eval::EvalString<String>> = SmallMap::default();
-                    for (name, val) in rule.vars.into_iter() {
-                        // TODO: We should not need to call .into_owned() here
-                        // if we keep the contents of all included files in
-                        // memory.
-                        vars.insert(name.to_owned(), val.into_owned());
-                    }
-                    self.rules.insert(rule.name.to_owned(), vars);
+                Ok(Statement::Rule(rule)) => {
+                    self.rules.insert(rule.name, rule.vars);
                 }
-                Statement::Build(build) => self.add_build(filename.clone(), &parser.vars, build)?,
-                Statement::Pool(pool) => {
+                Ok(Statement::Build(build)) => self.add_build(filename.clone(), build)?,
+                Ok(Statement::Pool(pool)) => {
                     self.pools.insert(pool.name.to_string(), pool.depth);
                 }
+                // TODO: Call format_parse_error
+                Err(e) => bail!(e.msg),
             };
         }
-        self.builddir = parser.vars.get("builddir").cloned();
+        self.builddir = self.vars.get("builddir").cloned();
         Ok(())
     }
 }
@@ -244,13 +278,17 @@ pub struct State {
 
 /// Load build.ninja/.n2_db and return the loaded build graph and state.
 pub fn read(build_filename: &str) -> anyhow::Result<State> {
-    let mut loader = Loader::new();
-    trace::scope("loader.read_file", || {
-        let id = loader
-            .graph
-            .files
-            .id_from_canonical(canon_path(build_filename));
-        loader.read_file(id)
+    let file_pool = FilePool::new();
+    let mut loader = trace::scope("loader.read_file", || -> anyhow::Result<Loader> {
+        thread_pool::scoped_thread_pool(std::thread::available_parallelism()?, |executor| {
+            let mut loader = Loader::new(&file_pool);
+            let id = loader
+                .graph
+                .files
+                .id_from_canonical(canon_path(build_filename));
+            loader.read_file(id, executor)?;
+            Ok(loader)
+        })
     })?;
     let mut hashes = graph::Hashes::default();
     let db = trace::scope("db::open", || {
@@ -277,9 +315,12 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
 #[cfg(test)]
 pub fn parse(name: &str, mut content: Vec<u8>) -> anyhow::Result<graph::Graph> {
     content.push(0);
-    let mut loader = Loader::new();
+    let file_pool = FilePool::new();
+    let mut loader = Loader::new(&file_pool);
     trace::scope("loader.read_file", || {
-        loader.parse(PathBuf::from(name), &content)
+        thread_pool::scoped_thread_pool(std::num::NonZeroUsize::new(1).unwrap(), |executor| {
+            loader.parse(PathBuf::from(name), &content, executor)
+        })
     })?;
     Ok(loader.graph)
 }

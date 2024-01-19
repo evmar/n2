@@ -2,9 +2,9 @@
 
 use std::{io::Read, path::Path};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ParseError {
-    msg: String,
+    pub msg: String,
     ofs: usize,
 }
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -17,9 +17,6 @@ pub struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
-        if !buf.ends_with(b"\0") {
-            panic!("Scanner requires nul-terminated buf");
-        }
         Scanner {
             buf,
             ofs: 0,

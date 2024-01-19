@@ -21,6 +21,7 @@ mod task;
 mod terminal;
 mod trace;
 mod work;
+mod thread_pool;
 
 #[cfg(not(any(windows, target_arch = "wasm32")))]
 use jemallocator::Jemalloc;
