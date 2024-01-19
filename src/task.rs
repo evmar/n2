@@ -12,7 +12,7 @@ use crate::{
     depfile,
     graph::{Build, BuildId, RspFile},
     process,
-    scanner::Scanner,
+    scanner::{self, Scanner},
 };
 use anyhow::{anyhow, bail};
 use std::path::{Path, PathBuf};
@@ -38,7 +38,7 @@ pub struct TaskResult {
 
 /// Reads dependencies from a .d file path.
 fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
-    let mut bytes = match std::fs::read(path) {
+    let bytes = match scanner::read_file_with_nul(path) {
         Ok(b) => b,
         // See discussion of missing depfiles in #80.
         // TODO(#99): warn or error in this circumstance?
@@ -46,7 +46,6 @@ fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
         Err(e) => bail!("read {}: {}", path.display(), e),
     };
 
-    bytes.push(0);
     let mut scanner = Scanner::new(&bytes);
     let parsed_deps = depfile::parse(&mut scanner)
         .map_err(|err| anyhow!(scanner.format_parse_error(path, err)))?;

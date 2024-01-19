@@ -14,7 +14,7 @@ mod process_posix;
 mod process_win;
 mod progress;
 pub mod run;
-mod scanner;
+pub mod scanner;
 mod signal;
 mod smallmap;
 mod task;

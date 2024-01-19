@@ -52,8 +52,7 @@ fn bench_parse_synthetic(c: &mut Criterion) {
     });
 }
 
-fn bench_parse_file(c: &mut Criterion, mut input: Vec<u8>) {
-    input.push(0);
+fn bench_parse_file(c: &mut Criterion, input: &[u8]) {
     c.bench_function("parse benches/build.ninja", |b| {
         b.iter(|| {
             let mut parser = n2::parse::Parser::new(&input);
@@ -67,8 +66,8 @@ fn bench_parse_file(c: &mut Criterion, mut input: Vec<u8>) {
 }
 
 pub fn bench_parse(c: &mut Criterion) {
-    match std::fs::read("benches/build.ninja") {
-        Ok(input) => bench_parse_file(c, input),
+    match n2::scanner::read_file_with_nul("benches/build.ninja".as_ref()) {
+        Ok(input) => bench_parse_file(c, &input),
         Err(err) => {
             eprintln!("failed to read benches/build.ninja: {}", err);
             eprintln!("using synthetic build.ninja");

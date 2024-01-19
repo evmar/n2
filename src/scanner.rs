@@ -1,6 +1,6 @@
 //! Scans an input string (source file) character by character.
 
-use std::path::Path;
+use std::{io::Read, path::Path};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -131,4 +131,22 @@ impl<'a> Scanner<'a> {
         }
         panic!("invalid offset when formatting error")
     }
+}
+
+/// Scanner wants its input buffer to end in a trailing nul.
+/// This function is like std::fs::read() but appends a nul, efficiently.
+pub fn read_file_with_nul(path: &Path) -> std::io::Result<Vec<u8>> {
+    // Using std::fs::read() to read the file and then pushing a nul on the end
+    // causes us to allocate a buffer the size of the file, then grow it to push
+    // the nul, copying the entire file(!).  So instead create a buffer of the
+    // right size up front.
+    let mut file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len() as usize;
+    let mut bytes = Vec::with_capacity(size + 1);
+    unsafe {
+        bytes.set_len(size);
+    }
+    file.read_exact(&mut bytes[..size])?;
+    bytes.push(0);
+    Ok(bytes)
 }

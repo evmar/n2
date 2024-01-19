@@ -5,6 +5,7 @@ use crate::{
     eval::{EvalPart, EvalString},
     graph::{FileId, RspFile},
     parse::Statement,
+    scanner,
     smallmap::SmallMap,
     {db, eval, graph, parse, trace},
 };
@@ -172,11 +173,10 @@ impl Loader {
 
     fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
         let path = self.graph.file(id).path().to_path_buf();
-        let mut bytes = match trace::scope("fs::read", || std::fs::read(&path)) {
+        let bytes = match trace::scope("read file", || scanner::read_file_with_nul(&path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path.display(), e),
         };
-        bytes.push(0);
         self.parse(path, &bytes)
     }
 
