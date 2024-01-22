@@ -47,6 +47,23 @@ impl<T: AsRef<str>> EvalString<T> {
         }
     }
 
+    fn calc_evaluated_length(&self, envs: &[&dyn Env]) -> usize {
+        self.0
+            .iter()
+            .map(|part| match part {
+                EvalPart::Literal(s) => s.as_ref().len(),
+                EvalPart::VarRef(v) => {
+                    for (i, env) in envs.iter().enumerate() {
+                        if let Some(v) = env.get_var(v.as_ref()) {
+                            return v.calc_evaluated_length(&envs[i + 1..]);
+                        }
+                    }
+                    0
+                }
+            })
+            .sum()
+    }
+
     /// evalulate turns the EvalString into a regular String, looking up the
     /// values of variable references in the provided Envs. It will look up
     /// its variables in the earliest Env that has them, and then those lookups
@@ -54,6 +71,7 @@ impl<T: AsRef<str>> EvalString<T> {
     /// had the first successful lookup.
     pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
         let mut result = String::new();
+        result.reserve(self.calc_evaluated_length(envs));
         self.evaluate_inner(&mut result, envs);
         result
     }
