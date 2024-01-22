@@ -56,17 +56,6 @@ pub struct Loader {
     builddir: Option<String>,
 }
 
-impl parse::Loader for Loader {
-    type Path = FileId;
-    fn path(&mut self, path: &mut str) -> Self::Path {
-        // Perf: this is called while parsing build.ninja files.  We go to
-        // some effort to avoid allocating in the common case of a path that
-        // refers to a file that is already known.
-        let len = canon_path_fast(path);
-        self.graph.files.id_from_canonical(&path[..len])
-    }
-}
-
 impl Loader {
     pub fn new() -> Self {
         let mut loader = Loader::default();
@@ -76,10 +65,19 @@ impl Loader {
         loader
     }
 
+    /// Convert a path string to a FileId.  For performance reasons
+    /// this requires an owned 'path' param.
+    fn path(&mut self, mut path: String) -> FileId {
+        // Perf: this is called while parsing build.ninja files.  We go to
+        // some effort to avoid allocating in the common case of a path that
+        // refers to a file that is already known.
+        let len = canon_path_fast(&mut path);
+        path.truncate(len);
+        self.graph.files.id_from_canonical(path)
+    }
+
     fn evaluate_path(&mut self, path: EvalString<&str>, envs: &[&dyn eval::Env]) -> FileId {
-        use parse::Loader;
-        let mut evaluated = path.evaluate(envs);
-        self.path(&mut evaluated)
+        self.path(path.evaluate(envs))
     }
 
     fn evaluate_paths(

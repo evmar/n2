@@ -3,7 +3,8 @@
 
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
+use std::collections::HashMap;
 
 /// An environment providing a mapping of variable name to variable value.
 /// This represents one "frame" of evaluation context, a given EvalString may
