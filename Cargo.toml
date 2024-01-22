@@ -18,6 +18,7 @@ description = "a ninja compatible build system"
 anyhow = "1.0"
 argh = "0.1.10"
 libc = "0.2"
+rustc-hash = "1.1.0"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.48"

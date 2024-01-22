@@ -1,5 +1,7 @@
 //! The build graph, a graph between files and commands.
 
+use rustc_hash::FxHashMap;
+
 use crate::{
     densemap::{self, DenseMap},
     hash::BuildHash,
@@ -258,7 +260,7 @@ pub struct Graph {
 #[derive(Default)]
 pub struct GraphFiles {
     pub by_id: DenseMap<FileId, File>,
-    by_name: HashMap<String, FileId>,
+    by_name: FxHashMap<String, FileId>,
 }
 
 impl Graph {

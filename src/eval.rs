@@ -1,10 +1,11 @@
 //! Represents parsed Ninja strings with embedded variable references, e.g.
 //! `c++ $in -o $out`, and mechanisms for expanding those into plain strings.
 
+use rustc_hash::FxHashMap;
+
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 /// An environment providing a mapping of variable name to variable value.
 /// This represents one "frame" of evaluation context, a given EvalString may
@@ -121,7 +122,7 @@ impl EvalString<&str> {
 
 /// A single scope's worth of variable definitions.
 #[derive(Debug, Default)]
-pub struct Vars<'text>(HashMap<&'text str, String>);
+pub struct Vars<'text>(FxHashMap<&'text str, String>);
 
 impl<'text> Vars<'text> {
     pub fn insert(&mut self, key: &'text str, val: String) {
