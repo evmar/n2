@@ -1,5 +1,4 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use n2::parse::Loader;
 use std::{io::Write, path::PathBuf, str::FromStr};
 
 pub fn bench_canon(c: &mut Criterion) {

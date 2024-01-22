@@ -57,18 +57,6 @@ pub struct Parser<'text> {
     eval_buf: Vec<EvalPart<&'text str>>,
 }
 
-/// Loader maps path strings (as found in build.ninja files) into an arbitrary
-/// "Path" type.  This allows us to canonicalize and convert path strings to
-/// more efficient integer identifiers while we parse, rather than needing to
-/// buffer up many intermediate strings; in fact, parsing uses a single buffer
-/// for all of these.
-pub trait Loader {
-    type Path;
-    /// Convert a path string to a Self::Path type.  For performance reasons
-    /// this may mutate the 'path' param.
-    fn path(&mut self, path: &mut str) -> Self::Path;
-}
-
 impl<'text> Parser<'text> {
     pub fn new(buf: &'text [u8]) -> Parser<'text> {
         Parser {
