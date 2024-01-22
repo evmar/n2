@@ -4,7 +4,7 @@ use crate::{
     densemap::{self, DenseMap},
     hash::BuildHash,
 };
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -310,21 +310,26 @@ impl GraphFiles {
     }
 
     /// Look up a file by its name, adding it if not already present.
-    /// Name must have been canonicalized already.
-    /// This function has a funny API to avoid copies; pass a String if you have
-    /// one already, otherwise a &str is acceptable.
-    pub fn id_from_canonical<S: AsRef<str> + Into<String>>(&mut self, file: S) -> FileId {
-        self.lookup(file.as_ref()).unwrap_or_else(|| {
-            // TODO: so many string copies :<
-            let file = file.into();
-            let id = self.by_id.push(File {
-                name: file.clone(),
-                input: None,
-                dependents: Vec::new(),
-            });
-            self.by_name.insert(file, id);
-            id
-        })
+    /// Name must have been canonicalized already. Only accepting an owned
+    /// string allows us to avoid a string copy and a hashmap lookup when we
+    /// need to create a new id, but would also be possible to create a version
+    /// of this function that accepts string references that is more optimized
+    /// for the case where the entry already exists. But so far, all of our
+    /// usages of this function have an owned string easily accessible anyways.
+    pub fn id_from_canonical(&mut self, file: String) -> FileId {
+        // TODO: so many string copies :<
+        match self.by_name.entry(file) {
+            Entry::Occupied(o) => *o.get(),
+            Entry::Vacant(v) => {
+                let id = self.by_id.push(File {
+                    name: v.key().clone(),
+                    input: None,
+                    dependents: Vec::new(),
+                });
+                v.insert(id);
+                id
+            }
+        }
     }
 
     pub fn all_ids(&self) -> impl Iterator<Item = FileId> {
