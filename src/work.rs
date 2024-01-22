@@ -788,7 +788,7 @@ build b: phony c
 build c: phony a
 ";
         let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
-        let a_id = graph.files.id_from_canonical("a");
+        let a_id = graph.files.id_from_canonical("a".to_owned());
         let mut states = BuildStates::new(graph.builds.next_id(), SmallMap::default());
         let mut stack = Vec::new();
         match states.want_file(&graph, &mut stack, a_id) {
