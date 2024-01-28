@@ -451,3 +451,21 @@ build foo: write_file
     assert_eq!(space.read("foo")?, b"Hello, world!\n");
     Ok(())
 }
+
+#[test]
+fn cycle() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+build a: phony b
+build b: phony c
+build c: phony a
+",
+    )?;
+    space.write("in", "")?;
+    let out = space.run(&mut n2_command(vec!["a"]))?;
+    assert_output_contains(&out, "dependency cycle: a -> b -> c -> a");
+
+    Ok(())
+}

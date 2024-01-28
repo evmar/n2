@@ -500,7 +500,7 @@ impl<'a> Work<'a> {
 
         let mut dependents = HashSet::new();
         for &id in build.outs() {
-            for &id in &self.graph.file(id).dependents {
+            for &id in self.graph.file(id).dependents.iter() {
                 if self.build_states.get(id) != BuildState::Want {
                     continue;
                 }
@@ -773,28 +773,5 @@ impl<'a> Work<'a> {
         // don't want n2 to print a "succeeded" message afterwards.
         let success = tasks_failed == 0 && !signal::was_interrupted();
         Ok(success.then_some(tasks_done))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_cycle() -> Result<(), anyhow::Error> {
-        let file = "
-build a: phony b
-build b: phony c
-build c: phony a
-";
-        let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
-        let a_id = graph.files.id_from_canonical("a".to_owned());
-        let mut states = BuildStates::new(graph.builds.next_id(), SmallMap::default());
-        let mut stack = Vec::new();
-        match states.want_file(&graph, &mut stack, a_id) {
-            Ok(_) => panic!("expected build cycle error"),
-            Err(err) => assert_eq!(err.to_string(), "dependency cycle: a -> b -> c -> a"),
-        }
-        Ok(())
     }
 }

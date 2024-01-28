@@ -9,6 +9,15 @@ use std::{borrow::Borrow, fmt::Debug};
 #[derive(Debug)]
 pub struct SmallMap<K, V>(Vec<(K, V)>);
 
+impl<K, V> SmallMap<K, V> {
+    pub fn with_capacity(cap: usize) -> Self {
+        Self(Vec::with_capacity(cap))
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 impl<K, V> Default for SmallMap<K, V> {
     fn default() -> Self {
         SmallMap(Vec::default())

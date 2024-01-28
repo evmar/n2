@@ -1,14 +1,11 @@
 //! The build graph, a graph between files and commands.
 
-use rustc_hash::FxHashMap;
-
 use crate::{
-    densemap::{self, DenseMap},
-    hash::BuildHash,
+    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, hash::BuildHash, trace
 };
-use std::collections::{hash_map::Entry, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::{collections::HashMap, sync::Arc};
 
 /// Id for File nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -21,6 +18,11 @@ impl densemap::Index for FileId {
 impl From<usize> for FileId {
     fn from(u: usize) -> FileId {
         FileId(u as u32)
+    }
+}
+impl From<u32> for FileId {
+    fn from(u: u32) -> FileId {
+        FileId(u)
     }
 }
 
@@ -39,14 +41,14 @@ impl From<usize> for BuildId {
 }
 
 /// A single file referenced as part of a build.
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct File {
     /// Canonical path to the file.
     pub name: String,
     /// The Build that generates this file, if any.
     pub input: Option<BuildId>,
     /// The Builds that depend on this file as an input.
-    pub dependents: Vec<BuildId>,
+    pub dependents: ConcurrentLinkedList<BuildId>,
 }
 
 impl File {
@@ -56,9 +58,9 @@ impl File {
 }
 
 /// A textual location within a build.ninja file, used in error messages.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileLoc {
-    pub filename: std::rc::Rc<PathBuf>,
+    pub filename: Arc<PathBuf>,
     pub line: usize,
 }
 impl std::fmt::Display for FileLoc {
@@ -146,6 +148,8 @@ mod tests {
 
 /// A single build action, generating File outputs from File inputs with a command.
 pub struct Build {
+    pub id: BuildId,
+
     /// Source location this Build was declared.
     pub location: FileLoc,
 
@@ -176,8 +180,9 @@ pub struct Build {
     pub outs: BuildOuts,
 }
 impl Build {
-    pub fn new(loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
+    pub fn new(id: BuildId, loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
         Build {
+            id,
             location: loc,
             desc: None,
             cmdline: None,
@@ -260,24 +265,51 @@ pub struct Graph {
 #[derive(Default)]
 pub struct GraphFiles {
     pub by_id: DenseMap<FileId, File>,
-    by_name: FxHashMap<String, FileId>,
+    by_name: dashmap::DashMap<String, FileId>,
 }
 
 impl Graph {
+    pub fn from_uninitialized_builds_and_files(
+        builds: Vec<Build>,
+        files: (
+            dashmap::DashMap<String, FileId>,
+            dashmap::DashMap<FileId, File>,
+        ),
+    ) -> anyhow::Result<Self> {
+        let files_by_name = files.0;
+        let files_by_id_orig = files.1;
+        let files_by_id = trace::scope("create files_by_id", || {
+            let mut files_by_id =
+                DenseMap::new_sized(FileId::from(files_by_id_orig.len()), File::default());
+            for (id, file) in files_by_id_orig.into_iter() {
+                files_by_id[id] = file;
+            }
+            files_by_id
+        });
+        let result = Graph {
+            builds: DenseMap::from_vec(builds),
+            files: GraphFiles {
+                by_name: files_by_name,
+                by_id: files_by_id,
+            },
+        };
+        Ok(result)
+    }
+
     /// Look up a file by its FileId.
     pub fn file(&self, id: FileId) -> &File {
         &self.files.by_id[id]
     }
-
     /// Add a new Build, generating a BuildId for it.
-    pub fn add_build(&mut self, mut build: Build) -> anyhow::Result<()> {
-        let new_id = self.builds.next_id();
-        for &id in &build.ins.ids {
-            self.files.by_id[id].dependents.push(new_id);
-        }
+
+    pub fn initialize_build(
+        files_by_id: &dashmap::DashMap<FileId, File>,
+        build: &mut Build,
+    ) -> anyhow::Result<()> {
+        let new_id = build.id;
         let mut fixup_dups = false;
-        for &id in &build.outs.ids {
-            let f = &mut self.files.by_id[id];
+        for id in &build.outs.ids {
+            let f = &mut files_by_id.get_mut(id).unwrap();
             match f.input {
                 Some(prev) if prev == new_id => {
                     fixup_dups = true;
@@ -287,11 +319,13 @@ impl Graph {
                     );
                 }
                 Some(prev) => {
+                    let location = build.location.clone();
                     anyhow::bail!(
-                        "{}: {:?} is already an output at {}",
-                        build.location,
+                        "{}: {:?} is already an output at ", // {}
+                        location,
                         f.name,
-                        self.builds[prev].location
+                        // TODO
+                        //self.builds[prev].location
                     );
                 }
                 None => f.input = Some(new_id),
@@ -300,7 +334,6 @@ impl Graph {
         if fixup_dups {
             build.outs.remove_duplicates();
         }
-        self.builds.push(build);
         Ok(())
     }
 }
@@ -308,7 +341,7 @@ impl Graph {
 impl GraphFiles {
     /// Look up a file by its name.  Name must have been canonicalized already.
     pub fn lookup(&self, file: &str) -> Option<FileId> {
-        self.by_name.get(file).copied()
+        self.by_name.get(file).map(|x| *x)
     }
 
     /// Look up a file by its name, adding it if not already present.
@@ -321,12 +354,12 @@ impl GraphFiles {
     pub fn id_from_canonical(&mut self, file: String) -> FileId {
         // TODO: so many string copies :<
         match self.by_name.entry(file) {
-            Entry::Occupied(o) => *o.get(),
-            Entry::Vacant(v) => {
+            dashmap::mapref::entry::Entry::Occupied(o) => *o.get(),
+            dashmap::mapref::entry::Entry::Vacant(v) => {
                 let id = self.by_id.push(File {
                     name: v.key().clone(),
                     input: None,
-                    dependents: Vec::new(),
+                    dependents: ConcurrentLinkedList::new(),
                 });
                 v.insert(id);
                 id

@@ -37,6 +37,20 @@ impl<K: Index, V> std::ops::IndexMut<K> for DenseMap<K, V> {
 }
 
 impl<K: Index, V> DenseMap<K, V> {
+    pub fn from_vec(v: Vec<V>) -> Self {
+        Self {
+            vec: v,
+            key_type: PhantomData,
+        }
+    }
+
+    pub fn with_capacity(c: usize) -> Self {
+        Self {
+            vec: Vec::with_capacity(c),
+            key_type: PhantomData,
+        }
+    }
+
     pub fn lookup(&self, k: K) -> Option<&V> {
         self.vec.get(k.index())
     }
@@ -49,6 +63,21 @@ impl<K: Index, V> DenseMap<K, V> {
         let id = self.next_id();
         self.vec.push(val);
         id
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = K> {
+        (0..self.vec.len()).map(|x| K::from(x))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (K, &V)> {
+        self.vec.iter().enumerate().map(|(i, v)| (K::from(i), v))
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (K, &mut V)> {
+        self.vec
+            .iter_mut()
+            .enumerate()
+            .map(|(i, v)| (K::from(i), v))
     }
 }
 

@@ -1,8 +1,8 @@
 //! Represents parsed Ninja strings with embedded variable references, e.g.
 //! `c++ $in -o $out`, and mechanisms for expanding those into plain strings.
 
-use rustc_hash::FxHashMap;
-
+use crate::load::Scope;
+use crate::load::ScopePosition;
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
 use std::borrow::Cow;
@@ -32,37 +32,31 @@ impl<T: AsRef<str>> EvalString<T> {
         EvalString(parts)
     }
 
-    fn evaluate_inner(&self, result: &mut String, envs: &[&dyn Env]) {
+    fn evaluate_inner(
+        &self,
+        result: &mut String,
+        envs: &[&dyn Env],
+        scope: &Scope,
+        position: ScopePosition,
+    ) {
         for part in &self.0 {
             match part {
                 EvalPart::Literal(s) => result.push_str(s.as_ref()),
                 EvalPart::VarRef(v) => {
+                    let mut found = false;
                     for (i, env) in envs.iter().enumerate() {
                         if let Some(v) = env.get_var(v.as_ref()) {
-                            v.evaluate_inner(result, &envs[i + 1..]);
+                            v.evaluate_inner(result, &envs[i + 1..], scope, position);
+                            found = true;
                             break;
                         }
+                    }
+                    if !found {
+                        scope.evaluate(result, v.as_ref(), position);
                     }
                 }
             }
         }
-    }
-
-    fn calc_evaluated_length(&self, envs: &[&dyn Env]) -> usize {
-        self.0
-            .iter()
-            .map(|part| match part {
-                EvalPart::Literal(s) => s.as_ref().len(),
-                EvalPart::VarRef(v) => {
-                    for (i, env) in envs.iter().enumerate() {
-                        if let Some(v) = env.get_var(v.as_ref()) {
-                            return v.calc_evaluated_length(&envs[i + 1..]);
-                        }
-                    }
-                    0
-                }
-            })
-            .sum()
     }
 
     /// evalulate turns the EvalString into a regular String, looking up the
@@ -70,11 +64,17 @@ impl<T: AsRef<str>> EvalString<T> {
     /// its variables in the earliest Env that has them, and then those lookups
     /// will be recursively expanded starting from the env after the one that
     /// had the first successful lookup.
-    pub fn evaluate(&self, envs: &[&dyn Env]) -> String {
+    pub fn evaluate(&self, envs: &[&dyn Env], scope: &Scope, position: ScopePosition) -> String {
         let mut result = String::new();
-        result.reserve(self.calc_evaluated_length(envs));
-        self.evaluate_inner(&mut result, envs);
+        self.evaluate_inner(&mut result, envs, scope, position);
         result
+    }
+
+    pub fn maybe_literal(&self) -> Option<&T> {
+        match &self.0[..] {
+            [EvalPart::Literal(x)] => Some(x),
+            _ => None,
+        }
     }
 }
 
@@ -117,26 +117,6 @@ impl EvalString<&str> {
                 })
                 .collect(),
         )
-    }
-}
-
-/// A single scope's worth of variable definitions.
-#[derive(Debug, Default)]
-pub struct Vars<'text>(FxHashMap<&'text str, String>);
-
-impl<'text> Vars<'text> {
-    pub fn insert(&mut self, key: &'text str, val: String) {
-        self.0.insert(key, val);
-    }
-    pub fn get(&self, key: &str) -> Option<&String> {
-        self.0.get(key)
-    }
-}
-impl<'a> Env for Vars<'a> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-        Some(EvalString::new(vec![EvalPart::Literal(
-            std::borrow::Cow::Borrowed(self.get(var)?),
-        )]))
     }
 }
 

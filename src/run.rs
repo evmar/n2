@@ -34,7 +34,7 @@ fn build(
     let mut tasks_finished = 0;
 
     // Attempt to rebuild build.ninja.
-    let build_file_target = work.lookup(&build_filename);
+    let mut build_file_target = work.lookup(&build_filename);
     if let Some(target) = build_file_target {
         work.want_file(target)?;
         match trace::scope("work.run", || work.run())? {
@@ -57,6 +57,7 @@ fn build(
                     progress,
                     state.pools,
                 );
+                build_file_target = work.lookup(&build_filename);
             }
         }
     }
@@ -81,6 +82,16 @@ fn build(
     }
 
     let tasks = trace::scope("work.run", || work.run())?;
+
+    // Important! Deallocating all the builds and files stored in the work
+    // object actually takes a considerable amount of time (>1 second on an
+    // AOSP build), so instead, leak the memory. This means that none of the
+    // Drop implementations will be called for work or anything inside of it,
+    // so we need to be sure to we don't put anything important in the Drop
+    // implementations. std::mem::forget used to be an unsafe api, and should
+    // be treated as such.
+    std::mem::forget(work);
+
     // Include any tasks from initial build in final count of steps.
     Ok(tasks.map(|n| n + tasks_finished))
 }

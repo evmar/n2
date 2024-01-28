@@ -6,11 +6,16 @@
 //! text, marked with the lifetime `'text`.
 
 use crate::{
-    eval::{EvalPart, EvalString, Vars},
+    eval::{EvalPart, EvalString},
+    load::{Scope, ScopePosition},
     scanner::{ParseError, ParseResult, Scanner},
     smallmap::SmallMap,
 };
-use std::path::Path;
+use std::{
+    cell::UnsafeCell,
+    path::Path,
+    sync::{atomic::AtomicBool, Mutex},
+};
 
 /// A list of variable bindings, as expressed with syntax like:
 ///   key = $val
@@ -20,6 +25,7 @@ pub type VarList<'text> = SmallMap<&'text str, EvalString<&'text str>>;
 pub struct Rule<'text> {
     pub name: &'text str,
     pub vars: VarList<'text>,
+    pub scope_position: ScopePosition,
 }
 
 #[derive(Debug, PartialEq)]
@@ -34,6 +40,7 @@ pub struct Build<'text> {
     pub order_only_ins: usize,
     pub validation_ins: usize,
     pub vars: VarList<'text>,
+    pub scope_position: ScopePosition,
 }
 
 #[derive(Debug, PartialEq)]
@@ -42,15 +49,77 @@ pub struct Pool<'text> {
     pub depth: usize,
 }
 
+#[derive(Debug)]
+pub struct VariableAssignment<'text> {
+    pub name: &'text str,
+    pub unevaluated: EvalString<&'text str>,
+    pub scope_position: ScopePosition,
+    pub evaluated: UnsafeCell<Option<String>>,
+    pub is_evaluated: AtomicBool,
+    pub lock: Mutex<()>,
+}
+
+unsafe impl Sync for VariableAssignment<'_> {}
+
+impl<'text> VariableAssignment<'text> {
+    fn new(
+        name: &'text str,
+        unevaluated: EvalString<&'text str>,
+    ) -> Self {
+        Self {
+            name,
+            unevaluated,
+            scope_position: ScopePosition(0),
+            evaluated: UnsafeCell::new(None),
+            is_evaluated: AtomicBool::new(false),
+            lock: Mutex::new(()),
+        }
+    }
+
+    pub fn evaluate(&self, result: &mut String, scope: &Scope) {
+        unsafe {
+            if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
+                result.push_str((*self.evaluated.get()).as_ref().unwrap());
+                return;
+            }
+            let guard = self.lock.lock().unwrap();
+            if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
+                result.push_str((*self.evaluated.get()).as_ref().unwrap());
+                return;
+            }
+
+            let cache = self.unevaluated.evaluate(&[], scope, self.scope_position);
+            result.push_str(&cache);
+            *self.evaluated.get() = Some(cache);
+            self.is_evaluated
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+
+            drop(guard);
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
+pub struct DefaultStmt<'text> {
+    pub files: Vec<EvalString<&'text str>>,
+    pub scope_position: ScopePosition,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct IncludeOrSubninja<'text> {
+    pub file: EvalString<&'text str>,
+    pub scope_position: ScopePosition,
+}
+
+#[derive(Debug)]
 pub enum Statement<'text> {
     Rule(Rule<'text>),
     Build(Build<'text>),
-    Default(Vec<EvalString<&'text str>>),
-    Include(EvalString<&'text str>),
-    Subninja(EvalString<&'text str>),
+    Default(DefaultStmt<'text>),
+    Include(IncludeOrSubninja<'text>),
+    Subninja(IncludeOrSubninja<'text>),
     Pool(Pool<'text>),
-    VariableAssignment((&'text str, EvalString<&'text str>)),
+    VariableAssignment(VariableAssignment<'text>),
 }
 
 pub struct Parser<'text> {
@@ -82,7 +151,10 @@ impl<'text> Parser<'text> {
         Ok(result)
     }
 
-    pub fn read_to_channel(&mut self, sender: std::sync::mpsc::Sender<ParseResult<Statement<'text>>>) {
+    pub fn read_to_channel(
+        &mut self,
+        sender: std::sync::mpsc::Sender<ParseResult<Statement<'text>>>,
+    ) {
         loop {
             match self.read() {
                 Ok(None) => return,
@@ -90,7 +162,7 @@ impl<'text> Parser<'text> {
                 Err(e) => {
                     sender.send(Err(e)).unwrap();
                     return;
-                },
+                }
             }
         }
     }
@@ -113,7 +185,7 @@ impl<'text> Parser<'text> {
                         // identifiers at the start of a new line, so that we can easily detect
                         // that here.
                         assert!(self.scanner.ofs == self.buf_len);
-                        return Ok(None)
+                        return Ok(None);
                     }
                     let ident = self.read_ident()?;
                     self.skip_spaces();
@@ -122,14 +194,26 @@ impl<'text> Parser<'text> {
                         "build" => return Ok(Some(Statement::Build(self.read_build()?))),
                         "default" => return Ok(Some(Statement::Default(self.read_default()?))),
                         "include" => {
-                            return Ok(Some(Statement::Include(self.read_eval(false)?)));
+                            let result = IncludeOrSubninja {
+                                file: self.read_eval(false)?,
+                                scope_position: ScopePosition(0),
+                            };
+                            return Ok(Some(Statement::Include(result)));
                         }
                         "subninja" => {
-                            return Ok(Some(Statement::Subninja(self.read_eval(false)?)));
+                            let result = IncludeOrSubninja {
+                                file: self.read_eval(false)?,
+                                scope_position: ScopePosition(0),
+                            };
+                            return Ok(Some(Statement::Subninja(result)));
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
-                            return Ok(Some(Statement::VariableAssignment((ident, self.read_vardef()?))))
+                            let result = VariableAssignment::new(
+                                ident,
+                                self.read_vardef()?,
+                            );
+                            return Ok(Some(Statement::VariableAssignment(result)));
                         }
                     }
                 }
@@ -194,7 +278,11 @@ impl<'text> Parser<'text> {
                     | "msvc_deps_prefix"
             )
         })?;
-        Ok(Rule { name, vars })
+        Ok(Rule {
+            name,
+            vars,
+            scope_position: ScopePosition(0),
+        })
     }
 
     fn read_pool(&mut self) -> ParseResult<Pool<'text>> {
@@ -204,10 +292,16 @@ impl<'text> Parser<'text> {
         let vars = self.read_scoped_vars(|var| matches!(var, "depth"))?;
         let mut depth = 0;
         if let Some((_, val)) = vars.into_iter().next() {
-            let val = val.evaluate(&[]);
-            depth = match val.parse::<usize>() {
-                Ok(d) => d,
-                Err(err) => return self.scanner.parse_error(format!("pool depth: {}", err)),
+            match val.maybe_literal() {
+                Some(x) => match x.parse::<usize>() {
+                    Ok(d) => depth = d,
+                    Err(err) => return self.scanner.parse_error(format!("pool depth: {}", err)),
+                },
+                None => {
+                    return self
+                        .scanner
+                        .parse_error(format!("pool depth must be a literal string"))
+                }
             }
         }
         Ok(Pool { name, depth })
@@ -279,6 +373,7 @@ impl<'text> Parser<'text> {
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars(|_| true)?;
+
         Ok(Build {
             rule,
             line,
@@ -290,18 +385,22 @@ impl<'text> Parser<'text> {
             order_only_ins,
             validation_ins,
             vars,
+            scope_position: ScopePosition(0),
         })
     }
 
-    fn read_default(&mut self) -> ParseResult<Vec<EvalString<&'text str>>> {
-        let mut defaults = Vec::new();
-        self.read_unevaluated_paths_to(&mut defaults)?;
-        if defaults.is_empty() {
+    fn read_default(&mut self) -> ParseResult<DefaultStmt<'text>> {
+        let mut files = Vec::new();
+        self.read_unevaluated_paths_to(&mut files)?;
+        if files.is_empty() {
             return self.scanner.parse_error("expected path");
         }
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
-        Ok(defaults)
+        Ok(DefaultStmt {
+            files,
+            scope_position: ScopePosition(0),
+        })
     }
 
     fn skip_comment(&mut self) -> ParseResult<()> {
@@ -492,7 +591,7 @@ fn find_start_of_next_manifest_chunk(buf: &[u8], prospective_start: usize) -> us
     loop {
         // TODO: Replace the search with something that uses SIMD instructions like the memchr crate
         let Some(nl_index) = &buf[idx..].iter().position(|&b| b == b'\n') else {
-            return buf.len()
+            return buf.len();
         };
         idx += nl_index + 1;
 
@@ -500,17 +599,20 @@ fn find_start_of_next_manifest_chunk(buf: &[u8], prospective_start: usize) -> us
         // for example, you could have:
         //  - a comment that ends with a "$": "# $\n"
         //  - an escaped-dollar: "X=$$\n"
-        if idx >= 2 && buf[idx-2] == b'$' ||
-            idx >= 3 && buf[idx-2] == b'\r' && buf[idx-3] == b'$' {
+        if idx >= 2 && buf[idx - 2] == b'$'
+            || idx >= 3 && buf[idx - 2] == b'\r' && buf[idx - 3] == b'$'
+        {
             continue;
         }
 
         // We want chunk boundaries to be at an easy/predictable place for the scanner to stop
         // at. So only stop at an identifier after a newline.
-        if idx == buf.len() || matches!(
-            buf[idx],
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' | b'.'
-        ) {
+        if idx == buf.len()
+            || matches!(
+                buf[idx],
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' | b'.'
+            )
+        {
             return idx;
         }
     }
@@ -540,11 +642,11 @@ mod tests {
             let mut buf = test_case_buffer(test_case);
             let mut parser = Parser::new(&mut buf);
             match parser.read().unwrap().unwrap() {
-                Statement::VariableAssignment(_) => {},
+                Statement::VariableAssignment(_) => {}
                 stmt => panic!("expected variable assignment, got {:?}", stmt),
             };
             let default = match parser.read().unwrap().unwrap() {
-                Statement::Default(d) => d,
+                Statement::Default(d) => d.files,
                 stmt => panic!("expected default, got {:?}", stmt),
             };
             assert_eq!(
@@ -562,24 +664,29 @@ mod tests {
     fn parse_dot_in_eval() {
         let mut buf = test_case_buffer("x = $y.z\n");
         let mut parser = Parser::new(&mut buf);
-        assert_eq!(parser.read(), Ok(Some(Statement::VariableAssignment(("x",  EvalString::new(vec![
-            EvalPart::VarRef("y"),
-            EvalPart::Literal(".z"),
-        ]))))));
+        let Ok(Some(Statement::VariableAssignment(x))) = parser.read() else {
+            panic!("Fail");
+        };
+        assert_eq!(x.name, "x");
+        assert_eq!(
+            x.unevaluated,
+            EvalString::new(vec![EvalPart::VarRef("y"), EvalPart::Literal(".z"),])
+        );
     }
 
     #[test]
     fn parse_dot_in_rule() {
         let mut buf = test_case_buffer("rule x.y\n  command = x\n");
         let mut parser = Parser::new(&mut buf);
-        let stmt = parser.read().unwrap().unwrap();
-        assert!(matches!(
-            stmt,
-            Statement::Rule(Rule {
-                name: "x.y",
-                vars: _
-            })
-        ));
+        let Ok(Some(Statement::Rule(stmt))) = parser.read() else {
+            panic!("Fail");
+        };
+        assert_eq!(stmt.name, "x.y");
+        assert_eq!(stmt.vars.len(), 1);
+        assert_eq!(
+            stmt.vars.get("command"),
+            Some(&EvalString::new(vec![EvalPart::Literal("x"),]))
+        );
     }
 
     #[test]

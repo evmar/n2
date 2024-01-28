@@ -238,7 +238,7 @@ impl<'a> Reader<'a> {
         }
 
         let len = self.read_u16()?;
-        let mut deps = Vec::new();
+        let mut deps = Vec::with_capacity(len as usize);
         for _ in 0..len {
             let id = self.read_id()?;
             deps.push(self.ids.fileids[id]);
