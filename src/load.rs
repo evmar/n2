@@ -181,7 +181,11 @@ fn add_build<'text>(
     let ins = graph::BuildIns {
         ids: ins
             .into_iter()
-            .map(|x| files.id_from_canonical_and_add_dependant(x, build_id))
+            .map(|x| {
+                let f = files.id_from_canonical(x);
+                f.dependents.prepend(build_id);
+                f
+            })
             .collect(),
         explicit: b.explicit_ins,
         implicit: b.implicit_ins,
@@ -212,7 +216,7 @@ fn add_build<'text>(
     build.rspfile = rspfile;
     build.pool = pool;
 
-    graph::Graph::initialize_build(&files.by_id, &mut build)?;
+    graph::Graph::initialize_build(&mut build)?;
 
     Ok(SubninjaResults {
         builds: vec![build],
@@ -221,67 +225,34 @@ fn add_build<'text>(
 }
 
 struct Files {
-    by_name: dashmap::DashMap<String, FileId>,
-    by_id: dashmap::DashMap<FileId, graph::File>,
-    next_id: AtomicU32,
+    by_name: dashmap::DashMap<String, Arc<graph::File>>,
     next_build_id: AtomicUsize,
 }
 impl Files {
     pub fn new() -> Self {
         Self {
             by_name: dashmap::DashMap::new(),
-            by_id: dashmap::DashMap::new(),
-            next_id: AtomicU32::new(0),
             next_build_id: AtomicUsize::new(0),
         }
     }
 
-    pub fn id_from_canonical(&self, file: String) -> FileId {
+    pub fn id_from_canonical(&self, file: String) -> Arc<graph::File> {
         match self.by_name.entry(file) {
-            dashmap::mapref::entry::Entry::Occupied(o) => *o.get(),
+            dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(v) => {
-                let id = self
-                    .next_id
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let id = FileId::from(id);
                 let mut f = graph::File::default();
                 f.name = v.key().clone();
-                self.by_id.insert(id, f);
-                v.insert(id);
-                id
-            }
-        }
-    }
-
-    pub fn id_from_canonical_and_add_dependant(&self, file: String, build: BuildId) -> FileId {
-        match self.by_name.entry(file) {
-            dashmap::mapref::entry::Entry::Occupied(o) => {
-                let id = *o.get();
-                self.by_id.get(&id).unwrap().dependents.prepend(build);
-                id
-            },
-            dashmap::mapref::entry::Entry::Vacant(v) => {
-                let id = self
-                    .next_id
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let id = FileId::from(id);
-                let mut f = graph::File::default();
-                f.name = v.key().clone();
-                f.dependents.prepend(build);
-                self.by_id.insert(id, f);
-                v.insert(id);
-                id
+                let f = Arc::new(f);
+                v.insert(f.clone());
+                f
             }
         }
     }
 
     pub fn into_maps(
         self,
-    ) -> (
-        dashmap::DashMap<String, FileId>,
-        dashmap::DashMap<FileId, graph::File>,
-    ) {
-        (self.by_name, self.by_id)
+    ) -> dashmap::DashMap<String, Arc<graph::File>> {
+        self.by_name
     }
 
     pub fn create_build_id(&self) -> BuildId {
@@ -295,7 +266,7 @@ impl Files {
 #[derive(Default)]
 struct SubninjaResults<'text> {
     pub builds: Vec<graph::Build>,
-    defaults: Vec<FileId>,
+    defaults: Vec<Arc<graph::File>>,
     builddir: Option<String>,
     pools: SmallMap<&'text str, usize>,
 }
@@ -544,7 +515,7 @@ pub struct State {
     pub graph: graph::Graph,
     pub db: db::Writer,
     pub hashes: graph::Hashes,
-    pub default: Vec<FileId>,
+    pub default: Vec<Arc<graph::File>>,
     pub pools: SmallMap<String, usize>,
 }
 

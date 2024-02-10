@@ -4,12 +4,9 @@
 //! See "Manifests instead of mtime order" in
 //!   https://neugierig.org/software/blog/2022/03/n2.html
 
-use crate::graph::{Build, FileId, FileState, GraphFiles, MTime, RspFile};
+use crate::graph::{self, Build, FileId, FileState, GraphFiles, MTime, RspFile};
 use std::{
-    collections::hash_map::DefaultHasher,
-    fmt::Write,
-    hash::{Hash, Hasher},
-    time::SystemTime,
+    collections::hash_map::DefaultHasher, fmt::Write, hash::{Hash, Hasher}, sync::Arc, time::SystemTime
 };
 
 /// Hash value used to identify a given instance of a Build's execution;
@@ -24,20 +21,18 @@ trait Manifest {
     fn write_files(
         &mut self,
         desc: &str,
-        files: &GraphFiles,
         file_state: &FileState,
-        ids: &[FileId],
+        ids: &[Arc<graph::File>],
     );
     fn write_rsp(&mut self, rspfile: &RspFile);
     fn write_cmdline(&mut self, cmdline: &str);
 }
 
 fn get_fileid_status<'a>(
-    files: &'a GraphFiles,
     file_state: &FileState,
-    id: FileId,
+    id: &'a graph::File,
 ) -> (&'a str, SystemTime) {
-    let name = &files.by_id[id].name;
+    let name = &id.name;
     let mtime = file_state
         .get(id)
         .unwrap_or_else(|| panic!("no state for {:?}", name));
@@ -72,12 +67,11 @@ impl Manifest for TerseHash {
     fn write_files<'a>(
         &mut self,
         _desc: &str,
-        files: &GraphFiles,
         file_state: &FileState,
-        ids: &[FileId],
+        ids: &[Arc<graph::File>],
     ) {
-        for &id in ids {
-            let (name, mtime) = get_fileid_status(files, file_state, id);
+        for id in ids {
+            let (name, mtime) = get_fileid_status(file_state, &id);
             self.write_string(name);
             mtime.hash(&mut self.0);
         }
@@ -96,26 +90,25 @@ impl Manifest for TerseHash {
 
 fn build_manifest<M: Manifest>(
     manifest: &mut M,
-    files: &GraphFiles,
     file_state: &FileState,
     build: &Build,
 ) {
-    manifest.write_files("in", files, file_state, build.dirtying_ins());
-    manifest.write_files("discovered", files, file_state, build.discovered_ins());
+    manifest.write_files("in", file_state, build.dirtying_ins());
+    manifest.write_files("discovered", file_state, build.discovered_ins());
     manifest.write_cmdline(build.cmdline.as_deref().unwrap_or(""));
     if let Some(rspfile) = &build.rspfile {
         manifest.write_rsp(rspfile);
     }
-    manifest.write_files("out", files, file_state, build.outs());
+    manifest.write_files("out", file_state, build.outs());
 }
 
 // Hashes the inputs of a build to compute a signature.
 // Prerequisite: all referenced files have already been stat()ed and are present.
 // (It doesn't make sense to hash a build with missing files, because it's out
 // of date regardless of the state of the other files.)
-pub fn hash_build(files: &GraphFiles, file_state: &FileState, build: &Build) -> BuildHash {
+pub fn hash_build(file_state: &FileState, build: &Build) -> BuildHash {
     let mut hasher = TerseHash::default();
-    build_manifest(&mut hasher, files, file_state, build);
+    build_manifest(&mut hasher, file_state, build);
     hasher.finish()
 }
 
@@ -129,13 +122,12 @@ impl Manifest for ExplainHash {
     fn write_files<'a>(
         &mut self,
         desc: &str,
-        files: &GraphFiles,
         file_state: &FileState,
-        ids: &[FileId],
+        ids: &[Arc<graph::File>],
     ) {
         writeln!(&mut self.text, "{desc}:").unwrap();
-        for &id in ids {
-            let (name, mtime) = get_fileid_status(files, file_state, id);
+        for id in ids {
+            let (name, mtime) = get_fileid_status(file_state, &id);
             let millis = mtime
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -159,8 +151,8 @@ impl Manifest for ExplainHash {
 
 /// Logs human-readable state of all the inputs used for hashing a given build.
 /// Used for "-d explain" debugging output.
-pub fn explain_hash_build(files: &GraphFiles, file_state: &FileState, build: &Build) -> String {
+pub fn explain_hash_build(file_state: &FileState, build: &Build) -> String {
     let mut explainer = ExplainHash::default();
-    build_manifest(&mut explainer, files, file_state, build);
+    build_manifest(&mut explainer, file_state, build);
     explainer.text
 }

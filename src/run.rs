@@ -35,7 +35,7 @@ fn build(
 
     // Attempt to rebuild build.ninja.
     let mut build_file_target = work.lookup(&build_filename);
-    if let Some(target) = build_file_target {
+    if let Some(target) = build_file_target.clone() {
         work.want_file(target)?;
         match trace::scope("work.run", || work.run())? {
             None => return Ok(None),
@@ -67,9 +67,11 @@ fn build(
             let target = work
                 .lookup(name)
                 .ok_or_else(|| anyhow::anyhow!("unknown path requested: {:?}", name))?;
-            if Some(target) == build_file_target {
-                // Already built above.
-                continue;
+            if let Some(build_file_target) = build_file_target.as_ref() {
+                if std::ptr::eq(build_file_target.as_ref(), target.as_ref()) {
+                    // Already built above.
+                    continue;
+                }
             }
             work.want_file(target)?;
         }

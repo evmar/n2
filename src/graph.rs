@@ -1,9 +1,11 @@
 //! The build graph, a graph between files and commands.
 
+use rustc_hash::{FxHashMap, FxHasher};
+
 use crate::{
     concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, hash::BuildHash, trace
 };
-use std::path::{Path, PathBuf};
+use std::{hash::BuildHasherDefault, path::{Path, PathBuf}, sync::Mutex};
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
@@ -41,12 +43,12 @@ impl From<usize> for BuildId {
 }
 
 /// A single file referenced as part of a build.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct File {
     /// Canonical path to the file.
     pub name: String,
     /// The Build that generates this file, if any.
-    pub input: Option<BuildId>,
+    pub input: Mutex<Option<BuildId>>,
     /// The Builds that depend on this file as an input.
     pub dependents: ConcurrentLinkedList<BuildId>,
 }
@@ -81,7 +83,7 @@ pub struct BuildIns {
     /// This is mostly to simplify some of the iteration and is a little more
     /// memory efficient than three separate Vecs, but it is kept internal to
     /// Build and only exposed via methods on Build.
-    pub ids: Vec<FileId>,
+    pub ids: Vec<Arc<File>>,
     pub explicit: usize,
     pub implicit: usize,
     pub order_only: usize,
@@ -92,7 +94,7 @@ pub struct BuildIns {
 /// Output files from a Build.
 pub struct BuildOuts {
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
-    pub ids: Vec<FileId>,
+    pub ids: Vec<Arc<File>>,
     pub explicit: usize,
 }
 
@@ -102,15 +104,15 @@ impl BuildOuts {
     /// this function removes duplicates from the output list.
     pub fn remove_duplicates(&mut self) {
         let mut ids = Vec::new();
-        for (i, &id) in self.ids.iter().enumerate() {
-            if self.ids[0..i].iter().any(|&prev| prev == id) {
+        for (i, id) in self.ids.iter().enumerate() {
+            if self.ids[0..i].iter().any(|prev| std::ptr::eq(prev.as_ref(), id.as_ref())) {
                 // Skip over duplicate.
                 if i < self.explicit {
                     self.explicit -= 1;
                 }
                 continue;
             }
-            ids.push(id);
+            ids.push(id.clone());
         }
         self.ids = ids;
     }
@@ -118,30 +120,39 @@ impl BuildOuts {
 
 #[cfg(test)]
 mod tests {
-    fn fileids(ids: Vec<usize>) -> Vec<FileId> {
-        ids.into_iter().map(FileId::from).collect()
+    use super::*;
+
+    fn assert_file_arc_vecs_equal(a: Vec<Arc<File>>, b: Vec<Arc<File>>) {
+        for (x, y) in a.into_iter().zip(b.into_iter()) {
+            if !Arc::ptr_eq(&x, &y) {
+                panic!("File vecs not equal");
+            }
+        }
     }
 
-    use super::*;
     #[test]
     fn remove_dups_explicit() {
+        let file1 = Arc::new(File::default());
+        let file2 = Arc::new(File::default());
         let mut outs = BuildOuts {
-            ids: fileids(vec![1, 1, 2]),
+            ids: vec![file1.clone(), file1.clone(), file2.clone()],
             explicit: 2,
         };
         outs.remove_duplicates();
-        assert_eq!(outs.ids, fileids(vec![1, 2]));
+        assert_file_arc_vecs_equal(outs.ids, vec![file1, file2]);
         assert_eq!(outs.explicit, 1);
     }
 
     #[test]
     fn remove_dups_implicit() {
+        let file1 = Arc::new(File::default());
+        let file2 = Arc::new(File::default());
         let mut outs = BuildOuts {
-            ids: fileids(vec![1, 2, 1]),
+            ids: vec![file1.clone(), file2.clone(), file1.clone()],
             explicit: 2,
         };
         outs.remove_duplicates();
-        assert_eq!(outs.ids, fileids(vec![1, 2]));
+        assert_file_arc_vecs_equal(outs.ids, vec![file1, file2]);
         assert_eq!(outs.explicit, 2);
     }
 }
@@ -174,7 +185,7 @@ pub struct Build {
     pub ins: BuildIns,
 
     /// Additional inputs discovered from a previous build.
-    discovered_ins: Vec<FileId>,
+    discovered_ins: Vec<Arc<File>>,
 
     /// Output files.
     pub outs: BuildOuts,
@@ -197,13 +208,13 @@ impl Build {
     }
 
     /// Input paths that appear in `$in`.
-    pub fn explicit_ins(&self) -> &[FileId] {
+    pub fn explicit_ins(&self) -> &[Arc<File>] {
         &self.ins.ids[0..self.ins.explicit]
     }
 
     /// Input paths that, if changed, invalidate the output.
     /// Note this omits discovered_ins, which also invalidate the output.
-    pub fn dirtying_ins(&self) -> &[FileId] {
+    pub fn dirtying_ins(&self) -> &[Arc<File>] {
         &self.ins.ids[0..(self.ins.explicit + self.ins.implicit)]
     }
 
@@ -211,7 +222,7 @@ impl Build {
     /// Distinct from dirtying_ins in that it includes order-only dependencies.
     /// Note that we don't order on discovered_ins, because they're not allowed to
     /// affect build order.
-    pub fn ordering_ins(&self) -> &[FileId] {
+    pub fn ordering_ins(&self) -> &[Arc<File>] {
         &self.ins.ids[0..(self.ins.order_only + self.ins.explicit + self.ins.implicit)]
     }
 
@@ -219,13 +230,25 @@ impl Build {
     /// Validation inputs will be built whenever this Build is built, but this Build will not
     /// wait for them to complete before running. The validation inputs can fail to build, which
     /// will cause the overall build to fail.
-    pub fn validation_ins(&self) -> &[FileId] {
+    pub fn validation_ins(&self) -> &[Arc<File>] {
         &self.ins.ids[(self.ins.order_only + self.ins.explicit + self.ins.implicit)..]
     }
 
+    fn vecs_of_arcs_eq<T>(a: &Vec<Arc<T>>, b: &Vec<Arc<T>>) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        for (x, y) in a.iter().zip(b.iter()) {
+            if !Arc::ptr_eq(x, y) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// Potentially update discovered_ins with a new set of deps, returning true if they changed.
-    pub fn update_discovered(&mut self, deps: Vec<FileId>) -> bool {
-        if deps == self.discovered_ins {
+    pub fn update_discovered(&mut self, deps: Vec<Arc<File>>) -> bool {
+        if Self::vecs_of_arcs_eq(&deps, &self.discovered_ins) {
             false
         } else {
             self.set_discovered_ins(deps);
@@ -233,22 +256,22 @@ impl Build {
         }
     }
 
-    pub fn set_discovered_ins(&mut self, deps: Vec<FileId>) {
+    pub fn set_discovered_ins(&mut self, deps: Vec<Arc<File>>) {
         self.discovered_ins = deps;
     }
 
     /// Input paths that were discovered after building, for use in the next build.
-    pub fn discovered_ins(&self) -> &[FileId] {
+    pub fn discovered_ins(&self) -> &[Arc<File>] {
         &self.discovered_ins
     }
 
     /// Output paths that appear in `$out`.
-    pub fn explicit_outs(&self) -> &[FileId] {
+    pub fn explicit_outs(&self) -> &[Arc<File>] {
         &self.outs.ids[0..self.outs.explicit]
     }
 
     /// Output paths that are updated when the build runs.
-    pub fn outs(&self) -> &[FileId] {
+    pub fn outs(&self) -> &[Arc<File>] {
         &self.outs.ids
     }
 }
@@ -264,53 +287,31 @@ pub struct Graph {
 /// Split from Graph for lifetime reasons.
 #[derive(Default)]
 pub struct GraphFiles {
-    pub by_id: DenseMap<FileId, File>,
-    by_name: dashmap::DashMap<String, FileId>,
+    by_name: dashmap::DashMap<String, Arc<File>>,
 }
 
 impl Graph {
     pub fn from_uninitialized_builds_and_files(
         builds: Vec<Build>,
-        files: (
-            dashmap::DashMap<String, FileId>,
-            dashmap::DashMap<FileId, File>,
-        ),
+        files: dashmap::DashMap<String, Arc<File>>,
     ) -> anyhow::Result<Self> {
-        let files_by_name = files.0;
-        let files_by_id_orig = files.1;
-        let files_by_id = trace::scope("create files_by_id", || {
-            let mut files_by_id =
-                DenseMap::new_sized(FileId::from(files_by_id_orig.len()), File::default());
-            for (id, file) in files_by_id_orig.into_iter() {
-                files_by_id[id] = file;
-            }
-            files_by_id
-        });
         let result = Graph {
             builds: DenseMap::from_vec(builds),
             files: GraphFiles {
-                by_name: files_by_name,
-                by_id: files_by_id,
+                by_name: files,
             },
         };
         Ok(result)
     }
 
-    /// Look up a file by its FileId.
-    pub fn file(&self, id: FileId) -> &File {
-        &self.files.by_id[id]
-    }
-    /// Add a new Build, generating a BuildId for it.
-
     pub fn initialize_build(
-        files_by_id: &dashmap::DashMap<FileId, File>,
         build: &mut Build,
     ) -> anyhow::Result<()> {
         let new_id = build.id;
         let mut fixup_dups = false;
-        for id in &build.outs.ids {
-            let f = &mut files_by_id.get_mut(id).unwrap();
-            match f.input {
+        for f in &build.outs.ids {
+            let mut input = f.input.lock().unwrap();
+            match *input {
                 Some(prev) if prev == new_id => {
                     fixup_dups = true;
                     println!(
@@ -328,7 +329,7 @@ impl Graph {
                         //self.builds[prev].location
                     );
                 }
-                None => f.input = Some(new_id),
+                None => *input = Some(new_id),
             }
         }
         if fixup_dups {
@@ -340,8 +341,8 @@ impl Graph {
 
 impl GraphFiles {
     /// Look up a file by its name.  Name must have been canonicalized already.
-    pub fn lookup(&self, file: &str) -> Option<FileId> {
-        self.by_name.get(file).map(|x| *x)
+    pub fn lookup(&self, file: &str) -> Option<Arc<File>> {
+        self.by_name.get(file).map(|x| x.clone())
     }
 
     /// Look up a file by its name, adding it if not already present.
@@ -351,24 +352,26 @@ impl GraphFiles {
     /// of this function that accepts string references that is more optimized
     /// for the case where the entry already exists. But so far, all of our
     /// usages of this function have an owned string easily accessible anyways.
-    pub fn id_from_canonical(&mut self, file: String) -> FileId {
+    pub fn id_from_canonical(&mut self, file: String) -> Arc<File> {
         // TODO: so many string copies :<
         match self.by_name.entry(file) {
-            dashmap::mapref::entry::Entry::Occupied(o) => *o.get(),
+            dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(v) => {
-                let id = self.by_id.push(File {
-                    name: v.key().clone(),
-                    input: None,
-                    dependents: ConcurrentLinkedList::new(),
-                });
-                v.insert(id);
-                id
+                let mut f = File::default();
+                f.name = v.key().clone();
+                let f = Arc::new(f);
+                v.insert(f.clone());
+                f
             }
         }
     }
 
-    pub fn all_ids(&self) -> impl Iterator<Item = FileId> {
-        (0..self.by_id.next_id().0).map(|id| FileId(id))
+    pub fn all_files(&self) -> impl Iterator<Item = Arc<File>> + '_ {
+        self.by_name.iter().map(|x| x.clone())
+    }
+
+    pub fn num_files(&self) -> usize {
+        self.by_name.len()
     }
 }
 
@@ -399,20 +402,21 @@ pub fn stat(path: &Path) -> std::io::Result<MTime> {
 
 /// Gathered state of on-disk files.
 /// Due to discovered deps this map may grow after graph initialization.
-pub struct FileState(DenseMap<FileId, Option<MTime>>);
+pub struct FileState(FxHashMap<*const File, Option<MTime>>);
 
 impl FileState {
     pub fn new(graph: &Graph) -> Self {
-        FileState(DenseMap::new_sized(graph.files.by_id.next_id(), None))
+        let hm = HashMap::with_capacity_and_hasher(graph.files.num_files(), BuildHasherDefault::<FxHasher>::default());
+        FileState(hm)
     }
 
-    pub fn get(&self, id: FileId) -> Option<MTime> {
-        self.0.lookup(id).copied().unwrap_or(None)
+    pub fn get(&self, id: &File) -> Option<MTime> {
+        self.0.get(&(id as *const File)).copied().flatten()
     }
 
-    pub fn stat(&mut self, id: FileId, path: &Path) -> anyhow::Result<MTime> {
+    pub fn stat(&mut self, id: &File, path: &Path) -> anyhow::Result<MTime> {
         let mtime = stat(path).map_err(|err| anyhow::anyhow!("stat {:?}: {}", path, err))?;
-        self.0.set_grow(id, Some(mtime), None);
+        self.0.insert(id as *const File, Some(mtime));
         Ok(mtime)
     }
 }
