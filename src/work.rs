@@ -240,7 +240,10 @@ impl BuildStates {
         file: Arc<File>,
     ) -> anyhow::Result<()> {
         // Check for a dependency cycle.
-        if let Some(cycle) = stack.iter().position(|f| std::ptr::eq(f.as_ref(), file.as_ref())) {
+        if let Some(cycle) = stack
+            .iter()
+            .position(|f| std::ptr::eq(f.as_ref(), file.as_ref()))
+        {
             let mut err = "dependency cycle: ".to_string();
             for file in stack[cycle..].iter() {
                 err.push_str(&format!("{} -> ", file.name));
@@ -365,7 +368,8 @@ impl<'a> Work<'a> {
                 }
             }
             let mut stack = Vec::new();
-            self.build_states.want_file(&self.graph, &mut stack, id.clone())?;
+            self.build_states
+                .want_file(&self.graph, &mut stack, id.clone())?;
         }
         Ok(())
     }
@@ -449,13 +453,22 @@ impl<'a> Work<'a> {
             for name in names {
                 let fileid = self.graph.files.id_from_canonical(canon_path(name));
                 // Filter duplicates from the file list.
-                if deps.iter().find(|x| std::ptr::eq(x.as_ref(), fileid.as_ref())).is_some() {
+                if deps
+                    .iter()
+                    .find(|x| std::ptr::eq(x.as_ref(), fileid.as_ref()))
+                    .is_some()
+                {
                     continue;
                 }
                 // Filter out any deps that were already dirtying in the build file.
                 // Note that it's allowed to have a duplicate against an order-only
                 // dep; see `discover_existing_dep` test.
-                if self.graph.builds[id].dirtying_ins().iter().find(|x| std::ptr::eq(x.as_ref(), fileid.as_ref())).is_some() {
+                if self.graph.builds[id]
+                    .dirtying_ins()
+                    .iter()
+                    .find(|x| std::ptr::eq(x.as_ref(), fileid.as_ref()))
+                    .is_some()
+                {
                     continue;
                 }
                 deps.push(fileid);
@@ -604,8 +617,7 @@ impl<'a> Work<'a> {
             if self.options.explain {
                 self.progress.log(&format!(
                     "explain: {}: input {} missing",
-                    build.location,
-                    missing.name
+                    build.location, missing.name
                 ));
             }
             return Ok(true);
@@ -635,10 +647,8 @@ impl<'a> Work<'a> {
             if self.options.explain {
                 self.progress
                     .log(&format!("explain: {}: manifest changed", build.location));
-                self.progress.log(&hash::explain_hash_build(
-                    &self.file_state,
-                    build,
-                ));
+                self.progress
+                    .log(&hash::explain_hash_build(&self.file_state, build));
             }
             return Ok(true);
         }

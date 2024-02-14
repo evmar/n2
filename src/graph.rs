@@ -3,11 +3,18 @@
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
-    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, hash::BuildHash, trace
+    concurrent_linked_list::ConcurrentLinkedList,
+    densemap::{self, DenseMap},
+    hash::BuildHash,
+    trace,
 };
-use std::{hash::BuildHasherDefault, path::{Path, PathBuf}, sync::Mutex};
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
+use std::{
+    hash::BuildHasherDefault,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 /// Id for File nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -105,7 +112,10 @@ impl BuildOuts {
     pub fn remove_duplicates(&mut self) {
         let mut ids = Vec::new();
         for (i, id) in self.ids.iter().enumerate() {
-            if self.ids[0..i].iter().any(|prev| std::ptr::eq(prev.as_ref(), id.as_ref())) {
+            if self.ids[0..i]
+                .iter()
+                .any(|prev| std::ptr::eq(prev.as_ref(), id.as_ref()))
+            {
                 // Skip over duplicate.
                 if i < self.explicit {
                     self.explicit -= 1;
@@ -297,16 +307,12 @@ impl Graph {
     ) -> anyhow::Result<Self> {
         let result = Graph {
             builds: DenseMap::from_vec(builds),
-            files: GraphFiles {
-                by_name: files,
-            },
+            files: GraphFiles { by_name: files },
         };
         Ok(result)
     }
 
-    pub fn initialize_build(
-        build: &mut Build,
-    ) -> anyhow::Result<()> {
+    pub fn initialize_build(build: &mut Build) -> anyhow::Result<()> {
         let new_id = build.id;
         let mut fixup_dups = false;
         for f in &build.outs.ids {
@@ -406,7 +412,10 @@ pub struct FileState(FxHashMap<*const File, Option<MTime>>);
 
 impl FileState {
     pub fn new(graph: &Graph) -> Self {
-        let hm = HashMap::with_capacity_and_hasher(graph.files.num_files(), BuildHasherDefault::<FxHasher>::default());
+        let hm = HashMap::with_capacity_and_hasher(
+            graph.files.num_files(),
+            BuildHasherDefault::<FxHasher>::default(),
+        );
         FileState(hm)
     }
 

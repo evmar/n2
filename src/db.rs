@@ -117,7 +117,9 @@ impl Writer {
             Some(&id) => id,
             None => {
                 let id = self.ids.fileids.push(file.clone());
-                self.ids.db_ids.insert(file.as_ref() as *const graph::File, id);
+                self.ids
+                    .db_ids
+                    .insert(file.as_ref() as *const graph::File, id);
                 self.write_path(&file.name)?;
                 id
             }
@@ -194,7 +196,9 @@ impl<'a> Reader<'a> {
         // No canonicalization needed, paths were written canonicalized.
         let file = self.graph.files.id_from_canonical(name);
         let dbid = self.ids.fileids.push(file.clone());
-        self.ids.db_ids.insert(file.as_ref() as *const graph::File, dbid);
+        self.ids
+            .db_ids
+            .insert(file.as_ref() as *const graph::File, dbid);
         Ok(())
     }
 

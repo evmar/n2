@@ -6,7 +6,11 @@
 
 use crate::graph::{self, Build, FileId, FileState, GraphFiles, MTime, RspFile};
 use std::{
-    collections::hash_map::DefaultHasher, fmt::Write, hash::{Hash, Hasher}, sync::Arc, time::SystemTime
+    collections::hash_map::DefaultHasher,
+    fmt::Write,
+    hash::{Hash, Hasher},
+    sync::Arc,
+    time::SystemTime,
 };
 
 /// Hash value used to identify a given instance of a Build's execution;
@@ -18,20 +22,12 @@ pub struct BuildHash(pub u64);
 /// implement it a second time for "-d explain" debug purposes.
 trait Manifest {
     /// Write a list of files+mtimes.  desc is used only for "-d explain" output.
-    fn write_files(
-        &mut self,
-        desc: &str,
-        file_state: &FileState,
-        ids: &[Arc<graph::File>],
-    );
+    fn write_files(&mut self, desc: &str, file_state: &FileState, ids: &[Arc<graph::File>]);
     fn write_rsp(&mut self, rspfile: &RspFile);
     fn write_cmdline(&mut self, cmdline: &str);
 }
 
-fn get_fileid_status<'a>(
-    file_state: &FileState,
-    id: &'a graph::File,
-) -> (&'a str, SystemTime) {
+fn get_fileid_status<'a>(file_state: &FileState, id: &'a graph::File) -> (&'a str, SystemTime) {
     let name = &id.name;
     let mtime = file_state
         .get(id)
@@ -64,12 +60,7 @@ impl TerseHash {
 }
 
 impl Manifest for TerseHash {
-    fn write_files<'a>(
-        &mut self,
-        _desc: &str,
-        file_state: &FileState,
-        ids: &[Arc<graph::File>],
-    ) {
+    fn write_files<'a>(&mut self, _desc: &str, file_state: &FileState, ids: &[Arc<graph::File>]) {
         for id in ids {
             let (name, mtime) = get_fileid_status(file_state, &id);
             self.write_string(name);
@@ -88,11 +79,7 @@ impl Manifest for TerseHash {
     }
 }
 
-fn build_manifest<M: Manifest>(
-    manifest: &mut M,
-    file_state: &FileState,
-    build: &Build,
-) {
+fn build_manifest<M: Manifest>(manifest: &mut M, file_state: &FileState, build: &Build) {
     manifest.write_files("in", file_state, build.dirtying_ins());
     manifest.write_files("discovered", file_state, build.discovered_ins());
     manifest.write_cmdline(build.cmdline.as_deref().unwrap_or(""));
@@ -119,12 +106,7 @@ struct ExplainHash {
 }
 
 impl Manifest for ExplainHash {
-    fn write_files<'a>(
-        &mut self,
-        desc: &str,
-        file_state: &FileState,
-        ids: &[Arc<graph::File>],
-    ) {
+    fn write_files<'a>(&mut self, desc: &str, file_state: &FileState, ids: &[Arc<graph::File>]) {
         writeln!(&mut self.text, "{desc}:").unwrap();
         for id in ids {
             let (name, mtime) = get_fileid_status(file_state, &id);

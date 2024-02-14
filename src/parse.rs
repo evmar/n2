@@ -62,10 +62,7 @@ pub struct VariableAssignment<'text> {
 unsafe impl Sync for VariableAssignment<'_> {}
 
 impl<'text> VariableAssignment<'text> {
-    fn new(
-        name: &'text str,
-        unevaluated: EvalString<&'text str>,
-    ) -> Self {
+    fn new(name: &'text str, unevaluated: EvalString<&'text str>) -> Self {
         Self {
             name,
             unevaluated,
@@ -209,10 +206,7 @@ impl<'text> Parser<'text> {
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
-                            let result = VariableAssignment::new(
-                                ident,
-                                self.read_vardef()?,
-                            );
+                            let result = VariableAssignment::new(ident, self.read_vardef()?);
                             return Ok(Some(Statement::VariableAssignment(result)));
                         }
                     }

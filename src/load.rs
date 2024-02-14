@@ -15,7 +15,11 @@ use crate::{
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-use std::{borrow::Cow, path::Path, sync::{atomic::AtomicUsize, mpsc::TryRecvError}};
+use std::{
+    borrow::Cow,
+    path::Path,
+    sync::{atomic::AtomicUsize, mpsc::TryRecvError},
+};
 use std::{
     cell::UnsafeCell,
     cmp::Ordering,
@@ -119,10 +123,10 @@ impl<'text> Scope<'text> {
 
 fn add_build<'text>(
     files: &Files,
-    filename: Arc<PathBuf>,
+    filename: &Arc<PathBuf>,
     scope: &Scope,
     b: parse::Build,
-) -> anyhow::Result<SubninjaResults<'text>> {
+) -> anyhow::Result<graph::Build> {
     let ins: Vec<_> = b
         .ins
         .iter()
@@ -202,7 +206,7 @@ fn add_build<'text>(
     let mut build = graph::Build::new(
         build_id,
         graph::FileLoc {
-            filename,
+            filename: filename.clone(),
             line: b.line,
         },
         ins,
@@ -218,10 +222,7 @@ fn add_build<'text>(
 
     graph::Graph::initialize_build(&mut build)?;
 
-    Ok(SubninjaResults {
-        builds: vec![build],
-        ..SubninjaResults::default()
-    })
+    Ok(build)
 }
 
 struct Files {
@@ -249,9 +250,7 @@ impl Files {
         }
     }
 
-    pub fn into_maps(
-        self,
-    ) -> dashmap::DashMap<String, Arc<graph::File>> {
+    pub fn into_maps(self) -> dashmap::DashMap<String, Arc<graph::File>> {
         self.by_name
     }
 
@@ -296,44 +295,42 @@ where
             },
         );
     }
-    let parse_results = parse(
-        num_threads,
-        file_pool,
-        file_pool.read_file(&path)?,
-        &mut scope,
-        executor,
-    )?;
-    let (sender, receiver) = std::sync::mpsc::channel::<anyhow::Result<SubninjaResults<'text>>>();
+    let parse_results = trace::scope("parse", || {
+        parse(
+            num_threads,
+            file_pool,
+            file_pool.read_file(&path)?,
+            &mut scope,
+            executor,
+        )
+    })?;
     let scope = Arc::new(scope);
-    for sn in parse_results.subninjas.into_iter() {
-        let scope = scope.clone();
-        let sender = sender.clone();
-        executor.spawn(move |executor| {
+    let mut subninja_results = parse_results
+        .subninjas
+        .into_par_iter()
+        .map(|sn| {
             let file = canon_path(sn.file.evaluate(&[], &scope, sn.scope_position));
-            sender
-                .send(subninja(
-                    num_threads,
-                    files,
-                    file_pool,
-                    file,
-                    Some(ParentScopeReference(scope, sn.scope_position)),
-                    executor,
-                ))
-                .unwrap();
-        });
-    }
+            subninja(
+                num_threads,
+                files,
+                file_pool,
+                file,
+                Some(ParentScopeReference(scope.clone(), sn.scope_position)),
+                executor,
+            )
+        })
+        .collect::<anyhow::Result<Vec<SubninjaResults>>>()?;
+
     let filename = Arc::new(path);
-    for build in parse_results.builds.into_iter() {
-        let filename = filename.clone();
-        let scope = scope.clone();
-        let sender = sender.clone();
-        executor.spawn(move |_| {
-            sender
-                .send(add_build(files, filename, &scope, build))
-                .unwrap();
-        });
-    }
     let mut results = SubninjaResults::default();
+
+    let builds = parse_results.builds;
+    results.builds = trace::scope("add builds", || {
+        builds
+            .into_par_iter()
+            .map(|build| add_build(files, &filename, &scope, build))
+            .collect::<anyhow::Result<Vec<graph::Build>>>()
+    })?;
     results.pools = parse_results.pools;
     for default in parse_results.defaults.into_iter() {
         let scope = scope.clone();
@@ -352,35 +349,23 @@ where
         }
     }
 
-    drop(sender);
-
-    let mut err = None;
-    loop {
-        match receiver.try_recv() {
-            Ok(Err(e)) => {
-                if err.is_none() {
-                    err = Some(Err(e))
-                }
-            },
-            Ok(Ok(new_results)) => {
-                results.builds.extend(new_results.builds);
-                results.defaults.extend(new_results.defaults);
-                for (name, depth) in new_results.pools.into_iter() {
-                    add_pool(&mut results.pools, name, depth)?;
-                }
-            },
-            // We can't risk having any tasks blocked on other tasks, lest
-            // the thread pool fill up with only blocked tasks.
-            Err(TryRecvError::Empty) => {rayon::yield_now();},
-            Err(TryRecvError::Disconnected) => break,
+    results.builds.par_extend(
+        subninja_results
+            .par_iter_mut()
+            .flat_map(|x| std::mem::take(&mut x.builds)),
+    );
+    results.defaults.par_extend(
+        subninja_results
+            .par_iter_mut()
+            .flat_map(|x| std::mem::take(&mut x.defaults)),
+    );
+    for new_results in subninja_results {
+        for (name, depth) in new_results.pools.into_iter() {
+            add_pool(&mut results.pools, name, depth)?;
         }
     }
 
-    if let Some(e) = err {
-        e
-    } else {
-        Ok(results)
-    }
+    Ok(results)
 }
 
 fn include<'thread, 'text>(
@@ -447,22 +432,35 @@ where
 {
     let chunks = parse::split_manifest_into_chunks(bytes, num_threads);
 
-    let mut receivers = Vec::with_capacity(chunks.len());
-
-    for chunk in chunks.into_iter() {
-        let (sender, receiver) = std::sync::mpsc::channel::<ParseResult<Statement<'text>>>();
-        receivers.push(receiver);
-        executor.spawn(move |_| {
+    let receivers = chunks
+        .into_par_iter()
+        .map(|chunk| {
             let mut parser = parse::Parser::new(chunk);
-            parser.read_to_channel(sender);
+            parser.read_all()
         })
-    }
+        .collect::<ParseResult<Vec<Vec<Statement>>>>();
 
-    let mut i = 0;
+    let Ok(receivers) = receivers else {
+        // TODO: Call format_parse_error
+        bail!(receivers.unwrap_err().msg);
+    };
+
     let mut results = ParseResults::default();
-    while i < receivers.len() {
-        match receivers[i].try_recv() {
-            Ok(Ok(Statement::VariableAssignment(mut variable_assignment))) => {
+
+    results.builds.reserve(
+        receivers
+            .par_iter()
+            .flatten()
+            .map(|x| match x {
+                Statement::Build(_) => 1,
+                _ => 0,
+            })
+            .sum(),
+    );
+
+    for stmt in receivers.into_iter().flatten() {
+        match stmt {
+            Statement::VariableAssignment(mut variable_assignment) => {
                 variable_assignment.scope_position = scope.get_and_inc_scope_position();
                 match scope.variables.entry(variable_assignment.name) {
                     Entry::Occupied(mut e) => e.get_mut().push(variable_assignment),
@@ -471,42 +469,37 @@ where
                     }
                 }
             }
-            Ok(Ok(Statement::Include(i))) => trace::scope("include", || -> anyhow::Result<()> {
+            Statement::Include(i) => trace::scope("include", || -> anyhow::Result<()> {
                 let evaluated = canon_path(i.file.evaluate(&[], &scope, i.scope_position));
                 let new_results = include(num_threads, file_pool, evaluated, scope, executor)?;
                 results.merge(new_results)?;
                 Ok(())
             })?,
-            Ok(Ok(Statement::Subninja(mut subninja))) => trace::scope("subninja", || {
+            Statement::Subninja(mut subninja) => trace::scope("subninja", || {
                 subninja.scope_position = scope.get_and_inc_scope_position();
                 results.subninjas.push(subninja);
             }),
-            Ok(Ok(Statement::Default(mut default))) => {
+            Statement::Default(mut default) => {
                 default.scope_position = scope.get_and_inc_scope_position();
                 results.defaults.push(default);
             }
-            Ok(Ok(Statement::Rule(mut rule))) => {
+            Statement::Rule(mut rule) => {
                 rule.scope_position = scope.get_and_inc_scope_position();
                 match scope.rules.entry(rule.name) {
                     Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
                     Entry::Vacant(e) => e.insert(rule),
                 };
             }
-            Ok(Ok(Statement::Build(mut build))) => {
+            Statement::Build(mut build) => {
                 build.scope_position = scope.get_and_inc_scope_position();
                 results.builds.push(build);
             }
-            Ok(Ok(Statement::Pool(pool))) => {
+            Statement::Pool(pool) => {
                 add_pool(&mut results.pools, pool.name, pool.depth)?;
             }
-            // TODO: Call format_parse_error
-            Ok(Err(e)) => bail!(e.msg),
-            // We can't risk having any tasks blocked on other tasks, lest
-            // the thread pool fill up with only blocked tasks.
-            Err(TryRecvError::Empty) => {rayon::yield_now();},
-            Err(TryRecvError::Disconnected) => {i += 1;},
         };
     }
+
     Ok(results)
 }
 
@@ -543,10 +536,13 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
                 None,
                 executor,
             )?;
-            results.builds.par_sort_unstable_by_key(|b| b.id.index());
+            trace::scope("sort builds", || {
+                results.builds.par_sort_unstable_by_key(|b| b.id.index())
+            });
             Ok(results)
         })
     })?;
+    drop(pool);
     let mut graph = trace::scope("loader.from_uninitialized_builds_and_files", || {
         Graph::from_uninitialized_builds_and_files(builds, files.into_maps())
     })?;

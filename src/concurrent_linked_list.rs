@@ -1,4 +1,10 @@
-use std::{borrow::Borrow, fmt::Debug, marker::PhantomData, ptr::null_mut, sync::atomic::{AtomicPtr, Ordering}};
+use std::{
+    borrow::Borrow,
+    fmt::Debug,
+    marker::PhantomData,
+    ptr::null_mut,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 /// ConcurrentLinkedList is a linked list that can only be prepended to or
 /// iterated over. prepend() accepts an &self instead of an &mut self, and can
@@ -20,7 +26,7 @@ impl<T> ConcurrentLinkedList<T> {
     }
 
     pub fn prepend(&self, val: T) {
-        let new_head = Box::into_raw(Box::new(ConcurrentLinkedListNode{
+        let new_head = Box::into_raw(Box::new(ConcurrentLinkedListNode {
             val,
             next: null_mut(),
         }));
@@ -28,7 +34,11 @@ impl<T> ConcurrentLinkedList<T> {
             let old_head = self.head.load(Ordering::SeqCst);
             unsafe {
                 (*new_head).next = old_head;
-                if self.head.compare_exchange_weak(old_head, new_head, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                if self
+                    .head
+                    .compare_exchange_weak(old_head, new_head, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
                     break;
                 }
             }
@@ -45,7 +55,9 @@ impl<T> ConcurrentLinkedList<T> {
 
 impl<T> Default for ConcurrentLinkedList<T> {
     fn default() -> Self {
-        Self { head: Default::default() }
+        Self {
+            head: Default::default(),
+        }
     }
 }
 
@@ -53,23 +65,27 @@ impl<T: Clone> Clone for ConcurrentLinkedList<T> {
     fn clone(&self) -> Self {
         let mut iter = self.iter();
         match iter.next() {
-            None => Self { head: AtomicPtr::new(null_mut()) },
+            None => Self {
+                head: AtomicPtr::new(null_mut()),
+            },
             Some(x) => {
-                let new_head = Box::into_raw(Box::new(ConcurrentLinkedListNode{
+                let new_head = Box::into_raw(Box::new(ConcurrentLinkedListNode {
                     val: x.clone(),
                     next: null_mut(),
                 }));
                 let mut new_tail = new_head;
                 for x in iter {
                     unsafe {
-                        (*new_tail).next = Box::into_raw(Box::new(ConcurrentLinkedListNode{
+                        (*new_tail).next = Box::into_raw(Box::new(ConcurrentLinkedListNode {
                             val: x.clone(),
                             next: null_mut(),
                         }));
                         new_tail = (*new_tail).next;
                     }
                 }
-                Self { head: AtomicPtr::new(new_head) }
+                Self {
+                    head: AtomicPtr::new(new_head),
+                }
             }
         }
     }
