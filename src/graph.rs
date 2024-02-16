@@ -53,7 +53,7 @@ impl From<usize> for BuildId {
 #[derive(Debug, Default)]
 pub struct File {
     /// Canonical path to the file.
-    pub name: String,
+    pub name: Arc<String>,
     /// The Build that generates this file, if any.
     pub input: Mutex<Option<BuildId>>,
     /// The Builds that depend on this file as an input.
@@ -62,7 +62,7 @@ pub struct File {
 
 impl File {
     pub fn path(&self) -> &Path {
-        Path::new(&self.name)
+        Path::new(self.name.as_ref())
     }
 }
 
@@ -297,13 +297,13 @@ pub struct Graph {
 /// Split from Graph for lifetime reasons.
 #[derive(Default)]
 pub struct GraphFiles {
-    by_name: dashmap::DashMap<String, Arc<File>>,
+    by_name: dashmap::DashMap<Arc<String>, Arc<File>>,
 }
 
 impl Graph {
     pub fn from_uninitialized_builds_and_files(
         builds: Vec<Build>,
-        files: dashmap::DashMap<String, Arc<File>>,
+        files: dashmap::DashMap<Arc<String>, Arc<File>>,
     ) -> anyhow::Result<Self> {
         let result = Graph {
             builds: DenseMap::from_vec(builds),
@@ -347,8 +347,8 @@ impl Graph {
 
 impl GraphFiles {
     /// Look up a file by its name.  Name must have been canonicalized already.
-    pub fn lookup(&self, file: &str) -> Option<Arc<File>> {
-        self.by_name.get(file).map(|x| x.clone())
+    pub fn lookup(&self, file: String) -> Option<Arc<File>> {
+        self.by_name.get(&Arc::new(file)).map(|x| x.clone())
     }
 
     /// Look up a file by its name, adding it if not already present.
@@ -359,6 +359,7 @@ impl GraphFiles {
     /// for the case where the entry already exists. But so far, all of our
     /// usages of this function have an owned string easily accessible anyways.
     pub fn id_from_canonical(&mut self, file: String) -> Arc<File> {
+        let file = Arc::new(file);
         // TODO: so many string copies :<
         match self.by_name.entry(file) {
             dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),

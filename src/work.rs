@@ -352,7 +352,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn lookup(&mut self, name: &str) -> Option<Arc<File>> {
-        self.graph.files.lookup(&canon_path(name))
+        self.graph.files.lookup(canon_path(name))
     }
 
     pub fn want_file(&mut self, file: Arc<File>) -> anyhow::Result<()> {

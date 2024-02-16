@@ -226,7 +226,7 @@ fn add_build<'text>(
 }
 
 struct Files {
-    by_name: dashmap::DashMap<String, Arc<graph::File>>,
+    by_name: dashmap::DashMap<Arc<String>, Arc<graph::File>>,
     next_build_id: AtomicUsize,
 }
 impl Files {
@@ -238,7 +238,7 @@ impl Files {
     }
 
     pub fn id_from_canonical(&self, file: String) -> Arc<graph::File> {
-        match self.by_name.entry(file) {
+        match self.by_name.entry(Arc::new(file)) {
             dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(v) => {
                 let mut f = graph::File::default();
@@ -250,7 +250,7 @@ impl Files {
         }
     }
 
-    pub fn into_maps(self) -> dashmap::DashMap<String, Arc<graph::File>> {
+    pub fn into_maps(self) -> dashmap::DashMap<Arc<String>, Arc<graph::File>> {
         self.by_name
     }
 
