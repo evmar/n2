@@ -3,6 +3,8 @@
 
 use crate::load::Scope;
 use crate::load::ScopePosition;
+use crate::parse::parse_eval;
+use crate::parse::Parser;
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
 use std::borrow::Cow;
@@ -26,10 +28,10 @@ pub enum EvalPart<T: AsRef<str>> {
 /// expanded evals, like top-level bindings, and EvalString<String>, which is
 /// used for delayed evals like in `rule` blocks.
 #[derive(Debug, PartialEq)]
-pub struct EvalString<T: AsRef<str>>(Vec<EvalPart<T>>);
+pub struct EvalString<T: AsRef<str>>(T);
 impl<T: AsRef<str>> EvalString<T> {
-    pub fn new(parts: Vec<EvalPart<T>>) -> Self {
-        EvalString(parts)
+    pub fn new(inner: T) -> Self {
+        EvalString(inner)
     }
 
     fn evaluate_inner(
@@ -39,7 +41,7 @@ impl<T: AsRef<str>> EvalString<T> {
         scope: &Scope,
         position: ScopePosition,
     ) {
-        for part in &self.0 {
+        for part in self.parse() {
             match part {
                 EvalPart::Literal(s) => result.push_str(s.as_ref()),
                 EvalPart::VarRef(v) => {
@@ -71,52 +73,34 @@ impl<T: AsRef<str>> EvalString<T> {
     }
 
     pub fn maybe_literal(&self) -> Option<&T> {
-        match &self.0[..] {
-            [EvalPart::Literal(x)] => Some(x),
-            _ => None,
+        if self.0.as_ref().contains('$') {
+            None
+        } else {
+            Some(&self.0)
         }
+    }
+
+
+    pub fn parse(&self) -> impl Iterator<Item = EvalPart<&str>> {
+        parse_eval(self.0.as_ref())
     }
 }
 
 impl EvalString<&str> {
     pub fn into_owned(self) -> EvalString<String> {
-        EvalString(
-            self.0
-                .into_iter()
-                .map(|part| match part {
-                    EvalPart::Literal(s) => EvalPart::Literal(s.to_owned()),
-                    EvalPart::VarRef(s) => EvalPart::VarRef(s.to_owned()),
-                })
-                .collect(),
-        )
+        EvalString(self.0.to_owned())
     }
 }
 
 impl EvalString<String> {
     pub fn as_cow(&self) -> EvalString<Cow<str>> {
-        EvalString(
-            self.0
-                .iter()
-                .map(|part| match part {
-                    EvalPart::Literal(s) => EvalPart::Literal(Cow::Borrowed(s.as_ref())),
-                    EvalPart::VarRef(s) => EvalPart::VarRef(Cow::Borrowed(s.as_ref())),
-                })
-                .collect(),
-        )
+        EvalString(Cow::Borrowed(self.0.as_str()))
     }
 }
 
 impl EvalString<&str> {
     pub fn as_cow(&self) -> EvalString<Cow<str>> {
-        EvalString(
-            self.0
-                .iter()
-                .map(|part| match part {
-                    EvalPart::Literal(s) => EvalPart::Literal(Cow::Borrowed(*s)),
-                    EvalPart::VarRef(s) => EvalPart::VarRef(Cow::Borrowed(*s)),
-                })
-                .collect(),
-        )
+        EvalString(Cow::Borrowed(self.0))
     }
 }
 
@@ -132,10 +116,10 @@ impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<&str>> {
     }
 }
 
-impl Env for SmallMap<&str, String> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-        Some(EvalString::new(vec![EvalPart::Literal(
-            std::borrow::Cow::Borrowed(self.get(var)?),
-        )]))
-    }
-}
+// impl Env for SmallMap<&str, String> {
+//     fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+//         Some(EvalString::new(vec![EvalPart::Literal(
+//             std::borrow::Cow::Borrowed(self.get(var)?),
+//         )]))
+//     }
+// }

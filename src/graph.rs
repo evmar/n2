@@ -164,7 +164,7 @@ struct BuildImplicitVars<'a> {
 impl<'text> crate::eval::Env for BuildImplicitVars<'text> {
     fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
         let string_to_evalstring =
-            |s: String| Some(EvalString::new(vec![EvalPart::Literal(Cow::Owned(s))]));
+            |s: String| Some(EvalString::new(Cow::Owned(s)));
         match var {
             "in" => string_to_evalstring(self.explicit_ins.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join(" ")),
             "in_newline" => string_to_evalstring(self.explicit_ins.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join("\n")),
