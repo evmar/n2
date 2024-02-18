@@ -110,6 +110,7 @@ pub struct IncludeOrSubninja<'text> {
 
 #[derive(Debug)]
 pub enum Statement<'text> {
+    EmptyStatement,
     Rule(Rule<'text>),
     Build(Build<'text>),
     Default(DefaultStmt<'text>),
