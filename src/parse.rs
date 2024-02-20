@@ -120,6 +120,35 @@ pub enum Statement<'text> {
     VariableAssignment(VariableAssignment<'text>),
 }
 
+#[derive(Default, Debug)]
+pub struct Clump<'text> {
+    pub assignments: Vec<VariableAssignment<'text>>,
+    pub rules: Vec<Rule<'text>>,
+    pub pools: Vec<Pool<'text>>,
+    pub defaults: Vec<DefaultStmt<'text>>,
+    pub builds: Vec<Build<'text>>,
+    pub subninjas: Vec<IncludeOrSubninja<'text>>,
+    pub used_scope_positions: usize,
+    pub base_position: ScopePosition,
+}
+
+impl<'text> Clump<'text> {
+    pub fn is_empty(&self) -> bool {
+        self.assignments.is_empty() &&
+            self.rules.is_empty() &&
+            self.pools.is_empty() &&
+            self.defaults.is_empty() &&
+            self.builds.is_empty() &&
+            self.subninjas.is_empty()
+    }
+}
+
+#[derive(Debug)]
+pub enum ClumpOrInclude<'text> {
+    Clump(Clump<'text>),
+    Include(EvalString<&'text str>),
+}
+
 pub struct Parser<'text> {
     scanner: Scanner<'text>,
     buf_len: usize,
@@ -149,20 +178,57 @@ impl<'text> Parser<'text> {
         Ok(result)
     }
 
-    pub fn read_to_channel(
-        &mut self,
-        sender: std::sync::mpsc::Sender<ParseResult<Statement<'text>>>,
-    ) {
-        loop {
-            match self.read() {
-                Ok(None) => return,
-                Ok(Some(stmt)) => sender.send(Ok(stmt)).unwrap(),
-                Err(e) => {
-                    sender.send(Err(e)).unwrap();
-                    return;
-                }
+    pub fn read_clumps(&mut self) -> ParseResult<Vec<ClumpOrInclude<'text>>> {
+        let mut result = Vec::new();
+        let mut clump = Clump::default();
+        let mut position = ScopePosition(0);
+        while let Some(stmt) = self.read()? {
+            match stmt {
+                Statement::EmptyStatement => {},
+                Statement::Rule(mut r) => {
+                    r.scope_position = position;
+                    position.0 += 1;
+                    clump.rules.push(r);
+                },
+                Statement::Build(mut b) => {
+                    b.scope_position = position;
+                    position.0 += 1;
+                    clump.builds.push(b);
+                },
+                Statement::Default(mut d) => {
+                    d.scope_position = position;
+                    position.0 += 1;
+                    clump.defaults.push(d);
+                },
+                Statement::Include(i) => {
+                    if !clump.is_empty() {
+                        clump.used_scope_positions = position.0;
+                        result.push(ClumpOrInclude::Clump(clump));
+                        clump = Clump::default();
+                        position = ScopePosition(0);
+                    }
+                    result.push(ClumpOrInclude::Include(i.file));
+                },
+                Statement::Subninja(mut s) => {
+                    s.scope_position = position;
+                    position.0 += 1;
+                    clump.subninjas.push(s);
+                },
+                Statement::Pool(p) => {
+                    clump.pools.push(p);
+                },
+                Statement::VariableAssignment(mut v) => {
+                    v.scope_position = position;
+                    position.0 += 1;
+                    clump.assignments.push(v);
+                },
             }
         }
+        if !clump.is_empty() {
+            clump.used_scope_positions = position.0;
+            result.push(ClumpOrInclude::Clump(clump));
+        }
+        Ok(result)
     }
 
     pub fn read(&mut self) -> ParseResult<Option<Statement<'text>>> {

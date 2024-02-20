@@ -119,6 +119,18 @@ pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     }
 }
 
+
+#[inline]
+pub fn write_complete(name: &'static str, start: Instant, end: Instant) {
+    // Safety: accessing global mut, not threadsafe.
+    unsafe {
+        match &mut TRACE {
+            None => (),
+            Some(t) => t.write_complete(name, 0, start, end),
+        }
+    }
+}
+
 pub fn close() {
     if_enabled(|t| t.close());
 }
