@@ -3,10 +3,7 @@
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
-    concurrent_linked_list::ConcurrentLinkedList,
-    densemap::{self, DenseMap},
-    hash::BuildHash,
-    trace,
+    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::EvalString, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap, trace
 };
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
@@ -85,12 +82,14 @@ pub struct RspFile {
 }
 
 /// Input files to a Build.
+#[derive(Debug)]
 pub struct BuildIns {
     /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
     /// This is mostly to simplify some of the iteration and is a little more
     /// memory efficient than three separate Vecs, but it is kept internal to
     /// Build and only exposed via methods on Build.
     pub ids: Vec<Arc<File>>,
+    pub unevaluated: Vec<EvalString<String>>,
     pub explicit: usize,
     pub implicit: usize,
     pub order_only: usize,
@@ -99,9 +98,11 @@ pub struct BuildIns {
 }
 
 /// Output files from a Build.
+#[derive(Debug)]
 pub struct BuildOuts {
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
     pub ids: Vec<Arc<File>>,
+    pub unevaluated: Vec<EvalString<String>>,
     pub explicit: usize,
 }
 
@@ -146,6 +147,7 @@ mod tests {
         let file2 = Arc::new(File::default());
         let mut outs = BuildOuts {
             ids: vec![file1.clone(), file1.clone(), file2.clone()],
+            unevaluated: Vec::new(),
             explicit: 2,
         };
         outs.remove_duplicates();
@@ -159,6 +161,7 @@ mod tests {
         let file2 = Arc::new(File::default());
         let mut outs = BuildOuts {
             ids: vec![file1.clone(), file2.clone(), file1.clone()],
+            unevaluated: Vec::new(),
             explicit: 2,
         };
         outs.remove_duplicates();
@@ -168,8 +171,17 @@ mod tests {
 }
 
 /// A single build action, generating File outputs from File inputs with a command.
+#[derive(Debug)]
 pub struct Build {
     pub id: BuildId,
+
+    pub scope_position: ScopePosition,
+
+    pub rule: String,
+
+    // The unevaluated variable bindings. They're stored unevalated so that
+    // we don't have to evaluate all bindings on all builds.
+    pub bindings: SmallMap<String, EvalString<String>>,
 
     /// Source location this Build was declared.
     pub location: FileLoc,
@@ -195,27 +207,28 @@ pub struct Build {
     pub ins: BuildIns,
 
     /// Additional inputs discovered from a previous build.
-    discovered_ins: Vec<Arc<File>>,
+    // TODO: Make private again
+    pub discovered_ins: Vec<Arc<File>>,
 
     /// Output files.
     pub outs: BuildOuts,
 }
 impl Build {
-    pub fn new(id: BuildId, loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
-        Build {
-            id,
-            location: loc,
-            desc: None,
-            cmdline: None,
-            depfile: None,
-            parse_showincludes: false,
-            rspfile: None,
-            pool: None,
-            ins,
-            discovered_ins: Vec::new(),
-            outs,
-        }
-    }
+    // pub fn new(id: BuildId, loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
+    //     Build {
+    //         id,
+    //         location: loc,
+    //         desc: None,
+    //         cmdline: None,
+    //         depfile: None,
+    //         parse_showincludes: false,
+    //         rspfile: None,
+    //         pool: None,
+    //         ins,
+    //         discovered_ins: Vec::new(),
+    //         outs,
+    //     }
+    // }
 
     /// Input paths that appear in `$in`.
     pub fn explicit_ins(&self) -> &[Arc<File>] {
@@ -315,6 +328,9 @@ impl Graph {
     pub fn initialize_build(build: &mut Build) -> anyhow::Result<()> {
         let new_id = build.id;
         let mut fixup_dups = false;
+        for input in &build.ins.ids {
+            input.dependents.prepend(new_id);
+        }
         for f in &build.outs.ids {
             let mut input = f.input.lock().unwrap();
             match *input {

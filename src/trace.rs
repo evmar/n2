@@ -58,6 +58,7 @@ impl Trace {
 
     /*
     These functions were useful when developing, but are currently unused.
+    */
 
     pub fn write_instant(&mut self, name: &str) {
         self.write_event_prefix(name, Instant::now());
@@ -79,7 +80,7 @@ impl Trace {
         }
         writeln!(self.w, "}}}}").unwrap();
     }
-    */
+    
 
     fn close(&mut self) {
         self.write_complete("main", 0, self.start, Instant::now());
@@ -115,6 +116,17 @@ pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
         match &mut TRACE {
             None => f(),
             Some(t) => t.scope(name, f),
+        }
+    }
+}
+
+#[inline]
+pub fn write_instant(name: &'static str) {
+    // Safety: accessing global mut, not threadsafe.
+    unsafe {
+        match &mut TRACE {
+            None => (),
+            Some(t) => t.write_instant(name),
         }
     }
 }

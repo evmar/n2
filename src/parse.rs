@@ -6,15 +6,12 @@
 //! text, marked with the lifetime `'text`.
 
 use crate::{
-    eval::{EvalPart, EvalString},
-    load::{Scope, ScopePosition},
-    scanner::{ParseError, ParseResult, Scanner},
-    smallmap::SmallMap,
+    eval::{EvalPart, EvalString}, graph::{Build, BuildId, BuildIns, BuildOuts, FileLoc}, load::{Scope, ScopePosition}, scanner::{ParseError, ParseResult, Scanner}, smallmap::SmallMap
 };
 use std::{
     cell::UnsafeCell,
-    path::Path,
-    sync::{atomic::AtomicBool, Mutex},
+    path::{Path, PathBuf},
+    sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
 /// A list of variable bindings, as expressed with syntax like:
@@ -28,20 +25,20 @@ pub struct Rule<'text> {
     pub scope_position: ScopePosition,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Build<'text> {
-    pub rule: &'text str,
-    pub line: usize,
-    pub outs: Vec<EvalString<&'text str>>,
-    pub explicit_outs: usize,
-    pub ins: Vec<EvalString<&'text str>>,
-    pub explicit_ins: usize,
-    pub implicit_ins: usize,
-    pub order_only_ins: usize,
-    pub validation_ins: usize,
-    pub vars: VarList<'text>,
-    pub scope_position: ScopePosition,
-}
+// #[derive(Debug, PartialEq)]
+// pub struct Build<'text> {
+//     pub rule: &'text str,
+//     pub line: usize,
+//     pub outs: Vec<EvalString<&'text str>>,
+//     pub explicit_outs: usize,
+//     pub ins: Vec<EvalString<&'text str>>,
+//     pub explicit_ins: usize,
+//     pub implicit_ins: usize,
+//     pub order_only_ins: usize,
+//     pub validation_ins: usize,
+//     pub vars: VarList<'text>,
+//     pub scope_position: ScopePosition,
+// }
 
 #[derive(Debug, PartialEq)]
 pub struct Pool<'text> {
@@ -112,7 +109,7 @@ pub struct IncludeOrSubninja<'text> {
 pub enum Statement<'text> {
     EmptyStatement,
     Rule(Rule<'text>),
-    Build(Build<'text>),
+    Build(Build),
     Default(DefaultStmt<'text>),
     Include(IncludeOrSubninja<'text>),
     Subninja(IncludeOrSubninja<'text>),
@@ -126,7 +123,7 @@ pub struct Clump<'text> {
     pub rules: Vec<Rule<'text>>,
     pub pools: Vec<Pool<'text>>,
     pub defaults: Vec<DefaultStmt<'text>>,
-    pub builds: Vec<Build<'text>>,
+    pub builds: Vec<Build>,
     pub subninjas: Vec<IncludeOrSubninja<'text>>,
     pub used_scope_positions: usize,
     pub base_position: ScopePosition,
@@ -150,6 +147,7 @@ pub enum ClumpOrInclude<'text> {
 }
 
 pub struct Parser<'text> {
+    filename: Arc<PathBuf>,
     scanner: Scanner<'text>,
     buf_len: usize,
     /// Reading EvalStrings is very hot when parsing, so we always read into
@@ -158,8 +156,9 @@ pub struct Parser<'text> {
 }
 
 impl<'text> Parser<'text> {
-    pub fn new(buf: &'text [u8]) -> Parser<'text> {
+    pub fn new(buf: &'text [u8], filename: Arc<PathBuf>) -> Parser<'text> {
         Parser {
+            filename,
             scanner: Scanner::new(buf),
             buf_len: buf.len(),
             eval_buf: Vec::with_capacity(16),
@@ -383,15 +382,30 @@ impl<'text> Parser<'text> {
         Ok(())
     }
 
-    fn read_build(&mut self) -> ParseResult<Build<'text>> {
+    fn read_owned_unevaluated_paths_to(
+        &mut self,
+        v: &mut Vec<EvalString<String>>,
+    ) -> ParseResult<()> {
+        self.skip_spaces();
+        while self.scanner.peek() != ':'
+            && self.scanner.peek() != '|'
+            && !self.scanner.peek_newline()
+        {
+            v.push(self.read_eval(true)?.into_owned());
+            self.skip_spaces();
+        }
+        Ok(())
+    }
+
+    fn read_build(&mut self) -> ParseResult<Build> {
         let line = self.scanner.line;
         let mut outs = Vec::new();
-        self.read_unevaluated_paths_to(&mut outs)?;
+        self.read_owned_unevaluated_paths_to(&mut outs)?;
         let explicit_outs = outs.len();
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            self.read_unevaluated_paths_to(&mut outs)?;
+            self.read_owned_unevaluated_paths_to(&mut outs)?;
         }
 
         self.scanner.expect(':')?;
@@ -399,7 +413,7 @@ impl<'text> Parser<'text> {
         let rule = self.read_ident()?;
 
         let mut ins = Vec::new();
-        self.read_unevaluated_paths_to(&mut ins)?;
+        self.read_owned_unevaluated_paths_to(&mut ins)?;
         let explicit_ins = ins.len();
 
         if self.scanner.peek() == '|' {
@@ -408,7 +422,7 @@ impl<'text> Parser<'text> {
             if peek == '|' || peek == '@' {
                 self.scanner.back();
             } else {
-                self.read_unevaluated_paths_to(&mut ins)?;
+                self.read_owned_unevaluated_paths_to(&mut ins)?;
             }
         }
         let implicit_ins = ins.len() - explicit_ins;
@@ -419,7 +433,7 @@ impl<'text> Parser<'text> {
                 self.scanner.back();
             } else {
                 self.scanner.expect('|')?;
-                self.read_unevaluated_paths_to(&mut ins)?;
+                self.read_owned_unevaluated_paths_to(&mut ins)?;
             }
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
@@ -427,7 +441,7 @@ impl<'text> Parser<'text> {
         if self.scanner.peek() == '|' {
             self.scanner.next();
             self.scanner.expect('@')?;
-            self.read_unevaluated_paths_to(&mut ins)?;
+            self.read_owned_unevaluated_paths_to(&mut ins)?;
         }
         let validation_ins = ins.len() - order_only_ins - implicit_ins - explicit_ins;
 
@@ -436,17 +450,33 @@ impl<'text> Parser<'text> {
         let vars = self.read_scoped_vars(|_| true)?;
 
         Ok(Build {
-            rule,
-            line,
-            outs,
-            explicit_outs,
-            ins,
-            explicit_ins,
-            implicit_ins,
-            order_only_ins,
-            validation_ins,
-            vars,
+            id: BuildId::from(0),
+            rule: rule.to_owned(),
             scope_position: ScopePosition(0),
+            bindings: vars.to_owned(),
+            location: FileLoc {
+                filename: self.filename.clone(),
+                line,
+            },
+            desc: None,
+            cmdline: None,
+            depfile: None,
+            parse_showincludes: false,
+            rspfile: None,
+            pool: None,
+            ins: BuildIns {
+                ids: Vec::new(),
+                unevaluated: ins,
+                explicit: explicit_ins,
+                implicit: implicit_ins,
+                order_only: order_only_ins,
+            },
+            discovered_ins: Vec::new(),
+            outs: BuildOuts {
+                ids: Vec::new(),
+                unevaluated: outs,
+                explicit: explicit_outs,
+            },
         })
     }
 
@@ -701,7 +731,7 @@ mod tests {
     fn parse_defaults() {
         test_for_line_endings(&["var = 3", "default a b$var c", ""], |test_case| {
             let mut buf = test_case_buffer(test_case);
-            let mut parser = Parser::new(&mut buf);
+            let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
             match parser.read().unwrap().unwrap() {
                 Statement::VariableAssignment(_) => {}
                 stmt => panic!("expected variable assignment, got {:?}", stmt),
@@ -724,7 +754,7 @@ mod tests {
     #[test]
     fn parse_dot_in_eval() {
         let mut buf = test_case_buffer("x = $y.z\n");
-        let mut parser = Parser::new(&mut buf);
+        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
         let Ok(Some(Statement::VariableAssignment(x))) = parser.read() else {
             panic!("Fail");
         };
@@ -738,7 +768,7 @@ mod tests {
     #[test]
     fn parse_dot_in_rule() {
         let mut buf = test_case_buffer("rule x.y\n  command = x\n");
-        let mut parser = Parser::new(&mut buf);
+        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
         let Ok(Some(Statement::Rule(stmt))) = parser.read() else {
             panic!("Fail");
         };
@@ -753,11 +783,12 @@ mod tests {
     #[test]
     fn parse_trailing_newline() {
         let mut buf = test_case_buffer("build$\n foo$\n : $\n  touch $\n\n");
-        let mut parser = Parser::new(&mut buf);
+        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
         let stmt = parser.read().unwrap().unwrap();
+        let rule = "touch".to_owned();
         assert!(matches!(
             stmt,
-            Statement::Build(Build { rule: "touch", .. })
+            Statement::Build(Build { rule, .. })
         ));
     }
 }

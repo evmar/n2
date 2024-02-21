@@ -4,6 +4,8 @@
 
 use std::{borrow::Borrow, fmt::Debug};
 
+use crate::eval::EvalString;
+
 /// A map-like object implemented as a list of pairs, for cases where the
 /// number of entries in the map is small.
 #[derive(Debug)]
@@ -93,5 +95,15 @@ impl<K: PartialEq, V: PartialEq> PartialEq for SmallMap<K, V> {
 impl<K: PartialEq, V: PartialEq> PartialEq for SmallMap<K, V> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+}
+
+impl SmallMap<&str, EvalString<&str>> {
+    pub fn to_owned(self) -> SmallMap<String, EvalString<String>> {
+        let mut result = SmallMap::default();
+        for (k, v) in self.into_iter() {
+            result.insert(k.to_owned(), v.into_owned());
+        }
+        result
     }
 }

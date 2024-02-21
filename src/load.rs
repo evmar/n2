@@ -1,7 +1,7 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::canon_path, db, densemap::Index, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, stat, BuildId, FileId, Graph, RspFile}, parse::{self, Build, ClumpOrInclude, DefaultStmt, IncludeOrSubninja, Rule, Statement, VariableAssignment}, scanner::{self, ParseResult}, smallmap::SmallMap, trace
+    canon::canon_path, db, densemap::Index, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, stat, BuildId, FileId, Graph, RspFile}, parse::{self, ClumpOrInclude, DefaultStmt, IncludeOrSubninja, Rule, Statement, VariableAssignment}, scanner::{self, ParseResult}, smallmap::SmallMap, trace
 };
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
@@ -120,35 +120,32 @@ impl<'text> Scope<'text> {
 
 fn add_build<'text>(
     files: &Files,
-    filename: &Arc<PathBuf>,
     scope: &Scope,
-    b: &mut parse::Build,
+    b: &mut graph::Build,
     base_position: ScopePosition,
-) -> anyhow::Result<graph::Build> {
+) -> anyhow::Result<()> {
     b.scope_position.0 += base_position.0;
-    let ins: Vec<_> = b
-        .ins
+    let ins: Vec<_> = b.ins.unevaluated
         .iter()
-        .map(|x| canon_path(x.evaluate(&[&b.vars], scope, b.scope_position)))
+        .map(|x| canon_path(x.evaluate(&[&b.bindings], scope, b.scope_position)))
         .collect();
-    let outs: Vec<_> = b
-        .outs
+    let outs: Vec<_> = b.outs.unevaluated
         .iter()
-        .map(|x| canon_path(x.evaluate(&[&b.vars], scope, b.scope_position)))
+        .map(|x| canon_path(x.evaluate(&[&b.bindings], scope, b.scope_position)))
         .collect();
 
-    let rule = match scope.get_rule(b.rule, b.scope_position) {
+    let rule = match scope.get_rule(&b.rule, b.scope_position) {
         Some(r) => r,
         None => bail!("unknown rule {:?}", b.rule),
     };
 
     let implicit_vars = BuildImplicitVars {
-        explicit_ins: &ins[..b.explicit_ins],
-        explicit_outs: &outs[..b.explicit_outs],
+        explicit_ins: &ins[..b.ins.explicit],
+        explicit_outs: &outs[..b.outs.explicit],
     };
 
     // temp variable in order to not move all of b into the closure
-    let build_vars = &b.vars;
+    let build_vars = &b.bindings;
     let lookup = |key: &str| -> Option<String> {
         // Look up `key = ...` binding in build and rule block.
         Some(match rule.vars.get(key) {
@@ -179,49 +176,21 @@ fn add_build<'text>(
         _ => bail!("rspfile and rspfile_content need to be both specified"),
     };
 
-    let build_id = files.create_build_id();
+    b.ins.ids = ins.into_iter()
+        .map(|x| files.id_from_canonical(x))
+        .collect();
+    b.outs.ids = outs.into_iter()
+        .map(|x| files.id_from_canonical(x))
+        .collect();
 
-    let ins = graph::BuildIns {
-        ids: ins
-            .into_iter()
-            .map(|x| {
-                let f = files.id_from_canonical(x);
-                f.dependents.prepend(build_id);
-                f
-            })
-            .collect(),
-        explicit: b.explicit_ins,
-        implicit: b.implicit_ins,
-        order_only: b.order_only_ins,
-        // validation is implied by the other counts
-    };
-    let outs = graph::BuildOuts {
-        ids: outs
-            .into_iter()
-            .map(|x| files.id_from_canonical(x))
-            .collect(),
-        explicit: b.explicit_outs,
-    };
-    let mut build = graph::Build::new(
-        build_id,
-        graph::FileLoc {
-            filename: filename.clone(),
-            line: b.line,
-        },
-        ins,
-        outs,
-    );
+    b.cmdline = cmdline;
+    b.desc = desc;
+    b.depfile = depfile;
+    b.parse_showincludes = parse_showincludes;
+    b.rspfile = rspfile;
+    b.pool = pool;
 
-    build.cmdline = cmdline;
-    build.desc = desc;
-    build.depfile = depfile;
-    build.parse_showincludes = parse_showincludes;
-    build.rspfile = rspfile;
-    build.pool = pool;
-
-    graph::Graph::initialize_build(&mut build)?;
-
-    Ok(build)
+    Ok(())
 }
 
 struct Files {
@@ -263,7 +232,7 @@ impl Files {
 
 #[derive(Default)]
 struct SubninjaResults<'text> {
-    pub builds: Vec<graph::Build>,
+    pub builds: Vec<Vec<graph::Build>>,
     defaults: Vec<Arc<graph::File>>,
     builddir: Option<String>,
     pools: SmallMap<&'text str, usize>,
@@ -293,11 +262,13 @@ where
             },
         );
     }
+    let filename = Arc::new(path);
     let mut parse_results = trace::scope("parse", || {
         parse(
+            &filename,
             num_threads,
             file_pool,
-            file_pool.read_file(&path)?,
+            file_pool.read_file(&filename)?,
             &mut scope,
             // to account for the phony rule
             if top_level_scope { ScopePosition(1) } else { ScopePosition(0) },
@@ -331,7 +302,6 @@ where
         })
         .collect::<anyhow::Result<Vec<SubninjaResults>>>()?;
 
-    let filename = Arc::new(path);
     let mut results = SubninjaResults::default();
 
     for clump in &parse_results {
@@ -347,17 +317,22 @@ where
         }
     }
 
-    results.builds = trace::scope("add builds", || {
+    results.builds = Vec::new();
+    results.builds.push(trace::scope("add builds", || {
         parse_results
             .par_iter_mut()
             .flat_map(|x| {
                 let num_builds = x.builds.len();
-                x.builds.par_iter_mut().zip(rayon::iter::repeatn(x.base_position, num_builds))
+                std::mem::take(&mut x.builds).into_par_iter().zip(rayon::iter::repeatn(x.base_position, num_builds))
             })
-            .map(|(build, base_position)| add_build(files, &filename, &scope, build, base_position))
+            .map(|(mut build, base_position)| -> anyhow::Result<graph::Build> {
+                add_build(files, &scope, &mut build, base_position)?;
+                Ok(build)
+            })
             .collect::<anyhow::Result<Vec<graph::Build>>>()
-    })?;
-
+    })?);
+    trace::write_instant("Right after add_builds");
+    
     // Only the builddir in the outermost scope is respected
     if top_level_scope {
         let mut build_dir = String::new();
@@ -367,24 +342,31 @@ where
         }
     }
 
-    for sn in &mut subninja_results {
-        results.builds.append(&mut sn.builds);
-    }
-    results.defaults.par_extend(
-        subninja_results
-            .par_iter_mut()
-            .flat_map(|x| std::mem::take(&mut x.defaults)),
-    );
-    for new_results in subninja_results {
-        for (name, depth) in new_results.pools.into_iter() {
-            add_pool(&mut results.pools, name, depth)?;
+    trace::scope("Extend subninja results", || -> anyhow::Result<()> {
+        results.builds.par_extend(
+            subninja_results
+                .par_iter_mut()
+                .flat_map(|x| std::mem::take(&mut x.builds)),
+        );
+        results.defaults.par_extend(
+            subninja_results
+                .par_iter_mut()
+                .flat_map(|x| std::mem::take(&mut x.defaults)),
+        );
+        for new_results in subninja_results {
+            for (name, depth) in new_results.pools.into_iter() {
+                add_pool(&mut results.pools, name, depth)?;
+            }
         }
-    }
+        Ok(())
+    })?;
 
+    trace::write_instant("End of subninja");
     Ok(results)
 }
 
 fn include<'thread, 'text>(
+    filename: &Arc<PathBuf>,
     num_threads: usize,
     file_pool: &'text FilePool,
     path: String,
@@ -397,6 +379,7 @@ where
 {
     let path = PathBuf::from(path);
     parse(
+        filename,
         num_threads,
         file_pool,
         file_pool.read_file(&path)?,
@@ -419,6 +402,7 @@ fn add_pool<'text>(
 }
 
 fn parse<'thread, 'text>(
+    filename: &Arc<PathBuf>,
     num_threads: usize,
     file_pool: &'text FilePool,
     bytes: &'text [u8],
@@ -434,7 +418,7 @@ where
     let statements: ParseResult<Vec<Vec<ClumpOrInclude>>> = chunks
         .into_par_iter()
         .map(|chunk| {
-            let mut parser = parse::Parser::new(chunk);
+            let mut parser = parse::Parser::new(chunk, filename.clone());
             parser.read_clumps()
         }).collect();
 
@@ -468,7 +452,7 @@ where
             ClumpOrInclude::Include(i) => {
                 trace::scope("include", || -> anyhow::Result<()> {
                     let evaluated = canon_path(i.evaluate(&[], &scope, clump_base_position));
-                    let mut new_results = include(num_threads, file_pool, evaluated, scope, clump_base_position, executor)?;
+                    let mut new_results = include(filename, num_threads, file_pool, evaluated, scope, clump_base_position, executor)?;
                     clump_base_position.0 += new_results.iter().map(|c| c.used_scope_positions).sum::<usize>();
                     // Things will be out of order here, but we don't care about
                     // order for builds, defaults, subninjas, or pools, as long
@@ -479,60 +463,6 @@ where
                 })?;
             },
         }
-        // match stmt {
-        //     stmt @ Statement::VariableAssignment(_) => {
-        //         let Statement::VariableAssignment(mut variable_assignment) = std::mem::replace(stmt, Statement::EmptyStatement) else {
-        //             unreachable!();
-        //         };
-        //         variable_assignment.scope_position = scope.get_and_inc_scope_position();
-        //         match scope.variables.entry(variable_assignment.name) {
-        //             Entry::Occupied(mut e) => e.get_mut().push(variable_assignment),
-        //             Entry::Vacant(e) => {
-        //                 e.insert(vec![variable_assignment]);
-        //             }
-        //         }
-        //     }
-        //     Statement::Include(ref i) => trace::scope("include", || -> anyhow::Result<()> {
-        //         let evaluated = canon_path(i.file.evaluate(&[], &scope, i.scope_position));
-        //         let new_results = include(num_threads, file_pool, evaluated, scope, executor)?;
-        //         // Things will be out of order here, but we don't care about
-        //         // order for builds, defaults, subninjas, or pools, as long
-        //         // as their scope_position is correct.
-        //         results.merge(new_results)?;
-        //         Ok(())
-        //     })?,
-        //     stmt @ Statement::Subninja(_) => trace::scope("subninja", || {
-        //         let Statement::Subninja(mut subninja) = std::mem::replace(stmt, Statement::EmptyStatement) else {
-        //             unreachable!();
-        //         };
-        //         subninja.scope_position = scope.get_and_inc_scope_position();
-        //         results.subninjas.push(subninja);
-        //     }),
-        //     stmt @ Statement::Default(_) => {
-        //         let Statement::Default(mut default) = std::mem::replace(stmt, Statement::EmptyStatement) else {
-        //             unreachable!();
-        //         };
-        //         default.scope_position = scope.get_and_inc_scope_position();
-        //         results.defaults.push(default);
-        //     }
-        //     stmt @ Statement::Rule(_) => {
-        //         let Statement::Rule(mut rule) = std::mem::replace(stmt, Statement::EmptyStatement) else {
-        //             unreachable!();
-        //         };
-        //         rule.scope_position = scope.get_and_inc_scope_position();
-        //         match scope.rules.entry(rule.name) {
-        //             Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
-        //             Entry::Vacant(e) => e.insert(rule),
-        //         };
-        //     }
-        //     Statement::Build(ref mut build) => {
-        //         build.scope_position = scope.get_and_inc_scope_position();
-        //     }
-        //     Statement::Pool(pool) => {
-        //         add_pool(&mut results.pools, pool.name, pool.depth)?;
-        //     }
-        //     Statement::EmptyStatement => {},
-        // };
     }
     trace::write_complete("parse loop", start, Instant::now());
 
@@ -557,12 +487,12 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()?;
-    let SubninjaResults {
-        builds,
+    let (SubninjaResults {
         defaults,
         builddir,
         pools,
-    } = trace::scope("loader.read_file", || -> anyhow::Result<SubninjaResults> {
+        ..
+    }, builds) = trace::scope("loader.read_file", || -> anyhow::Result<(SubninjaResults, Vec<graph::Build>)> {
         pool.scope(|executor: &rayon::Scope| {
             let mut results = subninja(
                 num_threads,
@@ -572,13 +502,21 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
                 None,
                 executor,
             )?;
-            trace::scope("sort builds", || {
-                results.builds.par_sort_unstable_by_key(|b| b.id.index())
-            });
-            Ok(results)
+            trace::scope("initialize builds", || {
+                let mut builds = Vec::with_capacity(results.builds.iter().map(|x| x.len()).sum());
+                for build_vec in &mut results.builds {
+                    builds.append(build_vec);
+                }
+                builds.par_iter_mut().enumerate().try_for_each(|(id, build)| {
+                    build.id = BuildId::from(id);
+                    graph::Graph::initialize_build(build)
+                })?;
+                Ok((results, builds))
+            })
         })
     })?;
     drop(pool);
+
     let mut graph = trace::scope("loader.from_uninitialized_builds_and_files", || {
         Graph::from_uninitialized_builds_and_files(builds, files.into_maps())
     })?;
