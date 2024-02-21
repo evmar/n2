@@ -6,7 +6,7 @@
 //! text, marked with the lifetime `'text`.
 
 use crate::{
-    eval::{EvalPart, EvalString}, graph::{Build, BuildId, BuildIns, BuildOuts, FileLoc}, load::{Scope, ScopePosition}, scanner::{ParseError, ParseResult, Scanner}, smallmap::SmallMap
+    eval::{EvalPart, EvalString}, graph::{self, Build, BuildId, BuildIns, BuildOuts, FileLoc}, load::{Scope, ScopePosition}, scanner::{ParseError, ParseResult, Scanner}, smallmap::SmallMap
 };
 use std::{
     cell::UnsafeCell,
@@ -93,9 +93,10 @@ impl<'text> VariableAssignment<'text> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct DefaultStmt<'text> {
     pub files: Vec<EvalString<&'text str>>,
+    pub evaluated: Vec<Arc<graph::File>>,
     pub scope_position: ScopePosition,
 }
 
@@ -490,6 +491,7 @@ impl<'text> Parser<'text> {
         self.scanner.expect('\n')?;
         Ok(DefaultStmt {
             files,
+            evaluated: Vec::new(),
             scope_position: ScopePosition(0),
         })
     }

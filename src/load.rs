@@ -1,7 +1,7 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::canon_path, db, densemap::Index, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, stat, BuildId, FileId, Graph, RspFile}, parse::{self, ClumpOrInclude, DefaultStmt, IncludeOrSubninja, Rule, Statement, VariableAssignment}, scanner::{self, ParseResult}, smallmap::SmallMap, trace
+    canon::canon_path, db, densemap::Index, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, stat, BuildId, FileId, Graph, RspFile}, parse::{self, Clump, ClumpOrInclude, DefaultStmt, IncludeOrSubninja, Rule, Statement, VariableAssignment}, scanner::{self, ParseResult}, smallmap::SmallMap, trace
 };
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
@@ -232,10 +232,8 @@ impl Files {
 
 #[derive(Default)]
 struct SubninjaResults<'text> {
-    pub builds: Vec<Vec<graph::Build>>,
-    defaults: Vec<Arc<graph::File>>,
+    clumps: Vec<Clump<'text>>,
     builddir: Option<String>,
-    pools: SmallMap<&'text str, usize>,
 }
 
 fn subninja<'thread, 'text>(
@@ -276,93 +274,65 @@ where
         )
     })?;
 
+    let scope = Arc::new(scope);
+
     for clump in &mut parse_results {
-        for mut rule in std::mem::take(&mut clump.rules).into_iter() {
-            rule.scope_position = rule.scope_position.add(clump.base_position);
-            match scope.rules.entry(rule.name) {
-                Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
-                Entry::Vacant(e) => e.insert(rule),
-            };
+        let base_position = clump.base_position;
+        for default in clump.defaults.iter_mut() {
+            let scope = scope.clone();
+            default.evaluated = default.files.iter().map(|x| {
+                let path = canon_path(x.evaluate(&[], &scope, default.scope_position.add(base_position)));
+                files.id_from_canonical(path)
+            }).collect();
         }
     }
 
-    let scope = Arc::new(scope);
+    parse_results
+        .par_iter_mut()
+        .flat_map(|x| {
+            let num_builds = x.builds.len();
+            x.builds.par_iter_mut().zip(rayon::iter::repeatn(x.base_position, num_builds))
+        })
+        .try_for_each(|(mut build, base_position)| -> anyhow::Result<()> {
+            add_build(files, &scope, &mut build, base_position)
+        })?;
+
     let mut subninja_results = parse_results.par_iter()
         .flat_map(|x| x.subninjas.par_iter().zip(rayon::iter::repeatn(x.base_position, x.subninjas.len())))
-        .map(|(sn, base_position)| {
+        .map(|(sn, base_position)| -> anyhow::Result<Vec<Clump>> {
             let file = canon_path(sn.file.evaluate(&[], &scope, sn.scope_position.add(base_position)));
-            subninja(
+            Ok(subninja(
                 num_threads,
                 files,
                 file_pool,
                 file,
                 Some(ParentScopeReference(scope.clone(), sn.scope_position)),
                 executor,
-            )
+            )?.clumps)
         })
-        .collect::<anyhow::Result<Vec<SubninjaResults>>>()?;
+        .collect::<anyhow::Result<Vec<Vec<Clump<'text>>>>>()?;
 
-    let mut results = SubninjaResults::default();
-
-    for clump in &parse_results {
-        for pool in &clump.pools {
-            add_pool(&mut results.pools, pool.name, pool.depth)?;
-        }
-        for default in clump.defaults.iter() {
-            let scope = scope.clone();
-            results.defaults.extend(default.files.iter().map(|x| {
-                let path = canon_path(x.evaluate(&[], &scope, default.scope_position.add(clump.base_position)));
-                files.id_from_canonical(path)
-            }));
-        }
+    for subninja_result in &mut subninja_results {
+        parse_results.append(subninja_result);
     }
-
-    results.builds = Vec::new();
-    results.builds.push(trace::scope("add builds", || {
-        parse_results
-            .par_iter_mut()
-            .flat_map(|x| {
-                let num_builds = x.builds.len();
-                std::mem::take(&mut x.builds).into_par_iter().zip(rayon::iter::repeatn(x.base_position, num_builds))
-            })
-            .map(|(mut build, base_position)| -> anyhow::Result<graph::Build> {
-                add_build(files, &scope, &mut build, base_position)?;
-                Ok(build)
-            })
-            .collect::<anyhow::Result<Vec<graph::Build>>>()
-    })?);
-    trace::write_instant("Right after add_builds");
     
     // Only the builddir in the outermost scope is respected
-    if top_level_scope {
+    let build_dir = if top_level_scope {
         let mut build_dir = String::new();
-        scope.evaluate(&mut build_dir, "builddir", ScopePosition(parse_results.iter().map(|x| x.used_scope_positions).sum::<usize>()));
+        scope.evaluate(&mut build_dir, "builddir", ScopePosition(usize::MAX));
         if !build_dir.is_empty() {
-            results.builddir = Some(build_dir);
+            Some(build_dir)
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
-    trace::scope("Extend subninja results", || -> anyhow::Result<()> {
-        results.builds.par_extend(
-            subninja_results
-                .par_iter_mut()
-                .flat_map(|x| std::mem::take(&mut x.builds)),
-        );
-        results.defaults.par_extend(
-            subninja_results
-                .par_iter_mut()
-                .flat_map(|x| std::mem::take(&mut x.defaults)),
-        );
-        for new_results in subninja_results {
-            for (name, depth) in new_results.pools.into_iter() {
-                add_pool(&mut results.pools, name, depth)?;
-            }
-        }
-        Ok(())
-    })?;
-
-    trace::write_instant("End of subninja");
-    Ok(results)
+    Ok(SubninjaResults {
+        clumps: parse_results,
+        builddir: build_dir,
+    })
 }
 
 fn include<'thread, 'text>(
@@ -422,7 +392,7 @@ where
             parser.read_clumps()
         }).collect();
 
-    let Ok(mut statements) = statements else {
+    let Ok(statements) = statements else {
         // TODO: Call format_parse_error
         bail!(statements.unwrap_err().msg);
     };
@@ -434,8 +404,8 @@ where
         match stmt {
             ClumpOrInclude::Clump(mut clump) => {
                 // Variable assignemnts must be added to the scope now, because
-                // they may be referenced by a later include. Everything else
-                // can be handled after all parsing is done.
+                // they may be referenced by a later include. Also add rules
+                // while we're at it, to avoid some copies later on.
                 for mut variable_assignment in std::mem::take(&mut clump.assignments).into_iter() {
                     variable_assignment.scope_position.0 += clump_base_position.0;
                     match scope.variables.entry(variable_assignment.name) {
@@ -443,6 +413,15 @@ where
                         Entry::Vacant(e) => {
                             e.insert(vec![variable_assignment]);
                         }
+                    }
+                }
+                for mut rule in std::mem::take(&mut clump.rules).into_iter() {
+                    rule.scope_position.0 += clump_base_position.0;
+                    match scope.rules.entry(rule.name) {
+                        Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
+                        Entry::Vacant(e) => {
+                            e.insert(rule);
+                        },
                     }
                 }
                 clump.base_position = clump_base_position;
@@ -487,12 +466,7 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()?;
-    let (SubninjaResults {
-        defaults,
-        builddir,
-        pools,
-        ..
-    }, builds) = trace::scope("loader.read_file", || -> anyhow::Result<(SubninjaResults, Vec<graph::Build>)> {
+    let (defaults, builddir, pools, builds) = trace::scope("loader.read_file", || -> anyhow::Result<_> {
         pool.scope(|executor: &rayon::Scope| {
             let mut results = subninja(
                 num_threads,
@@ -502,16 +476,29 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
                 None,
                 executor,
             )?;
+
+            let mut pools = SmallMap::default();
+            let mut defaults = Vec::new();
+            let mut num_builds = 0;
+            for clump in &mut results.clumps {
+                for pool in &clump.pools {
+                    add_pool(&mut pools, pool.name, pool.depth)?;
+                }
+                for default in &mut clump.defaults {
+                    defaults.append(&mut default.evaluated);
+                }
+                num_builds += clump.builds.len();
+            }
             trace::scope("initialize builds", || {
-                let mut builds = Vec::with_capacity(results.builds.iter().map(|x| x.len()).sum());
-                for build_vec in &mut results.builds {
-                    builds.append(build_vec);
+                let mut builds = Vec::with_capacity(num_builds);
+                for clump in &mut results.clumps {
+                    builds.append(&mut clump.builds);
                 }
                 builds.par_iter_mut().enumerate().try_for_each(|(id, build)| {
                     build.id = BuildId::from(id);
                     graph::Graph::initialize_build(build)
                 })?;
-                Ok((results, builds))
+                Ok((defaults, results.builddir, pools, builds))
             })
         })
     })?;
