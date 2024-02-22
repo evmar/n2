@@ -111,6 +111,10 @@ fn add_build<'text>(
     b.outs.ids = b.outs.unevaluated.iter()
         .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
+    // The unevaluated values actually have a lifetime of 'text, not 'static,
+    // so clear them so they don't accidentally get used later.
+    b.ins.unevaluated.clear();
+    b.outs.unevaluated.clear();
     b.scope = Some(scope);
 
     Ok(())

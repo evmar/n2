@@ -383,30 +383,15 @@ impl<'text> Parser<'text> {
         Ok(())
     }
 
-    fn read_owned_unevaluated_paths_to(
-        &mut self,
-        v: &mut Vec<EvalString<String>>,
-    ) -> ParseResult<()> {
-        self.skip_spaces();
-        while self.scanner.peek() != ':'
-            && self.scanner.peek() != '|'
-            && !self.scanner.peek_newline()
-        {
-            v.push(self.read_eval(true)?.into_owned());
-            self.skip_spaces();
-        }
-        Ok(())
-    }
-
     fn read_build(&mut self) -> ParseResult<Build> {
         let line = self.scanner.line;
         let mut outs = Vec::new();
-        self.read_owned_unevaluated_paths_to(&mut outs)?;
+        self.read_unevaluated_paths_to(&mut outs)?;
         let explicit_outs = outs.len();
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
-            self.read_owned_unevaluated_paths_to(&mut outs)?;
+            self.read_unevaluated_paths_to(&mut outs)?;
         }
 
         self.scanner.expect(':')?;
@@ -414,7 +399,7 @@ impl<'text> Parser<'text> {
         let rule = self.read_ident()?;
 
         let mut ins = Vec::new();
-        self.read_owned_unevaluated_paths_to(&mut ins)?;
+        self.read_unevaluated_paths_to(&mut ins)?;
         let explicit_ins = ins.len();
 
         if self.scanner.peek() == '|' {
@@ -423,7 +408,7 @@ impl<'text> Parser<'text> {
             if peek == '|' || peek == '@' {
                 self.scanner.back();
             } else {
-                self.read_owned_unevaluated_paths_to(&mut ins)?;
+                self.read_unevaluated_paths_to(&mut ins)?;
             }
         }
         let implicit_ins = ins.len() - explicit_ins;
@@ -434,7 +419,7 @@ impl<'text> Parser<'text> {
                 self.scanner.back();
             } else {
                 self.scanner.expect('|')?;
-                self.read_owned_unevaluated_paths_to(&mut ins)?;
+                self.read_unevaluated_paths_to(&mut ins)?;
             }
         }
         let order_only_ins = ins.len() - implicit_ins - explicit_ins;
@@ -442,12 +427,20 @@ impl<'text> Parser<'text> {
         if self.scanner.peek() == '|' {
             self.scanner.next();
             self.scanner.expect('@')?;
-            self.read_owned_unevaluated_paths_to(&mut ins)?;
+            self.read_unevaluated_paths_to(&mut ins)?;
         }
 
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars(|_| true)?;
+
+        // We will evaluate the ins/outs into owned strings before 'text is over,
+        // and we don't want to attach the 'text lifetime to Build. So instead,
+        // unsafely cast the lifetime to 'static.
+        let (ins, outs) = unsafe {
+            (std::mem::transmute::<Vec<EvalString<&'text str>>, Vec<EvalString<&'static str>>>(ins),
+            std::mem::transmute::<Vec<EvalString<&'text str>>, Vec<EvalString<&'static str>>>(outs))
+        };
 
         Ok(Build {
             id: BuildId::from(0),

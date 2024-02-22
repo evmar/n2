@@ -71,7 +71,7 @@ pub struct BuildIns {
     /// memory efficient than three separate Vecs, but it is kept internal to
     /// Build and only exposed via methods on Build.
     pub ids: Vec<Arc<File>>,
-    pub unevaluated: Vec<EvalString<String>>,
+    pub unevaluated: Vec<EvalString<&'static str>>,
     pub explicit: usize,
     pub implicit: usize,
     pub order_only: usize,
@@ -84,7 +84,7 @@ pub struct BuildIns {
 pub struct BuildOuts {
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
     pub ids: Vec<Arc<File>>,
-    pub unevaluated: Vec<EvalString<String>>,
+    pub unevaluated: Vec<EvalString<&'static str>>,
     pub explicit: usize,
 }
 
