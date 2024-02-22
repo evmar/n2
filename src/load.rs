@@ -113,7 +113,7 @@ impl<'text> Scope<'text> {
             // position, so check the parent scope if there is one.
         }
         if let Some(parent) = &self.parent {
-            parent.0.evaluate(result, varname, position);
+            parent.0.evaluate(result, varname, parent.1);
         }
     }
 }
