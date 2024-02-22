@@ -302,7 +302,7 @@ impl Build {
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them.
 #[derive(Default)]
 pub struct Graph {
-    pub builds: DenseMap<BuildId, Build>,
+    pub builds: DenseMap<BuildId, Box<Build>>,
     pub files: GraphFiles,
 }
 
@@ -315,7 +315,7 @@ pub struct GraphFiles {
 
 impl Graph {
     pub fn from_uninitialized_builds_and_files(
-        builds: Vec<Build>,
+        builds: Vec<Box<Build>>,
         files: dashmap::DashMap<Arc<String>, Arc<File>>,
     ) -> anyhow::Result<Self> {
         let result = Graph {

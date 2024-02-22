@@ -110,7 +110,7 @@ pub struct IncludeOrSubninja<'text> {
 pub enum Statement<'text> {
     EmptyStatement,
     Rule(Rule<'text>),
-    Build(Build),
+    Build(Box<Build>),
     Default(DefaultStmt<'text>),
     Include(IncludeOrSubninja<'text>),
     Subninja(IncludeOrSubninja<'text>),
@@ -124,7 +124,7 @@ pub struct Clump<'text> {
     pub rules: Vec<Rule<'text>>,
     pub pools: Vec<Pool<'text>>,
     pub defaults: Vec<DefaultStmt<'text>>,
-    pub builds: Vec<Build>,
+    pub builds: Vec<Box<Build>>,
     pub subninjas: Vec<IncludeOrSubninja<'text>>,
     pub used_scope_positions: usize,
     pub base_position: ScopePosition,
@@ -255,7 +255,7 @@ impl<'text> Parser<'text> {
                     self.skip_spaces();
                     match ident {
                         "rule" => return Ok(Some(Statement::Rule(self.read_rule()?))),
-                        "build" => return Ok(Some(Statement::Build(self.read_build()?))),
+                        "build" => return Ok(Some(Statement::Build(Box::new(self.read_build()?)))),
                         "default" => return Ok(Some(Statement::Default(self.read_default()?))),
                         "include" => {
                             let result = IncludeOrSubninja {
@@ -787,10 +787,9 @@ mod tests {
         let mut buf = test_case_buffer("build$\n foo$\n : $\n  touch $\n\n");
         let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
         let stmt = parser.read().unwrap().unwrap();
-        let rule = "touch".to_owned();
-        assert!(matches!(
-            stmt,
-            Statement::Build(Build { rule, .. })
-        ));
+        let Statement::Build(stmt) = stmt else {
+            panic!("Wasn't a build");
+        };
+        assert_eq!(stmt.rule, "touch");
     }
 }
