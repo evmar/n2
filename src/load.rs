@@ -195,13 +195,11 @@ fn add_build<'text>(
 
 struct Files {
     by_name: dashmap::DashMap<Arc<String>, Arc<graph::File>>,
-    next_build_id: AtomicUsize,
 }
 impl Files {
     pub fn new() -> Self {
         Self {
             by_name: dashmap::DashMap::new(),
-            next_build_id: AtomicUsize::new(0),
         }
     }
 
@@ -220,13 +218,6 @@ impl Files {
 
     pub fn into_maps(self) -> dashmap::DashMap<Arc<String>, Arc<graph::File>> {
         self.by_name
-    }
-
-    pub fn create_build_id(&self) -> BuildId {
-        let id = self
-            .next_build_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        BuildId::from(id)
     }
 }
 
@@ -287,15 +278,17 @@ where
         }
     }
 
-    parse_results
-        .par_iter_mut()
-        .flat_map(|x| {
-            let num_builds = x.builds.len();
-            x.builds.par_iter_mut().zip(rayon::iter::repeatn(x.base_position, num_builds))
-        })
-        .try_for_each(|(mut build, base_position)| -> anyhow::Result<()> {
-            add_build(files, &scope, &mut build, base_position)
-        })?;
+    trace::scope("add builds", || -> anyhow::Result<()> {
+        parse_results
+            .par_iter_mut()
+            .flat_map(|x| {
+                let num_builds = x.builds.len();
+                x.builds.par_iter_mut().zip(rayon::iter::repeatn(x.base_position, num_builds))
+            })
+            .try_for_each(|(mut build, base_position)| -> anyhow::Result<()> {
+                add_build(files, &scope, &mut build, base_position)
+            })
+    })?;
 
     let mut subninja_results = parse_results.par_iter()
         .flat_map(|x| x.subninjas.par_iter().zip(rayon::iter::repeatn(x.base_position, x.subninjas.len())))
@@ -329,6 +322,8 @@ where
         None
     };
 
+    //std::mem::forget(scope);
+
     Ok(SubninjaResults {
         clumps: parse_results,
         builddir: build_dir,
@@ -360,11 +355,11 @@ where
 }
 
 fn add_pool<'text>(
-    pools: &mut SmallMap<&'text str, usize>,
-    name: &'text str,
+    pools: &mut SmallMap<String, usize>,
+    name: String,
     depth: usize,
 ) -> anyhow::Result<()> {
-    if let Some(_) = pools.get(name) {
+    if let Some(_) = pools.get(&name) {
         bail!("duplicate pool {}", name);
     }
     pools.insert(name, depth);
@@ -397,33 +392,61 @@ where
         bail!(statements.unwrap_err().msg);
     };
 
-    let mut results = Vec::new();
-
     let start = Instant::now();
+
+    let mut num_rules = 0;
+    let mut num_variables = 0;
+    let mut num_clumps = 0;
+    for clumps in &statements {
+        num_clumps += clumps.len();
+        for clump_or_include in clumps {
+            if let ClumpOrInclude::Clump(clump) = clump_or_include {
+                num_rules += clump.rules.len();
+                num_variables += clump.assignments.len();
+            }
+        }
+    }
+
+    scope.rules.reserve(num_rules);
+    scope.variables.reserve(num_variables);
+
+    let mut results = Vec::with_capacity(num_clumps);
+
     for stmt in statements.into_iter().flatten() {
         match stmt {
             ClumpOrInclude::Clump(mut clump) => {
                 // Variable assignemnts must be added to the scope now, because
                 // they may be referenced by a later include. Also add rules
                 // while we're at it, to avoid some copies later on.
-                for mut variable_assignment in std::mem::take(&mut clump.assignments).into_iter() {
-                    variable_assignment.scope_position.0 += clump_base_position.0;
-                    match scope.variables.entry(variable_assignment.name) {
-                        Entry::Occupied(mut e) => e.get_mut().push(variable_assignment),
-                        Entry::Vacant(e) => {
-                            e.insert(vec![variable_assignment]);
+                let rules = std::mem::take(&mut clump.rules);
+                let assignments = std::mem::take(&mut clump.assignments);
+                let scope_rules = &mut scope.rules;
+                let scope_variables = &mut scope.variables;
+                rayon::join(
+                    || {
+                        for mut variable_assignment in assignments.into_iter() {
+                            variable_assignment.scope_position.0 += clump_base_position.0;
+                            match scope_variables.entry(variable_assignment.name) {
+                                Entry::Occupied(mut e) => e.get_mut().push(variable_assignment),
+                                Entry::Vacant(e) => {
+                                    e.insert(vec![variable_assignment]);
+                                }
+                            }
                         }
+                    },
+                    || -> anyhow::Result<()> {
+                        for mut rule in rules.into_iter() {
+                            rule.scope_position.0 += clump_base_position.0;
+                            match scope_rules.entry(rule.name) {
+                                Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
+                                Entry::Vacant(e) => {
+                                    e.insert(rule);
+                                },
+                            }
+                        }
+                        Ok(())
                     }
-                }
-                for mut rule in std::mem::take(&mut clump.rules).into_iter() {
-                    rule.scope_position.0 += clump_base_position.0;
-                    match scope.rules.entry(rule.name) {
-                        Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
-                        Entry::Vacant(e) => {
-                            e.insert(rule);
-                        },
-                    }
-                }
+                ).1?;
                 clump.base_position = clump_base_position;
                 clump_base_position.0 += clump.used_scope_positions;
                 results.push(clump);
@@ -480,20 +503,26 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
             let mut pools = SmallMap::default();
             let mut defaults = Vec::new();
             let mut num_builds = 0;
-            for clump in &mut results.clumps {
-                for pool in &clump.pools {
-                    add_pool(&mut pools, pool.name, pool.depth)?;
-                }
-                for default in &mut clump.defaults {
-                    defaults.append(&mut default.evaluated);
-                }
-                num_builds += clump.builds.len();
-            }
-            trace::scope("initialize builds", || {
-                let mut builds = Vec::with_capacity(num_builds);
+            trace::scope("add pools and defaults", || -> anyhow::Result<()> {
                 for clump in &mut results.clumps {
-                    builds.append(&mut clump.builds);
+                    for pool in &clump.pools {
+                        add_pool(&mut pools, pool.name.to_owned(), pool.depth)?;
+                    }
+                    for default in &mut clump.defaults {
+                        defaults.append(&mut default.evaluated);
+                    }
+                    num_builds += clump.builds.len();
                 }
+                Ok(())
+            })?;
+            trace::scope("initialize builds", || {
+                let mut builds = trace::scope("allocate and concat builds", || {
+                    let mut builds = Vec::with_capacity(num_builds);
+                    for clump in &mut results.clumps {
+                        builds.append(&mut clump.builds);
+                    }
+                    builds
+                });
                 builds.par_iter_mut().enumerate().try_for_each(|(id, build)| {
                     build.id = BuildId::from(id);
                     graph::Graph::initialize_build(build)
@@ -502,11 +531,8 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
             })
         })
     })?;
-    drop(pool);
 
-    let mut graph = trace::scope("loader.from_uninitialized_builds_and_files", || {
-        Graph::from_uninitialized_builds_and_files(builds, files.into_maps())
-    })?;
+    let mut graph = Graph::from_uninitialized_builds_and_files(builds, files.into_maps())?;
     let mut hashes = graph::Hashes::default();
     let db = trace::scope("db::open", || {
         let mut db_path = PathBuf::from(".n2_db");
@@ -520,16 +546,11 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
     })
     .map_err(|err| anyhow!("load .n2_db: {}", err))?;
 
-    let mut owned_pools = SmallMap::with_capacity(pools.len());
-    for pool in pools.iter() {
-        owned_pools.insert(pool.0.to_owned(), pool.1);
-    }
-
     Ok(State {
         graph,
         db,
         hashes,
         default: defaults,
-        pools: owned_pools,
+        pools,
     })
 }
