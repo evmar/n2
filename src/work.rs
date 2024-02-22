@@ -72,6 +72,7 @@ impl StateCounts {
 /// Each running build is running "in" a pool; there's a default unbounded
 /// pool for builds that don't specify one.
 /// See "Tracking build state" in the design notes.
+#[derive(Debug)]
 struct PoolState {
     /// A queue of builds that are ready to be executed in this pool.
     queued: VecDeque<BuildId>,
@@ -140,7 +141,7 @@ impl BuildStates {
         let prev = std::mem::replace(&mut self.states[id], state);
 
         // We skip user-facing counters for phony builds.
-        let skip_ui_count = build.cmdline.is_none();
+        let skip_ui_count = build.get_binding("command").is_none();
 
         // println!("{:?} {:?}=>{:?} {:?}", id, prev, state, self.counts);
         if prev == BuildState::Unknown {
@@ -270,7 +271,8 @@ impl BuildStates {
 
     /// Look up a PoolState by name.
     fn get_pool(&mut self, build: &Build) -> Option<&mut PoolState> {
-        let name = build.pool.as_deref().unwrap_or("");
+        let owned_name = build.get_binding("pool");
+        let name = owned_name.as_deref().unwrap_or("");
         for (key, pool) in self.pools.iter_mut() {
             if key == name {
                 return Some(pool);
@@ -289,7 +291,7 @@ impl BuildStates {
                 build.location,
                 // Unnamed pool lookups always succeed, this error is about
                 // named pools.
-                build.pool.as_ref().unwrap()
+                build.get_binding("pool").as_ref().unwrap()
             )
         })?;
         pool.queued.push_back(id);
@@ -502,7 +504,7 @@ impl<'a> Work<'a> {
         }
 
         let build = &self.graph.builds[id];
-        let hash = hash::hash_build(&self.file_state, build);
+        let hash = hash::hash_build(&self.file_state, build)?;
         self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
@@ -602,7 +604,7 @@ impl<'a> Work<'a> {
     /// Prereq: any dependent input is already generated.
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = &self.graph.builds[id];
-        let phony = build.cmdline.is_none();
+        let phony = build.get_binding("command").is_none();
         let file_missing = if phony {
             self.check_build_files_missing_phony(id)?;
             return Ok(false); // Phony builds never need to run anything.
@@ -642,13 +644,13 @@ impl<'a> Work<'a> {
             Some(prev_hash) => prev_hash,
         };
 
-        let hash = hash::hash_build(&self.file_state, build);
+        let hash = hash::hash_build(&self.file_state, build)?;
         if prev_hash != hash {
             if self.options.explain {
                 self.progress
                     .log(&format!("explain: {}: manifest changed", build.location));
                 self.progress
-                    .log(&hash::explain_hash_build(&self.file_state, build));
+                    .log(&hash::explain_hash_build(&self.file_state, build)?);
             }
             return Ok(true);
         }
@@ -703,7 +705,7 @@ impl<'a> Work<'a> {
                 let build = &self.graph.builds[id];
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
-                runner.start(id, build);
+                runner.start(id, build)?;
                 self.progress.task_started(id, build);
                 made_progress = true;
             }
@@ -747,7 +749,7 @@ impl<'a> Work<'a> {
             let build = &self.graph.builds[task.buildid];
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);
-                t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
+                t.write_complete(&desc, task.tid + 1, task.span.0, task.span.1);
             });
 
             self.progress

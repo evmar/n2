@@ -210,11 +210,11 @@ impl Runner {
         self.running > 0
     }
 
-    pub fn start(&mut self, id: BuildId, build: &Build) {
-        let cmdline = build.cmdline.clone().unwrap();
-        let depfile = build.depfile.clone().map(PathBuf::from);
-        let rspfile = build.rspfile.clone();
-        let parse_showincludes = build.parse_showincludes;
+    pub fn start(&mut self, id: BuildId, build: &Build) -> anyhow::Result<()> {
+        let cmdline = build.get_binding("command").clone().unwrap();
+        let depfile = build.get_binding("depfile").clone().map(PathBuf::from);
+        let rspfile = build.get_rspfile()?;
+        let parse_showincludes = build.get_parse_showincludes()?;
 
         let tid = self.tids.claim();
         let tx = self.tx.clone();
@@ -246,6 +246,7 @@ impl Runner {
             let _ = tx.send(Message::Done(task));
         });
         self.running += 1;
+        Ok(())
     }
 
     /// Wait for a build to complete.  May block for a long time.

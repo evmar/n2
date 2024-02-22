@@ -1,13 +1,13 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::canon_path, db, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, BuildId, Graph, RspFile}, parse::{self, Clump, ClumpOrInclude, Rule, VariableAssignment}, scanner::ParseResult, smallmap::SmallMap, trace
+    canon::canon_path, db, file_pool::FilePool, graph::{self, BuildId, Graph}, parse::{self, Clump, ClumpOrInclude, Rule, VariableAssignment}, scanner::ParseResult, smallmap::SmallMap, trace
 };
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::{
-    borrow::Cow, path::Path, time::Instant
+    path::Path, time::Instant
 };
 use std::{
     cmp::Ordering,
@@ -16,25 +16,6 @@ use std::{
     thread::available_parallelism,
 };
 use std::path::PathBuf;
-
-/// A variable lookup environment for magic $in/$out variables.
-struct BuildImplicitVars<'a> {
-    explicit_ins: &'a [String],
-    explicit_outs: &'a [String],
-}
-impl<'text> eval::Env for BuildImplicitVars<'text> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-        let string_to_evalstring =
-            |s: String| Some(EvalString::new(vec![EvalPart::Literal(Cow::Owned(s))]));
-        match var {
-            "in" => string_to_evalstring(self.explicit_ins.join(" ")),
-            "in_newline" => string_to_evalstring(self.explicit_ins.join("\n")),
-            "out" => string_to_evalstring(self.explicit_outs.join(" ")),
-            "out_newline" => string_to_evalstring(self.explicit_outs.join("\n")),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub struct ScopePosition(pub usize);
@@ -46,18 +27,18 @@ impl ScopePosition {
 }
 
 #[derive(Debug)]
-pub struct ParentScopeReference<'text>(pub Arc<Scope<'text>>, pub ScopePosition);
+pub struct ParentScopeReference(pub Arc<Scope>, pub ScopePosition);
 
 #[derive(Debug)]
-pub struct Scope<'text> {
-    parent: Option<ParentScopeReference<'text>>,
-    rules: FxHashMap<&'text str, Rule<'text>>,
-    variables: FxHashMap<&'text str, Vec<VariableAssignment<'text>>>,
+pub struct Scope {
+    parent: Option<ParentScopeReference>,
+    rules: FxHashMap<String, Rule>,
+    variables: FxHashMap<String, Vec<VariableAssignment>>,
     next_free_position: ScopePosition,
 }
 
-impl<'text> Scope<'text> {
-    pub fn new(parent: Option<ParentScopeReference<'text>>) -> Self {
+impl Scope {
+    pub fn new(parent: Option<ParentScopeReference>) -> Self {
         Self {
             parent,
             rules: FxHashMap::default(),
@@ -76,7 +57,7 @@ impl<'text> Scope<'text> {
         self.next_free_position
     }
 
-    pub fn get_rule(&self, name: &'text str, position: ScopePosition) -> Option<&Rule> {
+    pub fn get_rule(&self, name: &str, position: ScopePosition) -> Option<&Rule> {
         match self.rules.get(name) {
             Some(rule) if rule.scope_position.0 < position.0 => Some(rule),
             Some(_) | None => self
@@ -87,7 +68,7 @@ impl<'text> Scope<'text> {
         }
     }
 
-    pub fn evaluate(&self, result: &mut String, varname: &'text str, position: ScopePosition) {
+    pub fn evaluate(&self, result: &mut String, varname: &str, position: ScopePosition) {
         if let Some(variables) = self.variables.get(varname) {
             let i = variables
                 .binary_search_by(|x| {
@@ -119,75 +100,18 @@ impl<'text> Scope<'text> {
 
 fn add_build<'text>(
     files: &Files,
-    scope: &Scope,
+    scope: Arc<Scope>,
     b: &mut graph::Build,
     base_position: ScopePosition,
 ) -> anyhow::Result<()> {
     b.scope_position.0 += base_position.0;
-    let ins: Vec<_> = b.ins.unevaluated
-        .iter()
-        .map(|x| canon_path(x.evaluate(&[&b.bindings], scope, b.scope_position)))
+    b.ins.ids = b.ins.unevaluated.iter()
+        .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
-    let outs: Vec<_> = b.outs.unevaluated
-        .iter()
-        .map(|x| canon_path(x.evaluate(&[&b.bindings], scope, b.scope_position)))
+    b.outs.ids = b.outs.unevaluated.iter()
+        .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
-
-    let rule = match scope.get_rule(&b.rule, b.scope_position) {
-        Some(r) => r,
-        None => bail!("unknown rule {:?}", b.rule),
-    };
-
-    let implicit_vars = BuildImplicitVars {
-        explicit_ins: &ins[..b.ins.explicit],
-        explicit_outs: &outs[..b.outs.explicit],
-    };
-
-    // temp variable in order to not move all of b into the closure
-    let build_vars = &b.bindings;
-    let lookup = |key: &str| -> Option<String> {
-        // Look up `key = ...` binding in build and rule block.
-        Some(match rule.vars.get(key) {
-            Some(val) => val.evaluate(&[&implicit_vars, build_vars], scope, b.scope_position),
-            None => build_vars.get(key)?.evaluate(&[], scope, b.scope_position),
-        })
-    };
-
-    let cmdline = lookup("command");
-    let desc = lookup("description");
-    let depfile = lookup("depfile");
-    let parse_showincludes = match lookup("deps").as_deref() {
-        None => false,
-        Some("gcc") => false,
-        Some("msvc") => true,
-        Some(other) => bail!("invalid deps attribute {:?}", other),
-    };
-    let pool = lookup("pool");
-
-    let rspfile_path = lookup("rspfile");
-    let rspfile_content = lookup("rspfile_content");
-    let rspfile = match (rspfile_path, rspfile_content) {
-        (None, None) => None,
-        (Some(path), Some(content)) => Some(RspFile {
-            path: std::path::PathBuf::from(path),
-            content,
-        }),
-        _ => bail!("rspfile and rspfile_content need to be both specified"),
-    };
-
-    b.ins.ids = ins.into_iter()
-        .map(|x| files.id_from_canonical(x))
-        .collect();
-    b.outs.ids = outs.into_iter()
-        .map(|x| files.id_from_canonical(x))
-        .collect();
-
-    b.cmdline = cmdline;
-    b.desc = desc;
-    b.depfile = depfile;
-    b.parse_showincludes = parse_showincludes;
-    b.rspfile = rspfile;
-    b.pool = pool;
+    b.scope = Some(scope);
 
     Ok(())
 }
@@ -231,7 +155,7 @@ fn subninja<'thread, 'text>(
     files: &'thread Files,
     file_pool: &'text FilePool,
     path: String,
-    parent_scope: Option<ParentScopeReference<'text>>,
+    parent_scope: Option<ParentScopeReference>,
     executor: &rayon::Scope<'thread>,
 ) -> anyhow::Result<SubninjaResults<'text>>
 where
@@ -242,9 +166,8 @@ where
     let mut scope = Scope::new(parent_scope);
     if top_level_scope {
         scope.rules.insert(
-            "phony",
+            "phony".to_owned(),
             Rule {
-                name: "phony",
                 vars: SmallMap::default(),
                 scope_position: ScopePosition(0),
             },
@@ -277,6 +200,11 @@ where
         }
     }
 
+    scope.variables.par_iter().flat_map(|x| x.1.par_iter()).for_each(|x| {
+        let mut result = String::new();
+        x.evaluate(&mut result, &scope);
+    });
+
     trace::scope("add builds", || -> anyhow::Result<()> {
         parse_results
             .par_iter_mut()
@@ -285,7 +213,7 @@ where
                 x.builds.par_iter_mut().zip(rayon::iter::repeatn(x.base_position, num_builds))
             })
             .try_for_each(|(mut build, base_position)| -> anyhow::Result<()> {
-                add_build(files, &scope, &mut build, base_position)
+                add_build(files, scope.clone(), &mut build, base_position)
             })
     })?;
 
@@ -308,7 +236,7 @@ where
     for subninja_result in &mut subninja_results {
         parse_results.append(subninja_result);
     }
-    
+
     // Only the builddir in the outermost scope is respected
     let build_dir = if top_level_scope {
         let mut build_dir = String::new();
@@ -322,13 +250,6 @@ where
         None
     };
 
-    // Deallocating the scope can take some time (~200ms on android's files).
-    // We want to do that in the background, but rayon::spawn requires static
-    // lifetimes. We know that dropping doesn't attempt to dereference any
-    // pointers to the text, so unsafely cast the scope to the static lifetime.
-    let scope = unsafe { std::mem::transmute::<Arc<Scope<'text>>, Arc<Scope<'static>>>(scope)};
-    rayon::spawn(move || drop(scope));
-
     Ok(SubninjaResults {
         clumps: parse_results,
         builddir: build_dir,
@@ -340,7 +261,7 @@ fn include<'thread, 'text>(
     num_threads: usize,
     file_pool: &'text FilePool,
     path: String,
-    scope: &mut Scope<'text>,
+    scope: &mut Scope,
     clump_base_position: ScopePosition,
     executor: &rayon::Scope<'thread>,
 ) -> anyhow::Result<Vec<parse::Clump<'text>>>
@@ -376,7 +297,7 @@ fn parse<'thread, 'text>(
     num_threads: usize,
     file_pool: &'text FilePool,
     bytes: &'text [u8],
-    scope: &mut Scope<'text>,
+    scope: &mut Scope,
     mut clump_base_position: ScopePosition,
     executor: &rayon::Scope<'thread>,
 ) -> anyhow::Result<Vec<parse::Clump<'text>>>
@@ -429,9 +350,9 @@ where
                 let scope_variables = &mut scope.variables;
                 rayon::join(
                     || {
-                        for mut variable_assignment in assignments.into_iter() {
+                        for (name, mut variable_assignment) in assignments.into_iter() {
                             variable_assignment.scope_position.0 += clump_base_position.0;
-                            match scope_variables.entry(variable_assignment.name) {
+                            match scope_variables.entry(name) {
                                 Entry::Occupied(mut e) => e.get_mut().push(variable_assignment),
                                 Entry::Vacant(e) => {
                                     e.insert(vec![variable_assignment]);
@@ -440,10 +361,10 @@ where
                         }
                     },
                     || -> anyhow::Result<()> {
-                        for mut rule in rules.into_iter() {
+                        for (name, mut rule) in rules.into_iter() {
                             rule.scope_position.0 += clump_base_position.0;
-                            match scope_rules.entry(rule.name) {
-                                Entry::Occupied(_) => bail!("duplicate rule '{}'", rule.name),
+                            match scope_rules.entry(name) {
+                                Entry::Occupied(e) => bail!("duplicate rule '{}'", e.key()),
                                 Entry::Vacant(e) => {
                                     e.insert(rule);
                                 },

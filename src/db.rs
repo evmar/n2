@@ -3,7 +3,7 @@
 
 use crate::graph;
 use crate::{
-    densemap, densemap::DenseMap, graph::BuildId, graph::FileId, graph::Graph, graph::Hashes,
+    densemap, densemap::DenseMap, graph::BuildId, graph::Graph, graph::Hashes,
     hash::BuildHash,
 };
 use anyhow::{anyhow, bail};

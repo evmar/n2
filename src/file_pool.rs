@@ -1,7 +1,7 @@
 use anyhow::bail;
 use core::slice;
 use libc::{
-    c_void, mmap, munmap, strerror, sysconf, MAP_ANONYMOUS, MAP_FAILED, MAP_FIXED, MAP_PRIVATE,
+    c_void, mmap, munmap, sysconf, MAP_ANONYMOUS, MAP_FAILED, MAP_FIXED, MAP_PRIVATE,
     PROT_READ, PROT_WRITE, _SC_PAGESIZE,
 };
 use std::{

@@ -60,26 +60,26 @@ impl Trace {
     These functions were useful when developing, but are currently unused.
     */
 
-    pub fn write_instant(&mut self, name: &str) {
-        self.write_event_prefix(name, Instant::now());
-        writeln!(self.w, "\"ph\":\"i\"}}").unwrap();
-    }
+    // pub fn write_instant(&mut self, name: &str) {
+    //     self.write_event_prefix(name, Instant::now());
+    //     writeln!(self.w, "\"ph\":\"i\"}}").unwrap();
+    // }
 
-    pub fn write_counts<'a>(
-        &mut self,
-        name: &str,
-        counts: impl Iterator<Item = &'a (&'a str, usize)>,
-    ) {
-        self.write_event_prefix(name, Instant::now());
-        write!(self.w, "\"ph\":\"C\", \"args\":{{").unwrap();
-        for (i, (name, count)) in counts.enumerate() {
-            if i > 0 {
-                write!(self.w, ",").unwrap();
-            }
-            write!(self.w, "\"{}\":{}", name, count).unwrap();
-        }
-        writeln!(self.w, "}}}}").unwrap();
-    }
+    // pub fn write_counts<'a>(
+    //     &mut self,
+    //     name: &str,
+    //     counts: impl Iterator<Item = &'a (&'a str, usize)>,
+    // ) {
+    //     self.write_event_prefix(name, Instant::now());
+    //     write!(self.w, "\"ph\":\"C\", \"args\":{{").unwrap();
+    //     for (i, (name, count)) in counts.enumerate() {
+    //         if i > 0 {
+    //             write!(self.w, ",").unwrap();
+    //         }
+    //         write!(self.w, "\"{}\":{}", name, count).unwrap();
+    //     }
+    //     writeln!(self.w, "}}}}").unwrap();
+    // }
     
 
     fn close(&mut self) {
@@ -120,16 +120,16 @@ pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     }
 }
 
-#[inline]
-pub fn write_instant(name: &'static str) {
-    // Safety: accessing global mut, not threadsafe.
-    unsafe {
-        match &mut TRACE {
-            None => (),
-            Some(t) => t.write_instant(name),
-        }
-    }
-}
+// #[inline]
+// pub fn write_instant(name: &'static str) {
+//     // Safety: accessing global mut, not threadsafe.
+//     unsafe {
+//         match &mut TRACE {
+//             None => (),
+//             Some(t) => t.write_instant(name),
+//         }
+//     }
+// }
 
 
 #[inline]

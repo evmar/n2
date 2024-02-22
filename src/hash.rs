@@ -4,7 +4,7 @@
 //! See "Manifests instead of mtime order" in
 //!   https://neugierig.org/software/blog/2022/03/n2.html
 
-use crate::graph::{self, Build, FileId, FileState, GraphFiles, MTime, RspFile};
+use crate::graph::{self, Build, FileState, MTime, RspFile};
 use std::{
     collections::hash_map::DefaultHasher,
     fmt::Write,
@@ -79,24 +79,25 @@ impl Manifest for TerseHash {
     }
 }
 
-fn build_manifest<M: Manifest>(manifest: &mut M, file_state: &FileState, build: &Build) {
+fn build_manifest<M: Manifest>(manifest: &mut M, file_state: &FileState, build: &Build) -> anyhow::Result<()> {
     manifest.write_files("in", file_state, build.dirtying_ins());
     manifest.write_files("discovered", file_state, build.discovered_ins());
-    manifest.write_cmdline(build.cmdline.as_deref().unwrap_or(""));
-    if let Some(rspfile) = &build.rspfile {
+    manifest.write_cmdline(build.get_binding("command").as_deref().unwrap_or(""));
+    if let Some(rspfile) = &build.get_rspfile()? {
         manifest.write_rsp(rspfile);
     }
     manifest.write_files("out", file_state, build.outs());
+    Ok(())
 }
 
 // Hashes the inputs of a build to compute a signature.
 // Prerequisite: all referenced files have already been stat()ed and are present.
 // (It doesn't make sense to hash a build with missing files, because it's out
 // of date regardless of the state of the other files.)
-pub fn hash_build(file_state: &FileState, build: &Build) -> BuildHash {
+pub fn hash_build(file_state: &FileState, build: &Build) -> anyhow::Result<BuildHash> {
     let mut hasher = TerseHash::default();
-    build_manifest(&mut hasher, file_state, build);
-    hasher.finish()
+    build_manifest(&mut hasher, file_state, build)?;
+    Ok(hasher.finish())
 }
 
 /// A BuildHasher that records human-readable text for "-d explain" debugging.
@@ -133,8 +134,8 @@ impl Manifest for ExplainHash {
 
 /// Logs human-readable state of all the inputs used for hashing a given build.
 /// Used for "-d explain" debugging output.
-pub fn explain_hash_build(file_state: &FileState, build: &Build) -> String {
+pub fn explain_hash_build(file_state: &FileState, build: &Build) -> anyhow::Result<String> {
     let mut explainer = ExplainHash::default();
-    build_manifest(&mut explainer, file_state, build);
-    explainer.text
+    build_manifest(&mut explainer, file_state, build)?;
+    Ok(explainer.text)
 }

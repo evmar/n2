@@ -1,36 +1,18 @@
 //! The build graph, a graph between files and commands.
 
+use anyhow::bail;
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
-    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::EvalString, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap, trace
+    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::{EvalPart, EvalString}, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap
 };
-use std::time::SystemTime;
+use std::{borrow::Cow, time::SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use std::{
     hash::BuildHasherDefault,
     path::{Path, PathBuf},
     sync::Mutex,
 };
-
-/// Id for File nodes in the Graph.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct FileId(u32);
-impl densemap::Index for FileId {
-    fn index(&self) -> usize {
-        self.0 as usize
-    }
-}
-impl From<usize> for FileId {
-    fn from(u: usize) -> FileId {
-        FileId(u as u32)
-    }
-}
-impl From<u32> for FileId {
-    fn from(u: u32) -> FileId {
-        FileId(u)
-    }
-}
 
 /// Id for Build nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -170,11 +152,32 @@ mod tests {
     }
 }
 
+
+/// A variable lookup environment for magic $in/$out variables.
+struct BuildImplicitVars<'a> {
+    explicit_ins: &'a [Arc<File>],
+    explicit_outs: &'a [Arc<File>],
+}
+impl<'text> crate::eval::Env for BuildImplicitVars<'text> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+        let string_to_evalstring =
+            |s: String| Some(EvalString::new(vec![EvalPart::Literal(Cow::Owned(s))]));
+        match var {
+            "in" => string_to_evalstring(self.explicit_ins.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join(" ")),
+            "in_newline" => string_to_evalstring(self.explicit_ins.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join("\n")),
+            "out" => string_to_evalstring(self.explicit_outs.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join(" ")),
+            "out_newline" => string_to_evalstring(self.explicit_outs.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join("\n")),
+            _ => None,
+        }
+    }
+}
+
 /// A single build action, generating File outputs from File inputs with a command.
 #[derive(Debug)]
 pub struct Build {
     pub id: BuildId,
 
+    pub scope: Option<Arc<Scope>>,
     pub scope_position: ScopePosition,
 
     pub rule: String,
@@ -185,24 +188,6 @@ pub struct Build {
 
     /// Source location this Build was declared.
     pub location: FileLoc,
-
-    /// User-provided description of the build step.
-    pub desc: Option<String>,
-
-    /// Command line to run.  Absent for phony builds.
-    pub cmdline: Option<String>,
-
-    /// Path to generated `.d` file, if any.
-    pub depfile: Option<String>,
-
-    /// If true, extract "/showIncludes" lines from output.
-    pub parse_showincludes: bool,
-
-    // Struct that contains the path to the rsp file and its contents, if any.
-    pub rspfile: Option<RspFile>,
-
-    /// Pool to execute this build in, if any.
-    pub pool: Option<String>,
 
     pub ins: BuildIns,
 
@@ -297,16 +282,52 @@ impl Build {
     pub fn outs(&self) -> &[Arc<File>] {
         &self.outs.ids
     }
+
+    pub fn get_binding(&self, key: &str) -> Option<String> {
+        let implicit_vars = BuildImplicitVars {
+            explicit_ins: &self.ins.ids[..self.ins.explicit],
+            explicit_outs: &self.outs.ids[..self.outs.explicit],
+        };
+        let scope = self.scope.as_ref().unwrap();
+        let rule = scope.get_rule(&self.rule, self.scope_position).unwrap();
+        Some(match rule.vars.get(key) {
+            Some(val) => val.evaluate(&[&implicit_vars, &self.bindings], scope, self.scope_position),
+            None => self.bindings.get(key)?.evaluate(&[], scope, self.scope_position),
+        })
+    }
+
+    pub fn get_rspfile(&self) -> anyhow::Result<Option<RspFile>> {
+        let rspfile_path = self.get_binding("rspfile");
+        let rspfile_content = self.get_binding("rspfile_content");
+        let rspfile = match (rspfile_path, rspfile_content) {
+            (None, None) => None,
+            (Some(path), Some(content)) => Some(RspFile {
+                path: std::path::PathBuf::from(path),
+                content,
+            }),
+            _ => bail!("rspfile and rspfile_content need to be both specified"),
+        };
+        Ok(rspfile)
+    }
+
+    pub fn get_parse_showincludes(&self) -> anyhow::Result<bool> {
+        Ok(match self.get_binding("deps").as_deref() {
+            None => false,
+            Some("gcc") => false,
+            Some("msvc") => true,
+            Some(other) => bail!("invalid deps attribute {:?}", other),
+        })
+    }
 }
 
-/// The build graph: owns Files/Builds and maps FileIds/BuildIds to them.
+/// The build graph: owns Files/Builds and maps BuildIds to them.
 #[derive(Default)]
 pub struct Graph {
     pub builds: DenseMap<BuildId, Box<Build>>,
     pub files: GraphFiles,
 }
 
-/// Files identified by FileId, as well as mapping string filenames to them.
+/// Files identified by their string names.
 /// Split from Graph for lifetime reasons.
 #[derive(Default)]
 pub struct GraphFiles {

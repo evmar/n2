@@ -19,9 +19,8 @@ use std::{
 pub type VarList<'text> = SmallMap<&'text str, EvalString<&'text str>>;
 
 #[derive(Debug, PartialEq)]
-pub struct Rule<'text> {
-    pub name: &'text str,
-    pub vars: VarList<'text>,
+pub struct Rule {
+    pub vars: SmallMap<String, EvalString<String>>,
     pub scope_position: ScopePosition,
 }
 
@@ -47,21 +46,19 @@ pub struct Pool<'text> {
 }
 
 #[derive(Debug)]
-pub struct VariableAssignment<'text> {
-    pub name: &'text str,
-    pub unevaluated: EvalString<&'text str>,
+pub struct VariableAssignment {
+    pub unevaluated: EvalString<&'static str>,
     pub scope_position: ScopePosition,
     pub evaluated: UnsafeCell<Option<String>>,
     pub is_evaluated: AtomicBool,
     pub lock: Mutex<()>,
 }
 
-unsafe impl Sync for VariableAssignment<'_> {}
+unsafe impl Sync for VariableAssignment {}
 
-impl<'text> VariableAssignment<'text> {
-    fn new(name: &'text str, unevaluated: EvalString<&'text str>) -> Self {
+impl VariableAssignment {
+    fn new(unevaluated: EvalString<&'static str>) -> Self {
         Self {
-            name,
             unevaluated,
             scope_position: ScopePosition(0),
             evaluated: UnsafeCell::new(None),
@@ -109,19 +106,19 @@ pub struct IncludeOrSubninja<'text> {
 #[derive(Debug)]
 pub enum Statement<'text> {
     EmptyStatement,
-    Rule(Rule<'text>),
+    Rule((String, Rule)),
     Build(Box<Build>),
     Default(DefaultStmt<'text>),
     Include(IncludeOrSubninja<'text>),
     Subninja(IncludeOrSubninja<'text>),
     Pool(Pool<'text>),
-    VariableAssignment(VariableAssignment<'text>),
+    VariableAssignment((String, VariableAssignment)),
 }
 
 #[derive(Default, Debug)]
 pub struct Clump<'text> {
-    pub assignments: Vec<VariableAssignment<'text>>,
-    pub rules: Vec<Rule<'text>>,
+    pub assignments: Vec<(String, VariableAssignment)>,
+    pub rules: Vec<(String, Rule)>,
     pub pools: Vec<Pool<'text>>,
     pub defaults: Vec<DefaultStmt<'text>>,
     pub builds: Vec<Box<Build>>,
@@ -186,7 +183,7 @@ impl<'text> Parser<'text> {
             match stmt {
                 Statement::EmptyStatement => {},
                 Statement::Rule(mut r) => {
-                    r.scope_position = position;
+                    r.1.scope_position = position;
                     position.0 += 1;
                     clump.rules.push(r);
                 },
@@ -218,7 +215,7 @@ impl<'text> Parser<'text> {
                     clump.pools.push(p);
                 },
                 Statement::VariableAssignment(mut v) => {
-                    v.scope_position = position;
+                    v.1.scope_position = position;
                     position.0 += 1;
                     clump.assignments.push(v);
                 },
@@ -273,8 +270,12 @@ impl<'text> Parser<'text> {
                         }
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
-                            let result = VariableAssignment::new(ident, self.read_vardef()?);
-                            return Ok(Some(Statement::VariableAssignment(result)));
+                            let x = self.read_vardef()?;
+                            let x = unsafe {
+                                std::mem::transmute::<EvalString<&'text str>, EvalString<&'static str>>(x)
+                            };
+                            let result = VariableAssignment::new(x);
+                            return Ok(Some(Statement::VariableAssignment((ident.to_owned(), result))));
                         }
                     }
                 }
@@ -319,7 +320,7 @@ impl<'text> Parser<'text> {
         Ok(vars)
     }
 
-    fn read_rule(&mut self) -> ParseResult<Rule<'text>> {
+    fn read_rule(&mut self) -> ParseResult<(String, Rule)> {
         let name = self.read_ident()?;
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
@@ -339,11 +340,10 @@ impl<'text> Parser<'text> {
                     | "msvc_deps_prefix"
             )
         })?;
-        Ok(Rule {
-            name,
-            vars,
+        Ok((name.to_owned(), Rule {
+            vars: vars.to_owned(),
             scope_position: ScopePosition(0),
-        })
+        }))
     }
 
     fn read_pool(&mut self) -> ParseResult<Pool<'text>> {
@@ -444,7 +444,6 @@ impl<'text> Parser<'text> {
             self.scanner.expect('@')?;
             self.read_owned_unevaluated_paths_to(&mut ins)?;
         }
-        let validation_ins = ins.len() - order_only_ins - implicit_ins - explicit_ins;
 
         self.scanner.skip('\r');
         self.scanner.expect('\n')?;
@@ -453,18 +452,13 @@ impl<'text> Parser<'text> {
         Ok(Build {
             id: BuildId::from(0),
             rule: rule.to_owned(),
+            scope: None,
             scope_position: ScopePosition(0),
             bindings: vars.to_owned(),
             location: FileLoc {
                 filename: self.filename.clone(),
                 line,
             },
-            desc: None,
-            cmdline: None,
-            depfile: None,
-            parse_showincludes: false,
-            rspfile: None,
-            pool: None,
             ins: BuildIns {
                 ids: Vec::new(),
                 unevaluated: ins,
@@ -757,10 +751,10 @@ mod tests {
     fn parse_dot_in_eval() {
         let mut buf = test_case_buffer("x = $y.z\n");
         let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
-        let Ok(Some(Statement::VariableAssignment(x))) = parser.read() else {
+        let Ok(Some(Statement::VariableAssignment((name, x)))) = parser.read() else {
             panic!("Fail");
         };
-        assert_eq!(x.name, "x");
+        assert_eq!(name, "x");
         assert_eq!(
             x.unevaluated,
             EvalString::new(vec![EvalPart::VarRef("y"), EvalPart::Literal(".z"),])
@@ -771,14 +765,14 @@ mod tests {
     fn parse_dot_in_rule() {
         let mut buf = test_case_buffer("rule x.y\n  command = x\n");
         let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
-        let Ok(Some(Statement::Rule(stmt))) = parser.read() else {
+        let Ok(Some(Statement::Rule((name, stmt)))) = parser.read() else {
             panic!("Fail");
         };
-        assert_eq!(stmt.name, "x.y");
+        assert_eq!(name, "x.y");
         assert_eq!(stmt.vars.len(), 1);
         assert_eq!(
             stmt.vars.get("command"),
-            Some(&EvalString::new(vec![EvalPart::Literal("x"),]))
+            Some(&EvalString::new(vec![EvalPart::Literal("x".to_owned()),]))
         );
     }
 
