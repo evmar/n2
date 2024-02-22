@@ -1,22 +1,21 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::canon_path, db, densemap::Index, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, stat, BuildId, FileId, Graph, RspFile}, parse::{self, Clump, ClumpOrInclude, DefaultStmt, IncludeOrSubninja, Rule, Statement, VariableAssignment}, scanner::{self, ParseResult}, smallmap::SmallMap, trace
+    canon::canon_path, db, eval::{self, EvalPart, EvalString}, file_pool::FilePool, graph::{self, BuildId, Graph, RspFile}, parse::{self, Clump, ClumpOrInclude, Rule, VariableAssignment}, scanner::ParseResult, smallmap::SmallMap, trace
 };
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::{
-    borrow::Cow, default, path::Path, sync::{atomic::AtomicUsize, mpsc::TryRecvError}, time::Instant
+    borrow::Cow, path::Path, time::Instant
 };
 use std::{
-    cell::UnsafeCell,
     cmp::Ordering,
-    collections::{hash_map::Entry, HashMap},
-    sync::{Arc, Mutex},
+    collections::hash_map::Entry,
+    sync::Arc,
     thread::available_parallelism,
 };
-use std::{path::PathBuf, sync::atomic::AtomicU32};
+use std::path::PathBuf;
 
 /// A variable lookup environment for magic $in/$out variables.
 struct BuildImplicitVars<'a> {
@@ -52,7 +51,7 @@ pub struct ParentScopeReference<'text>(pub Arc<Scope<'text>>, pub ScopePosition)
 #[derive(Debug)]
 pub struct Scope<'text> {
     parent: Option<ParentScopeReference<'text>>,
-    rules: HashMap<&'text str, Rule<'text>>,
+    rules: FxHashMap<&'text str, Rule<'text>>,
     variables: FxHashMap<&'text str, Vec<VariableAssignment<'text>>>,
     next_free_position: ScopePosition,
 }
@@ -61,7 +60,7 @@ impl<'text> Scope<'text> {
     pub fn new(parent: Option<ParentScopeReference<'text>>) -> Self {
         Self {
             parent,
-            rules: HashMap::new(),
+            rules: FxHashMap::default(),
             variables: FxHashMap::default(),
             next_free_position: ScopePosition(0),
         }
@@ -293,13 +292,14 @@ where
     let mut subninja_results = parse_results.par_iter()
         .flat_map(|x| x.subninjas.par_iter().zip(rayon::iter::repeatn(x.base_position, x.subninjas.len())))
         .map(|(sn, base_position)| -> anyhow::Result<Vec<Clump>> {
-            let file = canon_path(sn.file.evaluate(&[], &scope, sn.scope_position.add(base_position)));
+            let position = sn.scope_position.add(base_position);
+            let file = canon_path(sn.file.evaluate(&[], &scope, position));
             Ok(subninja(
                 num_threads,
                 files,
                 file_pool,
                 file,
-                Some(ParentScopeReference(scope.clone(), sn.scope_position)),
+                Some(ParentScopeReference(scope.clone(), position)),
                 executor,
             )?.clumps)
         })
@@ -322,7 +322,12 @@ where
         None
     };
 
-    //std::mem::forget(scope);
+    // Deallocating the scope can take some time (~200ms on android's files).
+    // We want to do that in the background, but rayon::spawn requires static
+    // lifetimes. We know that dropping doesn't attempt to dereference any
+    // pointers to the text, so unsafely cast the scope to the static lifetime.
+    let scope = unsafe { std::mem::transmute::<Arc<Scope<'text>>, Arc<Scope<'static>>>(scope)};
+    rayon::spawn(move || drop(scope));
 
     Ok(SubninjaResults {
         clumps: parse_results,
