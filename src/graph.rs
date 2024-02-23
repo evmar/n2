@@ -71,7 +71,6 @@ pub struct BuildIns {
     /// memory efficient than three separate Vecs, but it is kept internal to
     /// Build and only exposed via methods on Build.
     pub ids: Vec<Arc<File>>,
-    pub unevaluated: Vec<EvalString<&'static str>>,
     pub explicit: usize,
     pub implicit: usize,
     pub order_only: usize,
@@ -84,8 +83,8 @@ pub struct BuildIns {
 pub struct BuildOuts {
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
     pub ids: Vec<Arc<File>>,
-    pub unevaluated: Vec<EvalString<&'static str>>,
     pub explicit: usize,
+    pub implicit: usize,
 }
 
 impl BuildOuts {
@@ -109,6 +108,10 @@ impl BuildOuts {
         }
         self.ids = ids;
     }
+
+    pub fn num_outs(&self) -> usize {
+        self.explicit + self.implicit
+    }
 }
 
 #[cfg(test)]
@@ -129,8 +132,8 @@ mod tests {
         let file2 = Arc::new(File::default());
         let mut outs = BuildOuts {
             ids: vec![file1.clone(), file1.clone(), file2.clone()],
-            unevaluated: Vec::new(),
             explicit: 2,
+            implicit: 0,
         };
         outs.remove_duplicates();
         assert_file_arc_vecs_equal(outs.ids, vec![file1, file2]);
@@ -143,8 +146,8 @@ mod tests {
         let file2 = Arc::new(File::default());
         let mut outs = BuildOuts {
             ids: vec![file1.clone(), file2.clone(), file1.clone()],
-            unevaluated: Vec::new(),
             explicit: 2,
+            implicit: 0,
         };
         outs.remove_duplicates();
         assert_file_arc_vecs_equal(outs.ids, vec![file1, file2]);
@@ -179,6 +182,7 @@ pub struct Build {
 
     pub scope: Option<Arc<Scope>>,
     pub scope_position: ScopePosition,
+    pub unevaluated_outs_and_ins: Vec<EvalString<&'static str>>,
 
     pub rule: String,
 

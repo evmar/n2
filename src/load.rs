@@ -105,16 +105,15 @@ fn add_build<'text>(
     base_position: ScopePosition,
 ) -> anyhow::Result<()> {
     b.scope_position.0 += base_position.0;
-    b.ins.ids = b.ins.unevaluated.iter()
+    b.outs.ids = b.unevaluated_outs_and_ins[..b.outs.num_outs()].iter()
         .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
-    b.outs.ids = b.outs.unevaluated.iter()
+    b.ins.ids = b.unevaluated_outs_and_ins[b.outs.num_outs()..].iter()
         .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
     // The unevaluated values actually have a lifetime of 'text, not 'static,
     // so clear them so they don't accidentally get used later.
-    b.ins.unevaluated.clear();
-    b.outs.unevaluated.clear();
+    b.unevaluated_outs_and_ins.clear();
     b.scope = Some(scope);
 
     Ok(())
