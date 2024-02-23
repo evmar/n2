@@ -105,7 +105,6 @@ pub struct IncludeOrSubninja<'text> {
 
 #[derive(Debug)]
 pub enum Statement<'text> {
-    EmptyStatement,
     Rule((String, Rule)),
     Build(Box<Build>),
     Default(DefaultStmt<'text>),
@@ -181,7 +180,6 @@ impl<'text> Parser<'text> {
         let mut position = ScopePosition(0);
         while let Some(stmt) = self.read()? {
             match stmt {
-                Statement::EmptyStatement => {},
                 Statement::Rule(mut r) => {
                     r.1.scope_position = position;
                     position.0 += 1;

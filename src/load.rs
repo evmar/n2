@@ -160,7 +160,6 @@ fn subninja<'thread, 'text>(
     file_pool: &'text FilePool,
     path: String,
     parent_scope: Option<ParentScopeReference>,
-    executor: &rayon::Scope<'thread>,
 ) -> anyhow::Result<SubninjaResults<'text>>
 where
     'text: 'thread,
@@ -187,7 +186,6 @@ where
             &mut scope,
             // to account for the phony rule
             if top_level_scope { ScopePosition(1) } else { ScopePosition(0) },
-            executor,
         )
     })?;
 
@@ -232,7 +230,6 @@ where
                 file_pool,
                 file,
                 Some(ParentScopeReference(scope.clone(), position)),
-                executor,
             )?.clumps)
         })
         .collect::<anyhow::Result<Vec<Vec<Clump<'text>>>>>()?;
@@ -267,7 +264,6 @@ fn include<'thread, 'text>(
     path: String,
     scope: &mut Scope,
     clump_base_position: ScopePosition,
-    executor: &rayon::Scope<'thread>,
 ) -> anyhow::Result<Vec<parse::Clump<'text>>>
 where
     'text: 'thread,
@@ -280,7 +276,6 @@ where
         file_pool.read_file(&path)?,
         scope,
         clump_base_position,
-        executor,
     )
 }
 
@@ -303,7 +298,6 @@ fn parse<'thread, 'text>(
     bytes: &'text [u8],
     scope: &mut Scope,
     mut clump_base_position: ScopePosition,
-    executor: &rayon::Scope<'thread>,
 ) -> anyhow::Result<Vec<parse::Clump<'text>>>
 where
     'text: 'thread,
@@ -384,7 +378,7 @@ where
             ClumpOrInclude::Include(i) => {
                 trace::scope("include", || -> anyhow::Result<()> {
                     let evaluated = canon_path(i.evaluate(&[], &scope, clump_base_position));
-                    let mut new_results = include(filename, num_threads, file_pool, evaluated, scope, clump_base_position, executor)?;
+                    let mut new_results = include(filename, num_threads, file_pool, evaluated, scope, clump_base_position)?;
                     clump_base_position.0 += new_results.iter().map(|c| c.used_scope_positions).sum::<usize>();
                     // Things will be out of order here, but we don't care about
                     // order for builds, defaults, subninjas, or pools, as long
@@ -420,14 +414,13 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
         .num_threads(num_threads)
         .build()?;
     let (defaults, builddir, pools, builds) = trace::scope("loader.read_file", || -> anyhow::Result<_> {
-        pool.scope(|executor: &rayon::Scope| {
+        pool.scope(|_| {
             let mut results = subninja(
                 num_threads,
                 &files,
                 &file_pool,
                 build_filename,
                 None,
-                executor,
             )?;
 
             let mut pools = SmallMap::default();
