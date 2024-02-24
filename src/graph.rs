@@ -335,13 +335,13 @@ pub struct Graph {
 /// Split from Graph for lifetime reasons.
 #[derive(Default)]
 pub struct GraphFiles {
-    by_name: dashmap::DashMap<Arc<String>, Arc<File>>,
+    by_name: dashmap::DashMap<Arc<String>, Arc<File>, BuildHasherDefault<FxHasher>>,
 }
 
 impl Graph {
     pub fn from_uninitialized_builds_and_files(
         builds: Vec<Box<Build>>,
-        files: dashmap::DashMap<Arc<String>, Arc<File>>,
+        files: dashmap::DashMap<Arc<String>, Arc<File>, BuildHasherDefault<FxHasher>>,
     ) -> anyhow::Result<Self> {
         let result = Graph {
             builds: DenseMap::from_vec(builds),

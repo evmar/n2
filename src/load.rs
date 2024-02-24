@@ -5,9 +5,9 @@ use crate::{
 };
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHasher};
 use std::{
-    path::Path, time::Instant
+    hash::BuildHasherDefault, path::Path, time::Instant
 };
 use std::{
     cmp::Ordering,
@@ -120,12 +120,12 @@ fn add_build<'text>(
 }
 
 struct Files {
-    by_name: dashmap::DashMap<Arc<String>, Arc<graph::File>>,
+    by_name: dashmap::DashMap<Arc<String>, Arc<graph::File>, BuildHasherDefault<FxHasher>>,
 }
 impl Files {
     pub fn new() -> Self {
         Self {
-            by_name: dashmap::DashMap::new(),
+            by_name: dashmap::DashMap::with_hasher(BuildHasherDefault::default()),
         }
     }
 
@@ -142,7 +142,7 @@ impl Files {
         }
     }
 
-    pub fn into_maps(self) -> dashmap::DashMap<Arc<String>, Arc<graph::File>> {
+    pub fn into_maps(self) -> dashmap::DashMap<Arc<String>, Arc<graph::File>, BuildHasherDefault<FxHasher>> {
         self.by_name
     }
 }
