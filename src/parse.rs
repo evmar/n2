@@ -49,7 +49,7 @@ pub struct Pool<'text> {
 pub struct VariableAssignment {
     pub unevaluated: EvalString<&'static str>,
     pub scope_position: ScopePosition,
-    pub evaluated: UnsafeCell<Option<String>>,
+    pub evaluated: UnsafeCell<String>,
     pub is_evaluated: AtomicBool,
     pub lock: Mutex<()>,
 }
@@ -61,7 +61,7 @@ impl VariableAssignment {
         Self {
             unevaluated,
             scope_position: ScopePosition(0),
-            evaluated: UnsafeCell::new(None),
+            evaluated: UnsafeCell::new(String::new()),
             is_evaluated: AtomicBool::new(false),
             lock: Mutex::new(()),
         }
@@ -70,18 +70,18 @@ impl VariableAssignment {
     pub fn evaluate(&self, result: &mut String, scope: &Scope) {
         unsafe {
             if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
-                result.push_str((*self.evaluated.get()).as_ref().unwrap());
+                result.push_str(&(*self.evaluated.get()));
                 return;
             }
             let guard = self.lock.lock().unwrap();
             if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
-                result.push_str((*self.evaluated.get()).as_ref().unwrap());
+                result.push_str(&(*self.evaluated.get()));
                 return;
             }
 
             let cache = self.unevaluated.evaluate(&[], scope, self.scope_position);
             result.push_str(&cache);
-            *self.evaluated.get() = Some(cache);
+            *self.evaluated.get() = cache;
             self.is_evaluated
                 .store(true, std::sync::atomic::Ordering::Relaxed);
 

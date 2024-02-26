@@ -82,8 +82,10 @@ impl Scope {
                         // before it. So return Greater instead of Equal.
                         Ordering::Greater
                     }
-                })
-                .unwrap_err();
+                });
+            // SAFETY: We never return Ordering::Equal above, so this will
+            // always be an error
+            let i = unsafe { i.unwrap_err_unchecked() };
             let i = std::cmp::min(i, variables.len() - 1);
             if variables[i].scope_position.0 < position.0 {
                 variables[i].evaluate(result, &self);
