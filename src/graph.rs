@@ -196,28 +196,33 @@ pub struct Build {
     pub ins: BuildIns,
 
     /// Additional inputs discovered from a previous build.
-    // TODO: Make private again
-    pub discovered_ins: Vec<Arc<File>>,
+    discovered_ins: Vec<Arc<File>>,
 
     /// Output files.
     pub outs: BuildOuts,
 }
 impl Build {
-    // pub fn new(id: BuildId, loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
-    //     Build {
-    //         id,
-    //         location: loc,
-    //         desc: None,
-    //         cmdline: None,
-    //         depfile: None,
-    //         parse_showincludes: false,
-    //         rspfile: None,
-    //         pool: None,
-    //         ins,
-    //         discovered_ins: Vec::new(),
-    //         outs,
-    //     }
-    // }
+    pub fn new(
+        rule: String,
+        bindings: SmallMap<String, EvalString<String>>,
+        location: FileLoc,
+        ins: BuildIns,
+        outs: BuildOuts,
+        unevaluated_outs_and_ins: Vec<EvalString<&'static str>>,
+    ) -> Self {
+        Build {
+            id: BuildId::from(0),
+            rule,
+            scope: None,
+            scope_position: ScopePosition(0),
+            bindings,
+            location,
+            ins: ins,
+            discovered_ins: Vec::new(),
+            outs: outs,
+            unevaluated_outs_and_ins,
+        }
+    }
 
     /// Input paths that appear in `$in`.
     pub fn explicit_ins(&self) -> &[Arc<File>] {
@@ -366,14 +371,12 @@ impl Graph {
                         build.location, f.name,
                     );
                 }
-                Some(prev) => {
+                Some(_) => {
                     let location = build.location.clone();
                     anyhow::bail!(
-                        "{}: {:?} is already an output at ", // {}
+                        "{}: {:?} is already an output of another build",
                         location,
                         f.name,
-                        // TODO
-                        //self.builds[prev].location
                     );
                 }
                 None => *input = Some(new_id),
@@ -401,7 +404,6 @@ impl GraphFiles {
     /// usages of this function have an owned string easily accessible anyways.
     pub fn id_from_canonical(&mut self, file: String) -> Arc<File> {
         let file = Arc::new(file);
-        // TODO: so many string copies :<
         match self.by_name.entry(file) {
             dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(v) => {

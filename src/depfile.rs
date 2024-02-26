@@ -85,13 +85,15 @@ pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<SmallMap<&'a str, Vec
 
 #[cfg(test)]
 mod tests {
+    use crate::scanner::format_parse_error;
+
     use super::*;
     use std::path::Path;
 
     fn try_parse(buf: &mut Vec<u8>) -> Result<SmallMap<&str, Vec<&str>>, String> {
         buf.push(0);
-        let mut scanner = Scanner::new(buf);
-        parse(&mut scanner).map_err(|err| scanner.format_parse_error(Path::new("test"), err))
+        let mut scanner = Scanner::new(buf, 0);
+        parse(&mut scanner).map_err(|err| format_parse_error(0, buf, Path::new("test"), err))
     }
 
     fn must_parse(buf: &mut Vec<u8>) -> SmallMap<&str, Vec<&str>> {

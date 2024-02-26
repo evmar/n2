@@ -6,11 +6,11 @@
 //! text, marked with the lifetime `'text`.
 
 use crate::{
-    eval::{EvalPart, EvalString}, graph::{self, Build, BuildId, BuildIns, BuildOuts, FileLoc}, load::{Scope, ScopePosition}, scanner::{ParseError, ParseResult, Scanner}, smallmap::SmallMap
+    eval::{EvalPart, EvalString}, graph::{self, Build, BuildIns, BuildOuts, FileLoc}, load::{Scope, ScopePosition}, scanner::{ParseResult, Scanner}, smallmap::SmallMap
 };
 use std::{
     cell::UnsafeCell,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
@@ -153,17 +153,13 @@ pub struct Parser<'text> {
 }
 
 impl<'text> Parser<'text> {
-    pub fn new(buf: &'text [u8], filename: Arc<PathBuf>) -> Parser<'text> {
+    pub fn new(buf: &'text [u8], filename: Arc<PathBuf>, chunk_index: usize) -> Parser<'text> {
         Parser {
             filename,
-            scanner: Scanner::new(buf),
+            scanner: Scanner::new(buf, chunk_index),
             buf_len: buf.len(),
             eval_buf: Vec::with_capacity(16),
         }
-    }
-
-    pub fn format_parse_error(&self, filename: &Path, err: ParseError) -> String {
-        self.scanner.format_parse_error(filename, err)
     }
 
     pub fn read_all(&mut self) -> ParseResult<Vec<Statement<'text>>> {
@@ -439,30 +435,26 @@ impl<'text> Parser<'text> {
             std::mem::transmute::<Vec<EvalString<&'text str>>, Vec<EvalString<&'static str>>>(outs_and_ins)
         };
 
-        Ok(Build {
-            id: BuildId::from(0),
-            rule: rule.to_owned(),
-            scope: None,
-            scope_position: ScopePosition(0),
-            bindings: vars.to_owned(),
-            location: FileLoc {
+        Ok(Build::new(
+            rule.to_owned(),
+            vars.to_owned(),
+            FileLoc {
                 filename: self.filename.clone(),
                 line,
             },
-            ins: BuildIns {
+            BuildIns {
                 ids: Vec::new(),
                 explicit: explicit_ins,
                 implicit: implicit_ins,
                 order_only: order_only_ins,
             },
-            discovered_ins: Vec::new(),
-            outs: BuildOuts {
+            BuildOuts {
                 ids: Vec::new(),
                 explicit: explicit_outs,
                 implicit: implicit_outs,
             },
-            unevaluated_outs_and_ins: outs_and_ins,
-        })
+            outs_and_ins
+        ))
     }
 
     fn read_default(&mut self) -> ParseResult<DefaultStmt<'text>> {
@@ -717,7 +709,7 @@ mod tests {
     fn parse_defaults() {
         test_for_line_endings(&["var = 3", "default a b$var c", ""], |test_case| {
             let mut buf = test_case_buffer(test_case);
-            let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
+            let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")), 0);
             match parser.read().unwrap().unwrap() {
                 Statement::VariableAssignment(_) => {}
                 stmt => panic!("expected variable assignment, got {:?}", stmt),
@@ -740,7 +732,7 @@ mod tests {
     #[test]
     fn parse_dot_in_eval() {
         let mut buf = test_case_buffer("x = $y.z\n");
-        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
+        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")), 0);
         let Ok(Some(Statement::VariableAssignment((name, x)))) = parser.read() else {
             panic!("Fail");
         };
@@ -754,7 +746,7 @@ mod tests {
     #[test]
     fn parse_dot_in_rule() {
         let mut buf = test_case_buffer("rule x.y\n  command = x\n");
-        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
+        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")), 0);
         let Ok(Some(Statement::Rule((name, stmt)))) = parser.read() else {
             panic!("Fail");
         };
@@ -769,7 +761,7 @@ mod tests {
     #[test]
     fn parse_trailing_newline() {
         let mut buf = test_case_buffer("build$\n foo$\n : $\n  touch $\n\n");
-        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")));
+        let mut parser = Parser::new(&mut buf, Arc::new(PathBuf::from("build.ninja")), 0);
         let stmt = parser.read().unwrap().unwrap();
         let Statement::Build(stmt) = stmt else {
             panic!("Wasn't a build");

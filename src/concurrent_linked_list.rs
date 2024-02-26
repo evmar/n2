@@ -100,7 +100,7 @@ impl<T: Debug> Debug for ConcurrentLinkedList<T> {
 
 impl<T> Drop for ConcurrentLinkedList<T> {
     fn drop(&mut self) {
-        let mut cur = self.head.load(Ordering::Relaxed);
+        let mut cur = self.head.swap(null_mut(), Ordering::Relaxed);
         while !cur.is_null() {
             unsafe {
                 // Re-box it so that box will call Drop and deallocate the memory

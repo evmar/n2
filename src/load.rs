@@ -1,7 +1,7 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::canon_path, db, file_pool::FilePool, graph::{self, BuildId, Graph}, parse::{self, Clump, ClumpOrInclude, Rule, VariableAssignment}, scanner::ParseResult, smallmap::SmallMap, trace
+    canon::canon_path, db, file_pool::FilePool, graph::{self, BuildId, Graph}, parse::{self, Clump, ClumpOrInclude, Rule, VariableAssignment}, scanner::{format_parse_error, ParseResult}, smallmap::SmallMap, trace
 };
 use anyhow::{anyhow, bail};
 use rayon::prelude::*;
@@ -308,15 +308,17 @@ where
     let chunks = parse::split_manifest_into_chunks(bytes, num_threads);
 
     let statements: ParseResult<Vec<Vec<ClumpOrInclude>>> = chunks
-        .into_par_iter()
-        .map(|chunk| {
-            let mut parser = parse::Parser::new(chunk, filename.clone());
+        .par_iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            let mut parser = parse::Parser::new(chunk, filename.clone(), i);
             parser.read_clumps()
         }).collect();
 
     let Ok(statements) = statements else {
-        // TODO: Call format_parse_error
-        bail!(statements.unwrap_err().msg);
+        let err = statements.unwrap_err();
+        let ofs = chunks[..err.chunk_index].iter().map(|x| x.len()).sum();
+        bail!(format_parse_error(ofs, chunks[err.chunk_index], filename, err));
     };
 
     let start = Instant::now();
