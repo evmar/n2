@@ -107,15 +107,17 @@ fn add_build<'text>(
     base_position: ScopePosition,
 ) -> anyhow::Result<()> {
     b.scope_position.0 += base_position.0;
-    b.outs.ids = b.unevaluated_outs_and_ins[..b.outs.num_outs()].iter()
+    let num_outs = b.outs.num_outs();
+    b.outs.ids = b.unevaluated_outs_and_ins[..num_outs].iter()
         .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
-    b.ins.ids = b.unevaluated_outs_and_ins[b.outs.num_outs()..].iter()
+    b.ins.ids = b.unevaluated_outs_and_ins[num_outs..].iter()
         .map(|x| files.id_from_canonical(canon_path(x.evaluate(&[&b.bindings], &scope, b.scope_position))))
         .collect();
     // The unevaluated values actually have a lifetime of 'text, not 'static,
     // so clear them so they don't accidentally get used later.
     b.unevaluated_outs_and_ins.clear();
+    b.unevaluated_outs_and_ins.shrink_to_fit();
     b.scope = Some(scope);
 
     Ok(())
@@ -439,19 +441,26 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
                 }
                 Ok(())
             })?;
-            trace::scope("initialize builds", || {
-                let mut builds = trace::scope("allocate and concat builds", || {
-                    let mut builds = Vec::with_capacity(num_builds);
-                    for clump in &mut results.clumps {
-                        builds.append(&mut clump.builds);
-                    }
-                    builds
-                });
+            let mut builds = trace::scope("allocate and concat builds", || {
+                let mut builds = Vec::with_capacity(num_builds);
+                for clump in &mut results.clumps {
+                    builds.append(&mut clump.builds);
+                }
+                builds
+            });
+            let builddir = results.builddir.take();
+            drop(results);
+            // Turns out munmap is rather slow, unmapping the android ninja
+            // files takes ~150ms. Do this in parallel with initialize_build.
+            rayon::spawn(move || {
+                drop(file_pool);
+            });
+            trace::scope("initialize builds", move || {
                 builds.par_iter_mut().enumerate().try_for_each(|(id, build)| {
                     build.id = BuildId::from(id);
                     graph::Graph::initialize_build(build)
                 })?;
-                Ok((defaults, results.builddir, pools, builds))
+                Ok((defaults, builddir, pools, builds))
             })
         })
     })?;

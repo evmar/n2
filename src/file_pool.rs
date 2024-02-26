@@ -69,6 +69,7 @@ impl FilePool {
 // but that pointer isn't used at all aside from the drop implementation, so
 // we won't have data races.
 unsafe impl Sync for FilePool {}
+unsafe impl Send for FilePool {}
 
 impl Drop for FilePool {
     fn drop(&mut self) {
