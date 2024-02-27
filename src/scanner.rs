@@ -34,25 +34,28 @@ impl<'a> Scanner<'a> {
         unsafe { *self.buf.get_unchecked(self.ofs) as char }
     }
     pub fn peek_newline(&self) -> bool {
-        if self.peek() == '\n' {
+        let peek = self.peek();
+        if peek == '\n' {
             return true;
         }
         if self.ofs >= self.buf.len() - 1 {
             return false;
         }
         let peek2 = unsafe { *self.buf.get_unchecked(self.ofs + 1) as char };
-        self.peek() == '\r' && peek2 == '\n'
+        peek == '\r' && peek2 == '\n'
     }
     pub fn next(&mut self) {
         if self.peek() == '\n' {
             self.line += 1;
         }
+        #[cfg(debug_assertions)]
         if self.ofs == self.buf.len() {
             panic!("scanned past end")
         }
         self.ofs += 1;
     }
     pub fn back(&mut self) {
+        #[cfg(debug_assertions)]
         if self.ofs == 0 {
             panic!("back at start")
         }

@@ -4,7 +4,6 @@
 use crate::load::Scope;
 use crate::load::ScopePosition;
 use crate::parse::parse_eval;
-use crate::parse::Parser;
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
 use std::borrow::Cow;
@@ -21,6 +20,21 @@ pub trait Env {
 pub enum EvalPart<T: AsRef<str>> {
     Literal(T),
     VarRef(T),
+}
+
+impl EvalPart<&str> {
+    pub fn into_owned(&self) -> EvalPart<String> {
+        match self {
+            EvalPart::Literal(x) => EvalPart::Literal((*x).to_owned()),
+            EvalPart::VarRef(x) => EvalPart::VarRef((*x).to_owned()),
+        }
+    }
+}
+
+impl<T: Default + AsRef<str>> Default for EvalPart<T> {
+    fn default() -> Self {
+        EvalPart::Literal(T::default())
+    }
 }
 
 /// A parsed but unexpanded variable-reference string, e.g. "cc $in -o $out".

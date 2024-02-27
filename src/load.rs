@@ -10,7 +10,6 @@ use std::{
     hash::BuildHasherDefault, path::Path, time::Instant
 };
 use std::{
-    cmp::Ordering,
     collections::hash_map::Entry,
     sync::Arc,
     thread::available_parallelism,

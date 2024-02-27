@@ -4,7 +4,7 @@ use anyhow::bail;
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
-    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::{EvalPart, EvalString}, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap
+    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::EvalString, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap
 };
 use std::{borrow::Cow, time::SystemTime};
 use std::{collections::HashMap, sync::Arc};

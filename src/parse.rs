@@ -294,8 +294,8 @@ impl<'text> Parser<'text> {
     fn read_scoped_vars(
         &mut self,
         variable_name_validator: fn(var: &str) -> bool,
-    ) -> ParseResult<VarList<'text>> {
-        let mut vars = VarList::default();
+    ) -> ParseResult<SmallMap<String, EvalString<String>>> {
+        let mut vars = SmallMap::default();
         while self.scanner.peek() == ' ' {
             self.scanner.skip_spaces();
             let name = self.read_ident()?;
@@ -304,8 +304,8 @@ impl<'text> Parser<'text> {
                     .parse_error(format!("unexpected variable {:?}", name))?;
             }
             self.skip_spaces();
-            let val = self.read_vardef()?;
-            vars.insert(name, val);
+            let val = self.read_vardef()?.into_owned();
+            vars.insert(name.to_owned(), val);
         }
         Ok(vars)
     }
@@ -331,7 +331,7 @@ impl<'text> Parser<'text> {
             )
         })?;
         Ok((name.to_owned(), Rule {
-            vars: vars.to_owned(),
+            vars,
             scope_position: ScopePosition(0),
         }))
     }
@@ -351,7 +351,7 @@ impl<'text> Parser<'text> {
                 None => {
                     return self
                         .scanner
-                        .parse_error(format!("pool depth must be a literal string"))
+                        .parse_error(format!("pool depth must be a literal string, got: {:?}", val))
                 }
             }
         }
@@ -363,8 +363,7 @@ impl<'text> Parser<'text> {
         v: &mut Vec<EvalString<&'text str>>,
     ) -> ParseResult<()> {
         self.skip_spaces();
-        while self.scanner.peek() != ':'
-            && self.scanner.peek() != '|'
+        while !matches!(self.scanner.peek(), ':' | '|')
             && !self.scanner.peek_newline()
         {
             v.push(self.read_eval(true)?);
@@ -433,7 +432,7 @@ impl<'text> Parser<'text> {
 
         Ok(Build::new(
             rule.to_owned(),
-            vars.to_owned(),
+            vars,
             FileLoc {
                 filename: self.filename.clone(),
                 line,
