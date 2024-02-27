@@ -17,12 +17,15 @@ use std::{
 };
 use std::path::PathBuf;
 
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct ScopePosition(pub usize);
 
 impl ScopePosition {
     pub fn add(&self, other: ScopePosition) -> ScopePosition {
         ScopePosition(self.0 + other.0)
+    }
+    pub fn add_usize(&self, other: usize) -> ScopePosition {
+        ScopePosition(self.0 + other)
     }
 }
 
@@ -70,23 +73,11 @@ impl Scope {
 
     pub fn evaluate(&self, result: &mut String, varname: &str, position: ScopePosition) {
         if let Some(variables) = self.variables.get(varname) {
-            let i = variables
-                .binary_search_by(|x| {
-                    if x.scope_position.0 < position.0 {
-                        Ordering::Less
-                    } else if x.scope_position.0 > position.0 {
-                        Ordering::Greater
-                    } else {
-                        // If we're evaluating a variable assignment, we don't want to
-                        // get the same assignment, but instead, we want the one just
-                        // before it. So return Greater instead of Equal.
-                        Ordering::Greater
-                    }
-                });
-            // SAFETY: We never return Ordering::Equal above, so this will
-            // always be an error
-            let i = unsafe { i.unwrap_err_unchecked() };
-            let i = std::cmp::min(i, variables.len() - 1);
+            let i = variables.binary_search_by_key(&position, |x| x.scope_position);
+            let i = match i {
+                Ok(i) => std::cmp::max(i, 1)-1,
+                Err(i) => std::cmp::min(i, variables.len() - 1),
+            };
             if variables[i].scope_position.0 < position.0 {
                 variables[i].evaluate(result, &self);
                 return;
@@ -384,12 +375,8 @@ where
                 trace::scope("include", || -> anyhow::Result<()> {
                     let evaluated = canon_path(i.evaluate(&[], &scope, clump_base_position));
                     let mut new_results = include(filename, num_threads, file_pool, evaluated, scope, clump_base_position)?;
-                    clump_base_position.0 += new_results.iter().map(|c| c.used_scope_positions).sum::<usize>();
-                    // Things will be out of order here, but we don't care about
-                    // order for builds, defaults, subninjas, or pools, as long
-                    // as their scope_position is correct.
+                    clump_base_position = new_results.last().map(|c| c.base_position.add_usize(c.used_scope_positions)).unwrap_or(clump_base_position);
                     results.append(&mut new_results);
-                    clump_base_position.0 += 1;
                     Ok(())
                 })?;
             },

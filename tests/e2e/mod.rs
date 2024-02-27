@@ -3,6 +3,7 @@
 mod basic;
 mod directories;
 mod discovered;
+mod include_and_subninja;
 mod missing;
 mod regen;
 mod validations;
@@ -99,6 +100,7 @@ impl TestSpace {
             print_output(&out);
             anyhow::bail!("build failed, status {}", out.status);
         }
+        print_output(&out);
         Ok(out)
     }
 
