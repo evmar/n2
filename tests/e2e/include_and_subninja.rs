@@ -43,3 +43,28 @@ a = $a bar
     assert_eq!(space.read("out").unwrap(), b"foo bar\n");
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn subninja_doesnt_affect_variables_in_parent_scope() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write("build.ninja", "
+rule write_file
+    command = echo $contents > $out
+
+a = foo
+subninja subninja.ninja
+build out: write_file
+    contents = $a
+
+")?;
+    space.write("subninja.ninja", "
+a = bar
+build out2: write_file
+    contents = $a
+")?;
+    space.run_expect(&mut n2_command(vec!["out", "out2"]))?;
+    assert_eq!(space.read("out").unwrap(), b"foo\n");
+    assert_eq!(space.read("out2").unwrap(), b"bar\n");
+    Ok(())
+}

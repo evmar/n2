@@ -100,7 +100,6 @@ impl TestSpace {
             print_output(&out);
             anyhow::bail!("build failed, status {}", out.status);
         }
-        print_output(&out);
         Ok(out)
     }
 
