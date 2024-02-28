@@ -79,13 +79,11 @@ impl VariableAssignment {
                 return;
             }
 
-            let cache = self.unevaluated.evaluate(&[], scope, self.scope_position);
-            result.push_str(&cache);
-            *self.evaluated.get() = cache;
-            self.is_evaluated
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.unevaluated.evaluate_inner(&mut *self.evaluated.get(), &[], scope, self.scope_position);
+            self.is_evaluated.store(true, std::sync::atomic::Ordering::Relaxed);
 
             drop(guard);
+            result.push_str(&(*self.evaluated.get()));
         }
     }
 }

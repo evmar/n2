@@ -16,9 +16,9 @@ use std::time::Instant;
 /// Compute the message to display on the console for a given build.
 pub fn build_message(build: &Build) -> String {
     build
-        .get_binding("description")
+        .get_description()
         .filter(|desc| !desc.is_empty())
-        .unwrap_or_else(|| build.get_binding("command").unwrap())
+        .unwrap_or_else(|| build.get_cmdline().unwrap())
 }
 
 /// Trait for build progress notifications.
@@ -80,7 +80,7 @@ impl Progress for DumbConsoleProgress {
 
     fn task_started(&mut self, id: BuildId, build: &Build) {
         if self.verbose {
-            self.log(build.get_binding("command").as_ref().unwrap());
+            self.log(build.get_cmdline().as_ref().unwrap());
         } else {
             self.log(&build_message(build));
         }
@@ -227,7 +227,7 @@ impl FancyState {
 
     fn task_started(&mut self, id: BuildId, build: &Build) {
         if self.verbose {
-            self.log(build.get_binding("command").as_ref().unwrap());
+            self.log(build.get_cmdline().as_ref().unwrap());
         }
         let message = build_message(build);
         self.tasks.push_back(Task {

@@ -211,8 +211,8 @@ impl Runner {
     }
 
     pub fn start(&mut self, id: BuildId, build: &Build) -> anyhow::Result<()> {
-        let cmdline = build.get_binding("command").clone().unwrap();
-        let depfile = build.get_binding("depfile").clone().map(PathBuf::from);
+        let cmdline = build.get_cmdline().clone().unwrap();
+        let depfile = build.get_depfile().clone().map(PathBuf::from);
         let rspfile = build.get_rspfile()?;
         let parse_showincludes = build.get_parse_showincludes()?;
 

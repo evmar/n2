@@ -6,13 +6,12 @@ use crate::load::ScopePosition;
 use crate::parse::parse_eval;
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
-use std::borrow::Cow;
 
 /// An environment providing a mapping of variable name to variable value.
 /// This represents one "frame" of evaluation context, a given EvalString may
 /// need multiple environments in order to be fully expanded.
 pub trait Env {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>>;
+    fn evaluate_var(&self, result: &mut String, var: &str, envs: &[&dyn Env], scope: &Scope, position: ScopePosition);
 }
 
 /// One token within an EvalString, either literal text or a variable reference.
@@ -48,26 +47,14 @@ impl<T: AsRef<str>> EvalString<T> {
         EvalString(inner)
     }
 
-    fn evaluate_inner(
-        &self,
-        result: &mut String,
-        envs: &[&dyn Env],
-        scope: &Scope,
-        position: ScopePosition,
-    ) {
+    pub fn evaluate_inner(&self, result: &mut String, envs: &[&dyn Env], scope: &Scope, position: ScopePosition) {
         for part in self.parse() {
             match part {
                 EvalPart::Literal(s) => result.push_str(s.as_ref()),
                 EvalPart::VarRef(v) => {
-                    let mut found = false;
-                    for (i, env) in envs.iter().enumerate() {
-                        if let Some(v) = env.get_var(v.as_ref()) {
-                            v.evaluate_inner(result, &envs[i + 1..], scope, position);
-                            found = true;
-                            break;
-                        }
-                    }
-                    if !found {
+                    if let Some(env) = envs.first() {
+                        env.evaluate_var(result, v.as_ref(), &envs[1..], scope, position);
+                    } else {
                         scope.evaluate(result, v.as_ref(), position);
                     }
                 }
@@ -106,34 +93,14 @@ impl EvalString<&str> {
     }
 }
 
-impl EvalString<String> {
-    pub fn as_cow(&self) -> EvalString<Cow<str>> {
-        EvalString(Cow::Borrowed(self.0.as_str()))
+impl<K: Borrow<str> + PartialEq, V: AsRef<str>> Env for SmallMap<K, EvalString<V>> {
+    fn evaluate_var(&self, result: &mut String, var: &str, envs: &[&dyn Env], scope: &Scope, position: ScopePosition) {
+        if let Some(v) = self.get(var) {
+            v.evaluate_inner(result, envs, scope, position);
+        } else if let Some(env) = envs.first() {
+            env.evaluate_var(result, var, &envs[1..], scope, position);
+        } else {
+            scope.evaluate(result, var, position);
+        }
     }
 }
-
-impl EvalString<&str> {
-    pub fn as_cow(&self) -> EvalString<Cow<str>> {
-        EvalString(Cow::Borrowed(self.0))
-    }
-}
-
-impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<String>> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-        Some(self.get(var)?.as_cow())
-    }
-}
-
-impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<&str>> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-        Some(self.get(var)?.as_cow())
-    }
-}
-
-// impl Env for SmallMap<&str, String> {
-//     fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-//         Some(EvalString::new(vec![EvalPart::Literal(
-//             std::borrow::Cow::Borrowed(self.get(var)?),
-//         )]))
-//     }
-// }

@@ -141,7 +141,7 @@ impl BuildStates {
         let prev = std::mem::replace(&mut self.states[id], state);
 
         // We skip user-facing counters for phony builds.
-        let skip_ui_count = build.get_binding("command").is_none();
+        let skip_ui_count = build.get_cmdline().is_none();
 
         // println!("{:?} {:?}=>{:?} {:?}", id, prev, state, self.counts);
         if prev == BuildState::Unknown {
@@ -271,7 +271,7 @@ impl BuildStates {
 
     /// Look up a PoolState by name.
     fn get_pool(&mut self, build: &Build) -> Option<&mut PoolState> {
-        let owned_name = build.get_binding("pool");
+        let owned_name = build.get_pool();
         let name = owned_name.as_deref().unwrap_or("");
         for (key, pool) in self.pools.iter_mut() {
             if key == name {
@@ -291,7 +291,7 @@ impl BuildStates {
                 build.location,
                 // Unnamed pool lookups always succeed, this error is about
                 // named pools.
-                build.get_binding("pool").as_ref().unwrap()
+                build.get_pool().as_ref().unwrap()
             )
         })?;
         pool.queued.push_back(id);
@@ -604,7 +604,7 @@ impl<'a> Work<'a> {
     /// Prereq: any dependent input is already generated.
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = &self.graph.builds[id];
-        let phony = build.get_binding("command").is_none();
+        let phony = build.get_cmdline().is_none();
         let file_missing = if phony {
             self.check_build_files_missing_phony(id)?;
             return Ok(false); // Phony builds never need to run anything.

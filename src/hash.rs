@@ -82,7 +82,7 @@ impl Manifest for TerseHash {
 fn build_manifest<M: Manifest>(manifest: &mut M, file_state: &FileState, build: &Build) -> anyhow::Result<()> {
     manifest.write_files("in", file_state, build.dirtying_ins());
     manifest.write_files("discovered", file_state, build.discovered_ins());
-    manifest.write_cmdline(build.get_binding("command").as_deref().unwrap_or(""));
+    manifest.write_cmdline(build.get_cmdline().as_deref().unwrap_or(""));
     if let Some(rspfile) = &build.get_rspfile()? {
         manifest.write_rsp(rspfile);
     }

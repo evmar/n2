@@ -183,6 +183,24 @@ rule echo
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn dollar_in_filename() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+# need a special touch rule that escapes the $ for the shell
+rule touch
+  command = touch '$out'
+build out$$foo: touch
+",
+    )?;
+    space.run_expect(&mut n2_command(vec!["out$foo"]))?;
+    assert!(space.read("out$foo").is_ok());
+    Ok(())
+}
+
 #[test]
 fn explain() -> anyhow::Result<()> {
     let space = TestSpace::new()?;

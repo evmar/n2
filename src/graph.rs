@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHasher};
 use crate::{
     concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::EvalString, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap
 };
-use std::{borrow::Cow, time::SystemTime};
+use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 use std::{
     hash::BuildHasherDefault,
@@ -162,15 +162,25 @@ struct BuildImplicitVars<'a> {
     explicit_outs: &'a [Arc<File>],
 }
 impl<'text> crate::eval::Env for BuildImplicitVars<'text> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
-        let string_to_evalstring =
-            |s: String| Some(EvalString::new(Cow::Owned(s)));
+    fn evaluate_var(&self, result: &mut String, var: &str, envs: &[&dyn crate::eval::Env], scope: &Scope, position: ScopePosition) {
+        let mut common = |files: &[Arc<File>], sep: &'static str| {
+            for (i, file) in files.iter().enumerate() {
+                if i > 0 {
+                    result.push_str(sep);
+                }
+                result.push_str(&file.name);
+            }
+        };
         match var {
-            "in" => string_to_evalstring(self.explicit_ins.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join(" ")),
-            "in_newline" => string_to_evalstring(self.explicit_ins.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join("\n")),
-            "out" => string_to_evalstring(self.explicit_outs.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join(" ")),
-            "out_newline" => string_to_evalstring(self.explicit_outs.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join("\n")),
-            _ => None,
+            "in" => common(self.explicit_ins, " "),
+            "in_newline" => common(self.explicit_ins, "\n"),
+            "out" => common(self.explicit_outs, " "),
+            "out_newline" => common(self.explicit_outs, "\n"),
+            _ => if let Some(env) = envs.first() {
+                env.evaluate_var(result, var, &envs[1..], scope, position);
+            } else {
+                scope.evaluate(result, var, position);
+            },
         }
     }
 }
@@ -292,7 +302,7 @@ impl Build {
         &self.outs.ids
     }
 
-    pub fn get_binding(&self, key: &str) -> Option<String> {
+    fn get_binding(&self, key: &str) -> Option<String> {
         let implicit_vars = BuildImplicitVars {
             explicit_ins: &self.ins.ids[..self.ins.explicit],
             explicit_outs: &self.outs.ids[..self.outs.explicit],
@@ -326,6 +336,22 @@ impl Build {
             Some("msvc") => true,
             Some(other) => bail!("invalid deps attribute {:?}", other),
         })
+    }
+
+    pub fn get_cmdline(&self) -> Option<String> {
+        self.get_binding("command")
+    }
+
+    pub fn get_description(&self) -> Option<String> {
+        self.get_binding("description")
+    }
+
+    pub fn get_depfile(&self) -> Option<String> {
+        self.get_binding("depfile")
+    }
+
+    pub fn get_pool(&self) -> Option<String> {
+        self.get_binding("pool")
     }
 }
 
