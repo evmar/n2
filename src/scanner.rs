@@ -2,9 +2,9 @@
 
 use std::{io::Read, path::Path};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct ParseError {
-    pub msg: String,
+    msg: String,
     ofs: usize,
     pub chunk_index: usize,
 }

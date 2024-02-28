@@ -1,8 +1,8 @@
 use anyhow::bail;
 use core::slice;
 use libc::{
-    c_void, mmap, munmap, sysconf, MAP_ANONYMOUS, MAP_FAILED, MAP_FIXED, MAP_PRIVATE,
-    PROT_READ, PROT_WRITE, _SC_PAGESIZE,
+    c_void, mmap, munmap, sysconf, MAP_ANONYMOUS, MAP_FAILED, MAP_FIXED, MAP_PRIVATE, PROT_READ,
+    PROT_WRITE, _SC_PAGESIZE,
 };
 use std::{
     os::fd::{AsFd, AsRawFd},
@@ -11,7 +11,7 @@ use std::{
     sync::Mutex,
 };
 
-/// FilePool is a datastucture that is intended to hold onto byte buffers and give out immutable
+/// FilePool is a datastructure that is intended to hold onto byte buffers and give out immutable
 /// references to them. But it can also accept new byte buffers while old ones are still lent out.
 /// This requires interior mutability / unsafe code. Appending to a Vec while references to other
 /// elements are held is generally unsafe, because the Vec can reallocate all the prior elements

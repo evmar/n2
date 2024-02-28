@@ -6,7 +6,11 @@
 //! text, marked with the lifetime `'text`.
 
 use crate::{
-    eval::{EvalPart, EvalString}, graph::{self, Build, BuildIns, BuildOuts, FileLoc}, load::{Scope, ScopePosition}, scanner::{ParseResult, Scanner}, smallmap::SmallMap
+    eval::{EvalPart, EvalString},
+    graph::{self, Build, BuildIns, BuildOuts, FileLoc},
+    load::{Scope, ScopePosition},
+    scanner::{ParseResult, Scanner},
+    smallmap::SmallMap,
 };
 use std::{
     cell::UnsafeCell,
@@ -14,11 +18,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
-/// A list of variable bindings, as expressed with syntax like:
-///   key = $val
-pub type VarList<'text> = SmallMap<&'text str, EvalString<&'text str>>;
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Rule {
     pub vars: SmallMap<String, EvalString<String>>,
     pub scope_position: ScopePosition,
@@ -54,6 +54,8 @@ pub struct VariableAssignment {
     pub lock: Mutex<()>,
 }
 
+// SAFETY: Sync is not automatically implemented because of the UnsafeCell,
+// but our usage of the UnsafeCell is guarded byhind a Mutex.
 unsafe impl Sync for VariableAssignment {}
 
 impl VariableAssignment {
@@ -68,23 +70,35 @@ impl VariableAssignment {
     }
 
     pub fn evaluate(&self, result: &mut String, scope: &Scope) {
+        self.pre_evaluate(scope);
         unsafe {
-            if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
-                result.push_str(&(*self.evaluated.get()));
-                return;
-            }
-            let guard = self.lock.lock().unwrap();
-            if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
-                result.push_str(&(*self.evaluated.get()));
-                return;
-            }
-
-            self.unevaluated.evaluate_inner(&mut *self.evaluated.get(), &[], scope, self.scope_position);
-            self.is_evaluated.store(true, std::sync::atomic::Ordering::Relaxed);
-
-            drop(guard);
             result.push_str(&(*self.evaluated.get()));
         }
+    }
+
+    // This is the same as evaluate, but doesn't give any results back.
+    // Used to evalutate all the variables before 'text is over, as unevaluated
+    // should really have a 'text lifetime.
+    pub fn pre_evaluate(&self, scope: &Scope) {
+        if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let guard = self.lock.lock().unwrap();
+        if self.is_evaluated.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+
+        unsafe {
+            self.unevaluated.evaluate_inner(
+                &mut *self.evaluated.get(),
+                &[],
+                scope,
+                self.scope_position,
+            );
+        }
+        self.is_evaluated
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        drop(guard);
     }
 }
 
@@ -112,6 +126,9 @@ pub enum Statement<'text> {
     VariableAssignment((String, VariableAssignment)),
 }
 
+// Grouping the parse results into clumps allows us to do fewer vector
+// concatenations when merging results of different chunks or different files
+// together.
 #[derive(Default, Debug)]
 pub struct Clump<'text> {
     pub assignments: Vec<(String, VariableAssignment)>,
@@ -126,12 +143,12 @@ pub struct Clump<'text> {
 
 impl<'text> Clump<'text> {
     pub fn is_empty(&self) -> bool {
-        self.assignments.is_empty() &&
-            self.rules.is_empty() &&
-            self.pools.is_empty() &&
-            self.defaults.is_empty() &&
-            self.builds.is_empty() &&
-            self.subninjas.is_empty()
+        self.assignments.is_empty()
+            && self.rules.is_empty()
+            && self.pools.is_empty()
+            && self.defaults.is_empty()
+            && self.builds.is_empty()
+            && self.subninjas.is_empty()
     }
 }
 
@@ -156,14 +173,6 @@ impl<'text> Parser<'text> {
         }
     }
 
-    pub fn read_all(&mut self) -> ParseResult<Vec<Statement<'text>>> {
-        let mut result = Vec::new();
-        while let Some(stmt) = self.read()? {
-            result.push(stmt)
-        }
-        Ok(result)
-    }
-
     pub fn read_clumps(&mut self) -> ParseResult<Vec<ClumpOrInclude<'text>>> {
         let mut result = Vec::new();
         let mut clump = Clump::default();
@@ -174,17 +183,17 @@ impl<'text> Parser<'text> {
                     r.1.scope_position = position;
                     position.0 += 1;
                     clump.rules.push(r);
-                },
+                }
                 Statement::Build(mut b) => {
                     b.scope_position = position;
                     position.0 += 1;
                     clump.builds.push(b);
-                },
+                }
                 Statement::Default(mut d) => {
                     d.scope_position = position;
                     position.0 += 1;
                     clump.defaults.push(d);
-                },
+                }
                 Statement::Include(i) => {
                     if !clump.is_empty() {
                         clump.used_scope_positions = position.0;
@@ -193,20 +202,20 @@ impl<'text> Parser<'text> {
                         position = ScopePosition(0);
                     }
                     result.push(ClumpOrInclude::Include(i.file));
-                },
+                }
                 Statement::Subninja(mut s) => {
                     s.scope_position = position;
                     position.0 += 1;
                     clump.subninjas.push(s);
-                },
+                }
                 Statement::Pool(p) => {
                     clump.pools.push(p);
-                },
+                }
                 Statement::VariableAssignment(mut v) => {
                     v.1.scope_position = position;
                     position.0 += 1;
                     clump.assignments.push(v);
-                },
+                }
             }
         }
         if !clump.is_empty() {
@@ -259,11 +268,22 @@ impl<'text> Parser<'text> {
                         "pool" => return Ok(Some(Statement::Pool(self.read_pool()?))),
                         ident => {
                             let x = self.read_vardef()?;
+                            // SAFETY: We need to make sure we call evaluate
+                            // or pre_evaluate on all VariableAssignments before
+                            // the lifetime of 'text is over. After evaluating,
+                            // the VariableAssignments will cache their owned
+                            // Strings.
                             let x = unsafe {
-                                std::mem::transmute::<EvalString<&'text str>, EvalString<&'static str>>(x)
+                                std::mem::transmute::<
+                                    EvalString<&'text str>,
+                                    EvalString<&'static str>,
+                                >(x)
                             };
                             let result = VariableAssignment::new(x);
-                            return Ok(Some(Statement::VariableAssignment((ident.to_owned(), result))));
+                            return Ok(Some(Statement::VariableAssignment((
+                                ident.to_owned(),
+                                result,
+                            ))));
                         }
                     }
                 }
@@ -328,10 +348,13 @@ impl<'text> Parser<'text> {
                     | "msvc_deps_prefix"
             )
         })?;
-        Ok((name.to_owned(), Rule {
-            vars,
-            scope_position: ScopePosition(0),
-        }))
+        Ok((
+            name.to_owned(),
+            Rule {
+                vars,
+                scope_position: ScopePosition(0),
+            },
+        ))
     }
 
     fn read_pool(&mut self) -> ParseResult<Pool<'text>> {
@@ -347,9 +370,10 @@ impl<'text> Parser<'text> {
                     Err(err) => return self.scanner.parse_error(format!("pool depth: {}", err)),
                 },
                 None => {
-                    return self
-                        .scanner
-                        .parse_error(format!("pool depth must be a literal string, got: {:?}", val))
+                    return self.scanner.parse_error(format!(
+                        "pool depth must be a literal string, got: {:?}",
+                        val
+                    ))
                 }
             }
         }
@@ -361,9 +385,7 @@ impl<'text> Parser<'text> {
         v: &mut Vec<EvalString<&'text str>>,
     ) -> ParseResult<()> {
         self.skip_spaces();
-        while !matches!(self.scanner.peek(), ':' | '|')
-            && !self.scanner.peek_newline()
-        {
+        while !matches!(self.scanner.peek(), ':' | '|') && !self.scanner.peek_newline() {
             v.push(self.read_eval(true)?);
             self.skip_spaces();
         }
@@ -409,7 +431,8 @@ impl<'text> Parser<'text> {
                 self.read_unevaluated_paths_to(&mut outs_and_ins)?;
             }
         }
-        let order_only_ins = outs_and_ins.len() - implicit_ins - explicit_ins - implicit_outs - explicit_outs;
+        let order_only_ins =
+            outs_and_ins.len() - implicit_ins - explicit_ins - implicit_outs - explicit_outs;
 
         if self.scanner.peek() == '|' {
             self.scanner.next();
@@ -421,11 +444,13 @@ impl<'text> Parser<'text> {
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars(|_| true)?;
 
-        // We will evaluate the ins/outs into owned strings before 'text is over,
-        // and we don't want to attach the 'text lifetime to Build. So instead,
-        // unsafely cast the lifetime to 'static.
+        // SAFETY: We will evaluate the ins/outs into owned strings before 'text
+        // is over, and we don't want to attach the 'text lifetime to Build. So
+        // instead, unsafely cast the lifetime to 'static.
         let outs_and_ins = unsafe {
-            std::mem::transmute::<Vec<EvalString<&'text str>>, Vec<EvalString<&'static str>>>(outs_and_ins)
+            std::mem::transmute::<Vec<EvalString<&'text str>>, Vec<EvalString<&'static str>>>(
+                outs_and_ins,
+            )
         };
 
         Ok(Build::new(
@@ -446,7 +471,7 @@ impl<'text> Parser<'text> {
                 explicit: explicit_outs,
                 implicit: implicit_outs,
             },
-            outs_and_ins
+            outs_and_ins,
         ))
     }
 
@@ -579,15 +604,13 @@ impl<'text> Parser<'text> {
                 self.scanner.skip_spaces();
             }
             ' ' | '$' | ':' => (),
-            '{' => {
-                loop {
-                    match self.scanner.read() {
-                        '\0' => return self.scanner.parse_error("unexpected EOF"),
-                        '}' => break,
-                        _ => {}
-                    }
+            '{' => loop {
+                match self.scanner.read() {
+                    '\0' => return self.scanner.parse_error("unexpected EOF"),
+                    '}' => break,
+                    _ => {}
                 }
-            }
+            },
             _ => {
                 // '$' followed by some other text.
                 self.scanner.back();
@@ -663,20 +686,28 @@ fn find_start_of_next_manifest_chunk(buf: &[u8], prospective_start: usize) -> us
     }
 }
 
-struct EvalParser<'a> {
+// An iterator over the EvalParts in the given string. Note that the
+// string must be a valid EvalString, or undefined behavior will occur.
+pub struct EvalParser<'a> {
     buf: &'a [u8],
     offset: usize,
 }
 
 impl<'a> EvalParser<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf, offset: 0 }
+    }
+
     fn peek(&self) -> u8 {
         unsafe { *self.buf.get_unchecked(self.offset) }
     }
+
     fn read(&mut self) -> u8 {
         let c = self.peek();
         self.offset += 1;
         c
     }
+
     fn slice(&self, start: usize, end: usize) -> &'a str {
         unsafe { std::str::from_utf8_unchecked(self.buf.get_unchecked(start..end)) }
     }
@@ -691,7 +722,7 @@ impl<'a> Iterator for EvalParser<'a> {
             match self.peek() {
                 b'$' => {
                     if self.offset > start {
-                        return Some(EvalPart::Literal(self.slice(start, self.offset)))
+                        return Some(EvalPart::Literal(self.slice(start, self.offset)));
                     }
                     self.offset += 1;
                     match self.peek() {
@@ -716,10 +747,12 @@ impl<'a> Iterator for EvalParser<'a> {
                         _ => {
                             // '$' followed by some other text.
                             start = self.offset;
-                            while self.offset < self.buf.len() && matches!(self.peek(), b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-') {
+                            while self.offset < self.buf.len()
+                                && matches!(self.peek(), b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-')
+                            {
                                 self.offset += 1;
                             }
-                            return Some(EvalPart::VarRef(self.slice(start, self.offset)))
+                            return Some(EvalPart::VarRef(self.slice(start, self.offset)));
                         }
                     }
                 }
@@ -727,18 +760,9 @@ impl<'a> Iterator for EvalParser<'a> {
             }
         }
         if self.offset > start {
-            return Some(EvalPart::Literal(self.slice(start, self.offset)))
+            return Some(EvalPart::Literal(self.slice(start, self.offset)));
         }
         None
-    }
-}
-
-// Returns an iterator over teh EvalParts in the given string. Note that the
-// string must be a valid EvalString, or undefined behavior will occur.
-pub fn parse_eval(buf: &str) -> impl Iterator<Item = EvalPart<&str>> {
-    return EvalParser {
-        buf: buf.as_bytes(),
-        offset: 0,
     }
 }
 
@@ -774,7 +798,10 @@ mod tests {
                 stmt => panic!("expected default, got {:?}", stmt),
             };
             assert_eq!(
-                default.iter().map(|x| x.parse().collect::<Vec<_>>()).collect::<Vec<_>>(),
+                default
+                    .iter()
+                    .map(|x| x.parse().collect::<Vec<_>>())
+                    .collect::<Vec<_>>(),
                 vec![
                     vec![EvalPart::Literal("a")],
                     vec![EvalPart::Literal("b"), EvalPart::VarRef("var")],

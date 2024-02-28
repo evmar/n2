@@ -79,7 +79,11 @@ impl Manifest for TerseHash {
     }
 }
 
-fn build_manifest<M: Manifest>(manifest: &mut M, file_state: &FileState, build: &Build) -> anyhow::Result<()> {
+fn build_manifest<M: Manifest>(
+    manifest: &mut M,
+    file_state: &FileState,
+    build: &Build,
+) -> anyhow::Result<()> {
     manifest.write_files("in", file_state, build.dirtying_ins());
     manifest.write_files("discovered", file_state, build.discovered_ins());
     manifest.write_cmdline(build.get_cmdline().as_deref().unwrap_or(""));

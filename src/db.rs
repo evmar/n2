@@ -3,8 +3,7 @@
 
 use crate::graph;
 use crate::{
-    densemap, densemap::DenseMap, graph::BuildId, graph::Graph, graph::Hashes,
-    hash::BuildHash,
+    densemap, densemap::DenseMap, graph::BuildId, graph::Graph, graph::Hashes, hash::BuildHash,
 };
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;

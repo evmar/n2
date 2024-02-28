@@ -100,7 +100,9 @@ impl Progress for DumbConsoleProgress {
                     self.log(&build_message(build))
                 }
             }
-            Termination::Interrupted => self.log(&format!("interrupted: {}", &build_message(build))),
+            Termination::Interrupted => {
+                self.log(&format!("interrupted: {}", &build_message(build)))
+            }
             Termination::Failure => self.log(&format!("failed: {}", &build_message(build))),
         };
         if !result.output.is_empty() {

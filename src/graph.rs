@@ -4,7 +4,12 @@ use anyhow::bail;
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
-    concurrent_linked_list::ConcurrentLinkedList, densemap::{self, DenseMap}, eval::EvalString, hash::BuildHash, load::{Scope, ScopePosition}, smallmap::SmallMap
+    concurrent_linked_list::ConcurrentLinkedList,
+    densemap::{self, DenseMap},
+    eval::EvalString,
+    hash::BuildHash,
+    load::{Scope, ScopePosition},
+    smallmap::SmallMap,
 };
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
@@ -155,14 +160,20 @@ mod tests {
     }
 }
 
-
 /// A variable lookup environment for magic $in/$out variables.
 struct BuildImplicitVars<'a> {
     explicit_ins: &'a [Arc<File>],
     explicit_outs: &'a [Arc<File>],
 }
 impl<'text> crate::eval::Env for BuildImplicitVars<'text> {
-    fn evaluate_var(&self, result: &mut String, var: &str, envs: &[&dyn crate::eval::Env], scope: &Scope, position: ScopePosition) {
+    fn evaluate_var(
+        &self,
+        result: &mut String,
+        var: &str,
+        envs: &[&dyn crate::eval::Env],
+        scope: &Scope,
+        position: ScopePosition,
+    ) {
         let mut common = |files: &[Arc<File>], sep: &'static str| {
             for (i, file) in files.iter().enumerate() {
                 if i > 0 {
@@ -176,11 +187,13 @@ impl<'text> crate::eval::Env for BuildImplicitVars<'text> {
             "in_newline" => common(self.explicit_ins, "\n"),
             "out" => common(self.explicit_outs, " "),
             "out_newline" => common(self.explicit_outs, "\n"),
-            _ => if let Some(env) = envs.first() {
-                env.evaluate_var(result, var, &envs[1..], scope, position);
-            } else {
-                scope.evaluate(result, var, position);
-            },
+            _ => {
+                if let Some(env) = envs.first() {
+                    env.evaluate_var(result, var, &envs[1..], scope, position);
+                } else {
+                    scope.evaluate(result, var, position);
+                }
+            }
         }
     }
 }
@@ -190,8 +203,19 @@ impl<'text> crate::eval::Env for BuildImplicitVars<'text> {
 pub struct Build {
     pub id: BuildId,
 
+    /// The scope that this build is part of. Used when evaluating the build's
+    /// bindings.
     pub scope: Option<Arc<Scope>>,
+
+    /// The position of this build in the scope. Used when evaluating the
+    /// build's bindings.
     pub scope_position: ScopePosition,
+
+    /// The unevalated output/input files. These strings really have a lifetime
+    /// of 'text, but we use 'static so that we don't need to add 'text to the
+    /// build itself. We unsafely cast 'text strings to 'static. The strings
+    /// are evaluated and this vec is cleared before the lifetime of 'text is
+    /// over.
     pub unevaluated_outs_and_ins: Vec<EvalString<&'static str>>,
 
     pub rule: String,
@@ -203,6 +227,7 @@ pub struct Build {
     /// Source location this Build was declared.
     pub location: FileLoc,
 
+    /// Input files.
     pub ins: BuildIns,
 
     /// Additional inputs discovered from a previous build.
@@ -310,8 +335,15 @@ impl Build {
         let scope = self.scope.as_ref().unwrap();
         let rule = scope.get_rule(&self.rule, self.scope_position).unwrap();
         Some(match rule.vars.get(key) {
-            Some(val) => val.evaluate(&[&implicit_vars, &self.bindings], scope, self.scope_position),
-            None => self.bindings.get(key)?.evaluate(&[], scope, self.scope_position),
+            Some(val) => val.evaluate(
+                &[&implicit_vars, &self.bindings],
+                scope,
+                self.scope_position,
+            ),
+            None => self
+                .bindings
+                .get(key)?
+                .evaluate(&[], scope, self.scope_position),
         })
     }
 
@@ -370,13 +402,10 @@ pub struct GraphFiles {
 }
 
 impl Graph {
-    pub fn from_uninitialized_builds_and_files(
-        builds: Vec<Box<Build>>,
-        files: dashmap::DashMap<Arc<String>, Arc<File>, BuildHasherDefault<FxHasher>>,
-    ) -> anyhow::Result<Self> {
+    pub fn new(builds: Vec<Box<Build>>, files: GraphFiles) -> anyhow::Result<Self> {
         let result = Graph {
             builds: DenseMap::from_vec(builds),
-            files: GraphFiles { by_name: files },
+            files,
         };
         Ok(result)
     }
@@ -428,7 +457,7 @@ impl GraphFiles {
     /// of this function that accepts string references that is more optimized
     /// for the case where the entry already exists. But so far, all of our
     /// usages of this function have an owned string easily accessible anyways.
-    pub fn id_from_canonical(&mut self, file: String) -> Arc<File> {
+    pub fn id_from_canonical(&self, file: String) -> Arc<File> {
         let file = Arc::new(file);
         match self.by_name.entry(file) {
             dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),

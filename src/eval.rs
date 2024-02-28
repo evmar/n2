@@ -3,7 +3,7 @@
 
 use crate::load::Scope;
 use crate::load::ScopePosition;
-use crate::parse::parse_eval;
+use crate::parse::EvalParser;
 use crate::smallmap::SmallMap;
 use std::borrow::Borrow;
 
@@ -11,7 +11,14 @@ use std::borrow::Borrow;
 /// This represents one "frame" of evaluation context, a given EvalString may
 /// need multiple environments in order to be fully expanded.
 pub trait Env {
-    fn evaluate_var(&self, result: &mut String, var: &str, envs: &[&dyn Env], scope: &Scope, position: ScopePosition);
+    fn evaluate_var(
+        &self,
+        result: &mut String,
+        var: &str,
+        envs: &[&dyn Env],
+        scope: &Scope,
+        position: ScopePosition,
+    );
 }
 
 /// One token within an EvalString, either literal text or a variable reference.
@@ -19,21 +26,6 @@ pub trait Env {
 pub enum EvalPart<T: AsRef<str>> {
     Literal(T),
     VarRef(T),
-}
-
-impl EvalPart<&str> {
-    pub fn into_owned(&self) -> EvalPart<String> {
-        match self {
-            EvalPart::Literal(x) => EvalPart::Literal((*x).to_owned()),
-            EvalPart::VarRef(x) => EvalPart::VarRef((*x).to_owned()),
-        }
-    }
-}
-
-impl<T: Default + AsRef<str>> Default for EvalPart<T> {
-    fn default() -> Self {
-        EvalPart::Literal(T::default())
-    }
 }
 
 /// A parsed but unexpanded variable-reference string, e.g. "cc $in -o $out".
@@ -47,7 +39,13 @@ impl<T: AsRef<str>> EvalString<T> {
         EvalString(inner)
     }
 
-    pub fn evaluate_inner(&self, result: &mut String, envs: &[&dyn Env], scope: &Scope, position: ScopePosition) {
+    pub fn evaluate_inner(
+        &self,
+        result: &mut String,
+        envs: &[&dyn Env],
+        scope: &Scope,
+        position: ScopePosition,
+    ) {
         for part in self.parse() {
             match part {
                 EvalPart::Literal(s) => result.push_str(s.as_ref()),
@@ -81,9 +79,8 @@ impl<T: AsRef<str>> EvalString<T> {
         }
     }
 
-
     pub fn parse(&self) -> impl Iterator<Item = EvalPart<&str>> {
-        parse_eval(self.0.as_ref())
+        EvalParser::new(self.0.as_ref().as_bytes())
     }
 }
 
@@ -94,7 +91,14 @@ impl EvalString<&str> {
 }
 
 impl<K: Borrow<str> + PartialEq, V: AsRef<str>> Env for SmallMap<K, EvalString<V>> {
-    fn evaluate_var(&self, result: &mut String, var: &str, envs: &[&dyn Env], scope: &Scope, position: ScopePosition) {
+    fn evaluate_var(
+        &self,
+        result: &mut String,
+        var: &str,
+        envs: &[&dyn Env],
+        scope: &Scope,
+        position: ScopePosition,
+    ) {
         if let Some(v) = self.get(var) {
             v.evaluate_inner(result, envs, scope, position);
         } else if let Some(env) = envs.first() {

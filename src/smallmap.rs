@@ -4,11 +4,8 @@
 
 use std::{borrow::Borrow, fmt::Debug};
 
-use crate::eval::EvalString;
-
 /// A map-like object implemented as a list of pairs, for cases where the
 /// number of entries in the map is small.
-#[derive(Debug)]
 pub struct SmallMap<K, V>(Vec<(K, V)>);
 
 impl<K, V> SmallMap<K, V> {
@@ -35,6 +32,17 @@ impl<K: PartialEq, V> SmallMap<K, V> {
             }
         }
         self.0.push((k, v));
+    }
+
+    // returns true if value was inserted, false if the key was already present.
+    pub fn insert_if_absent(&mut self, k: K, v: V) -> bool {
+        for (ik, _) in self.0.iter_mut() {
+            if *ik == k {
+                return false;
+            }
+        }
+        self.0.push((k, v));
+        true
     }
 
     pub fn get<Q>(&self, q: &Q) -> Option<&V>
@@ -88,22 +96,5 @@ impl<K: Debug, V: Debug> Debug for SmallMap<K, V> {
 impl<K: PartialEq, V: PartialEq> PartialEq for SmallMap<K, V> {
     fn eq(&self, other: &Self) -> bool {
         return self.0 == other.0;
-    }
-}
-
-// TODO: Make this not order-sensitive
-impl<K: PartialEq, V: PartialEq> PartialEq for SmallMap<K, V> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl SmallMap<&str, EvalString<&str>> {
-    pub fn to_owned(self) -> SmallMap<String, EvalString<String>> {
-        let mut result = SmallMap::default();
-        for (k, v) in self.into_iter() {
-            result.insert(k.to_owned(), v.into_owned());
-        }
-        result
     }
 }
