@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@1.70.0
+    - uses: dtolnay/rust-toolchain@1.73.0
       with:
         components: rustfmt
     - name: Check formatting

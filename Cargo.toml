@@ -11,7 +11,7 @@ readme = "README.md"
 repository = "https://github.com/evmar/n2"
 # https://github.com/evmar/n2/issues/74
 # Note: if we bump this, may need to bump .github/workflows/ci.yml version too.
-rust-version = "1.70.0"
+rust-version = "1.73.0"
 description = "a ninja compatible build system"
 
 [dependencies]
