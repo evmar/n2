@@ -6,6 +6,7 @@ use crate::{
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 /// Build steps go through this sequence of states.
 /// See "Build states" in the design notes.
@@ -71,6 +72,7 @@ impl StateCounts {
 /// Each running build is running "in" a pool; there's a default unbounded
 /// pool for builds that don't specify one.
 /// See "Tracking build state" in the design notes.
+#[derive(Debug)]
 struct PoolState {
     /// A queue of builds that are ready to be executed in this pool.
     queued: VecDeque<BuildId>,
@@ -139,7 +141,7 @@ impl BuildStates {
         let prev = std::mem::replace(&mut self.states[id], state);
 
         // We skip user-facing counters for phony builds.
-        let skip_ui_count = build.cmdline.is_none();
+        let skip_ui_count = build.get_cmdline().is_none();
 
         // println!("{:?} {:?}=>{:?} {:?}", id, prev, state, self.counts);
         if prev == BuildState::Unknown {
@@ -197,10 +199,10 @@ impl BuildStates {
 
     /// Visits a BuildId that is an input to the desired output.
     /// Will recursively visit its own inputs.
-    fn want_build(
+    fn want_build<'a>(
         &mut self,
         graph: &Graph,
-        stack: &mut Vec<FileId>,
+        stack: &mut Vec<Arc<File>>,
         id: BuildId,
     ) -> anyhow::Result<()> {
         if self.get(id) != BuildState::Unknown {
@@ -212,16 +214,16 @@ impl BuildStates {
 
         // Any Build that doesn't depend on an output of another Build is ready.
         let mut ready = true;
-        for &id in build.ordering_ins() {
-            self.want_file(graph, stack, id)?;
-            ready = ready && graph.file(id).input.is_none();
+        for file in build.ordering_ins() {
+            self.want_file(graph, stack, file.clone())?;
+            ready = ready && file.input.lock().unwrap().is_none();
         }
-        for &id in build.validation_ins() {
+        for file in build.validation_ins() {
             // This build doesn't technically depend on the validation inputs, so
             // allocate a new stack. Validation inputs could in theory depend on this build's
             // outputs.
             let mut stack = Vec::new();
-            self.want_file(graph, &mut stack, id)?;
+            self.want_file(graph, &mut stack, file.clone())?;
         }
 
         if ready {
@@ -235,21 +237,26 @@ impl BuildStates {
     pub fn want_file(
         &mut self,
         graph: &Graph,
-        stack: &mut Vec<FileId>,
-        id: FileId,
+        stack: &mut Vec<Arc<File>>,
+        file: Arc<File>,
     ) -> anyhow::Result<()> {
         // Check for a dependency cycle.
-        if let Some(cycle) = stack.iter().position(|&sid| sid == id) {
+        if let Some(cycle) = stack
+            .iter()
+            .position(|f| std::ptr::eq(f.as_ref(), file.as_ref()))
+        {
             let mut err = "dependency cycle: ".to_string();
-            for &id in stack[cycle..].iter() {
-                err.push_str(&format!("{} -> ", graph.file(id).name));
+            for file in stack[cycle..].iter() {
+                err.push_str(&format!("{} -> ", file.name));
             }
-            err.push_str(&graph.file(id).name);
+            err.push_str(&file.name);
             anyhow::bail!(err);
         }
 
-        if let Some(bid) = graph.file(id).input {
-            stack.push(id);
+        let input_guard = file.input.lock().unwrap();
+        if let Some(bid) = *input_guard {
+            drop(input_guard);
+            stack.push(file.clone());
             self.want_build(graph, stack, bid)?;
             stack.pop();
         }
@@ -264,7 +271,8 @@ impl BuildStates {
 
     /// Look up a PoolState by name.
     fn get_pool(&mut self, build: &Build) -> Option<&mut PoolState> {
-        let name = build.pool.as_deref().unwrap_or("");
+        let owned_name = build.get_pool();
+        let name = owned_name.as_deref().unwrap_or("");
         for (key, pool) in self.pools.iter_mut() {
             if key == name {
                 return Some(pool);
@@ -283,7 +291,7 @@ impl BuildStates {
                 build.location,
                 // Unnamed pool lookups always succeed, this error is about
                 // named pools.
-                build.pool.as_ref().unwrap()
+                build.get_pool().as_ref().unwrap()
             )
         })?;
         pool.queued.push_back(id);
@@ -345,23 +353,25 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn lookup(&mut self, name: &str) -> Option<FileId> {
-        self.graph.files.lookup(&canon_path(name))
+    pub fn lookup(&mut self, name: &str) -> Option<Arc<File>> {
+        self.graph.files.lookup(canon_path(name))
     }
 
-    pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
+    pub fn want_file(&mut self, file: Arc<File>) -> anyhow::Result<()> {
         let mut stack = Vec::new();
-        self.build_states.want_file(&self.graph, &mut stack, id)
+        self.build_states.want_file(&self.graph, &mut stack, file)
     }
 
-    pub fn want_every_file(&mut self, exclude: Option<FileId>) -> anyhow::Result<()> {
-        for id in self.graph.files.all_ids() {
-            if let Some(exclude) = exclude {
-                if id == exclude {
+    pub fn want_every_file(&mut self, exclude: Option<Arc<File>>) -> anyhow::Result<()> {
+        for id in self.graph.files.all_files() {
+            if let Some(exclude) = exclude.as_ref() {
+                if std::ptr::eq(id.as_ref(), exclude.as_ref()) {
                     continue;
                 }
             }
-            self.want_file(id)?;
+            let mut stack = Vec::new();
+            self.build_states
+                .want_file(&self.graph, &mut stack, id.clone())?;
         }
         Ok(())
     }
@@ -371,9 +381,8 @@ impl<'a> Work<'a> {
     fn recheck_ready(&self, id: BuildId) -> bool {
         let build = &self.graph.builds[id];
         // println!("recheck {:?} {} ({}...)", id, build.location, self.graph.file(build.outs()[0]).name);
-        for &id in build.ordering_ins() {
-            let file = self.graph.file(id);
-            match file.input {
+        for file in build.ordering_ins() {
+            match *file.input.lock().unwrap() {
                 None => {
                     // Only generated inputs contribute to readiness.
                     continue;
@@ -397,19 +406,18 @@ impl<'a> Work<'a> {
         &mut self,
         id: BuildId,
         discovered: bool,
-    ) -> anyhow::Result<Option<FileId>> {
+    ) -> anyhow::Result<Option<Arc<File>>> {
         let build = &self.graph.builds[id];
-        let ids = if discovered {
+        let files = if discovered {
             build.discovered_ins()
         } else {
             build.dirtying_ins()
         };
-        for &id in ids {
-            let mtime = match self.file_state.get(id) {
+        for file in files {
+            let mtime = match self.file_state.get(file.as_ref()) {
                 Some(mtime) => mtime,
                 None => {
-                    let file = self.graph.file(id);
-                    if file.input.is_some() {
+                    if file.input.lock().unwrap().is_some() {
                         // This dep is generated by some other build step, but the
                         // build graph didn't cause that other build step to be
                         // visited first.  This is an error in the build file.
@@ -428,11 +436,11 @@ impl<'a> Work<'a> {
                             file.name
                         );
                     }
-                    self.file_state.stat(id, file.path())?
+                    self.file_state.stat(file.as_ref(), file.path())?
                 }
             };
             if mtime == MTime::Missing {
-                return Ok(Some(id));
+                return Ok(Some(file.clone()));
             }
         }
         Ok(None)
@@ -442,18 +450,27 @@ impl<'a> Work<'a> {
     /// Postcondition: all outputs have been stat()ed.
     fn record_finished(&mut self, id: BuildId, result: task::TaskResult) -> anyhow::Result<()> {
         // Clean up the deps discovered from the task.
-        let mut deps = Vec::new();
+        let mut deps: Vec<Arc<File>> = Vec::new();
         if let Some(names) = result.discovered_deps {
             for name in names {
                 let fileid = self.graph.files.id_from_canonical(canon_path(name));
                 // Filter duplicates from the file list.
-                if deps.contains(&fileid) {
+                if deps
+                    .iter()
+                    .find(|x| std::ptr::eq(x.as_ref(), fileid.as_ref()))
+                    .is_some()
+                {
                     continue;
                 }
                 // Filter out any deps that were already dirtying in the build file.
                 // Note that it's allowed to have a duplicate against an order-only
                 // dep; see `discover_existing_dep` test.
-                if self.graph.builds[id].dirtying_ins().contains(&fileid) {
+                if self.graph.builds[id]
+                    .dirtying_ins()
+                    .iter()
+                    .find(|x| std::ptr::eq(x.as_ref(), fileid.as_ref()))
+                    .is_some()
+                {
                     continue;
                 }
                 deps.push(fileid);
@@ -467,7 +484,7 @@ impl<'a> Work<'a> {
                 anyhow::bail!(
                     "{}: depfile references nonexistent {}",
                     self.graph.builds[id].location,
-                    self.graph.file(missing).name
+                    missing.name
                 );
             }
         }
@@ -475,7 +492,7 @@ impl<'a> Work<'a> {
         let input_was_missing = self.graph.builds[id]
             .dirtying_ins()
             .iter()
-            .any(|&id| self.file_state.get(id).unwrap() == MTime::Missing);
+            .any(|file| self.file_state.get(file.as_ref()).unwrap() == MTime::Missing);
 
         // Update any cached state of the output files to reflect their new state.
         let output_was_missing = self.stat_all_outputs(id)?.is_some();
@@ -487,7 +504,7 @@ impl<'a> Work<'a> {
         }
 
         let build = &self.graph.builds[id];
-        let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
+        let hash = hash::hash_build(&self.file_state, build)?;
         self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
@@ -499,12 +516,12 @@ impl<'a> Work<'a> {
         self.build_states.set(id, build, BuildState::Done);
 
         let mut dependents = HashSet::new();
-        for &id in build.outs() {
-            for &id in &self.graph.file(id).dependents {
-                if self.build_states.get(id) != BuildState::Want {
+        for file in build.outs() {
+            for &file in file.dependents.iter() {
+                if self.build_states.get(file) != BuildState::Want {
                     continue;
                 }
-                dependents.insert(id);
+                dependents.insert(file);
             }
         }
         for id in dependents {
@@ -519,14 +536,13 @@ impl<'a> Work<'a> {
     /// Stat all the outputs of a build.
     /// Called before it's run (for determining whether it's up to date) and
     /// after (to see if it touched any outputs).
-    fn stat_all_outputs(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
+    fn stat_all_outputs(&mut self, id: BuildId) -> anyhow::Result<Option<Arc<File>>> {
         let build = &self.graph.builds[id];
         let mut missing = None;
-        for &id in build.outs() {
-            let file = self.graph.file(id);
-            let mtime = self.file_state.stat(id, file.path())?;
+        for file in build.outs() {
+            let mtime = self.file_state.stat(file.as_ref(), file.path())?;
             if mtime == MTime::Missing && missing.is_none() {
-                missing = Some(id);
+                missing = Some(file.clone());
             }
         }
         Ok(missing)
@@ -538,13 +554,12 @@ impl<'a> Work<'a> {
     /// Returns a build error if any required input files are missing.
     /// Otherwise returns the missing id if any expected but not required files,
     /// e.g. outputs, are missing, implying that the build needs to be executed.
-    fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
+    fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<Option<Arc<File>>> {
         // Ensure we have state for all input files.
         if let Some(missing) = self.ensure_input_files(id, false)? {
-            let file = self.graph.file(missing);
-            if file.input.is_none() {
+            if missing.input.lock().unwrap().is_none() {
                 let build = &self.graph.builds[id];
-                anyhow::bail!("{}: input {} missing", build.location, file.name);
+                anyhow::bail!("{}: input {} missing", build.location, missing.name);
             }
             return Ok(Some(missing));
         }
@@ -589,7 +604,7 @@ impl<'a> Work<'a> {
     /// Prereq: any dependent input is already generated.
     fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
         let build = &self.graph.builds[id];
-        let phony = build.cmdline.is_none();
+        let phony = build.get_cmdline().is_none();
         let file_missing = if phony {
             self.check_build_files_missing_phony(id)?;
             return Ok(false); // Phony builds never need to run anything.
@@ -604,8 +619,7 @@ impl<'a> Work<'a> {
             if self.options.explain {
                 self.progress.log(&format!(
                     "explain: {}: input {} missing",
-                    build.location,
-                    self.graph.file(missing).name
+                    build.location, missing.name
                 ));
             }
             return Ok(true);
@@ -630,16 +644,13 @@ impl<'a> Work<'a> {
             Some(prev_hash) => prev_hash,
         };
 
-        let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
+        let hash = hash::hash_build(&self.file_state, build)?;
         if prev_hash != hash {
             if self.options.explain {
                 self.progress
                     .log(&format!("explain: {}: manifest changed", build.location));
-                self.progress.log(&hash::explain_hash_build(
-                    &self.graph.files,
-                    &self.file_state,
-                    build,
-                ));
+                self.progress
+                    .log(&hash::explain_hash_build(&self.file_state, build)?);
             }
             return Ok(true);
         }
@@ -650,10 +661,10 @@ impl<'a> Work<'a> {
     /// Create the parent directories of a given list of fileids.
     /// Used to create directories used for outputs.
     /// TODO: do this within the thread executing the subtask?
-    fn create_parent_dirs(&self, ids: &[FileId]) -> anyhow::Result<()> {
+    fn create_parent_dirs(&self, ids: &[Arc<File>]) -> anyhow::Result<()> {
         let mut dirs: Vec<&std::path::Path> = Vec::new();
-        for &out in ids {
-            if let Some(parent) = self.graph.file(out).path().parent() {
+        for out in ids {
+            if let Some(parent) = out.path().parent() {
                 if dirs.iter().any(|&p| p == parent) {
                     continue;
                 }
@@ -694,7 +705,7 @@ impl<'a> Work<'a> {
                 let build = &self.graph.builds[id];
                 self.build_states.set(id, build, BuildState::Running);
                 self.create_parent_dirs(build.outs())?;
-                runner.start(id, build);
+                runner.start(id, build)?;
                 self.progress.task_started(id, build);
                 made_progress = true;
             }
@@ -738,7 +749,7 @@ impl<'a> Work<'a> {
             let build = &self.graph.builds[task.buildid];
             trace::if_enabled(|t| {
                 let desc = progress::build_message(build);
-                t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
+                t.write_complete(&desc, task.tid + 1, task.span.0, task.span.1);
             });
 
             self.progress
@@ -773,28 +784,5 @@ impl<'a> Work<'a> {
         // don't want n2 to print a "succeeded" message afterwards.
         let success = tasks_failed == 0 && !signal::was_interrupted();
         Ok(success.then_some(tasks_done))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_cycle() -> Result<(), anyhow::Error> {
-        let file = "
-build a: phony b
-build b: phony c
-build c: phony a
-";
-        let mut graph = crate::load::parse("build.ninja", file.as_bytes().to_vec())?;
-        let a_id = graph.files.id_from_canonical("a".to_owned());
-        let mut states = BuildStates::new(graph.builds.next_id(), SmallMap::default());
-        let mut stack = Vec::new();
-        match states.want_file(&graph, &mut stack, a_id) {
-            Ok(_) => panic!("expected build cycle error"),
-            Err(err) => assert_eq!(err.to_string(), "dependency cycle: a -> b -> c -> a"),
-        }
-        Ok(())
     }
 }

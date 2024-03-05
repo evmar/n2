@@ -11,13 +11,15 @@ readme = "README.md"
 repository = "https://github.com/evmar/n2"
 # https://github.com/evmar/n2/issues/74
 # Note: if we bump this, may need to bump .github/workflows/ci.yml version too.
-rust-version = "1.70.0"
+rust-version = "1.73.0"
 description = "a ninja compatible build system"
 
 [dependencies]
 anyhow = "1.0"
 argh = "0.1.10"
+dashmap = "5.5.3"
 libc = "0.2"
+rayon = "1.8.1"
 rustc-hash = "1.1.0"
 
 [target.'cfg(windows)'.dependencies.windows-sys]

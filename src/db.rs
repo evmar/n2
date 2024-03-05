@@ -1,9 +1,9 @@
 //! The n2 database stores information about previous builds for determining
 //! which files are up to date.
 
+use crate::graph;
 use crate::{
-    densemap, densemap::DenseMap, graph::BuildId, graph::FileId, graph::Graph, graph::Hashes,
-    hash::BuildHash,
+    densemap, densemap::DenseMap, graph::BuildId, graph::Graph, graph::Hashes, hash::BuildHash,
 };
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 
 const VERSION: u32 = 1;
 
@@ -34,9 +35,9 @@ impl From<usize> for Id {
 #[derive(Default)]
 pub struct IdMap {
     /// Maps db::Id to FileId.
-    fileids: DenseMap<Id, FileId>,
+    fileids: DenseMap<Id, Arc<graph::File>>,
     /// Maps FileId to db::Id.
-    db_ids: HashMap<FileId, Id>,
+    db_ids: HashMap<*const graph::File, Id>,
 }
 
 /// RecordWriter buffers writes into a Vec<u8>.
@@ -110,13 +111,15 @@ impl Writer {
         w.finish(&mut self.w)
     }
 
-    fn ensure_id(&mut self, graph: &Graph, fileid: FileId) -> std::io::Result<Id> {
-        let id = match self.ids.db_ids.get(&fileid) {
+    fn ensure_id(&mut self, file: Arc<graph::File>) -> std::io::Result<Id> {
+        let id = match self.ids.db_ids.get(&(file.as_ref() as *const graph::File)) {
             Some(&id) => id,
             None => {
-                let id = self.ids.fileids.push(fileid);
-                self.ids.db_ids.insert(fileid, id);
-                self.write_path(&graph.file(fileid).name)?;
+                let id = self.ids.fileids.push(file.clone());
+                self.ids
+                    .db_ids
+                    .insert(file.as_ref() as *const graph::File, id);
+                self.write_path(&file.name)?;
                 id
             }
         };
@@ -134,15 +137,15 @@ impl Writer {
         let outs = build.outs();
         let mark = (outs.len() as u16) | 0b1000_0000_0000_0000;
         w.write_u16(mark);
-        for &out in outs {
-            let id = self.ensure_id(graph, out)?;
+        for out in outs {
+            let id = self.ensure_id(out.clone())?;
             w.write_id(id);
         }
 
         let deps = build.discovered_ins();
         w.write_u16(deps.len() as u16);
-        for &dep in deps {
-            let id = self.ensure_id(graph, dep)?;
+        for dep in deps {
+            let id = self.ensure_id(dep.clone())?;
             w.write_id(id);
         }
 
@@ -190,9 +193,11 @@ impl<'a> Reader<'a> {
     fn read_path(&mut self, len: usize) -> std::io::Result<()> {
         let name = self.read_str(len)?;
         // No canonicalization needed, paths were written canonicalized.
-        let fileid = self.graph.files.id_from_canonical(name);
-        let dbid = self.ids.fileids.push(fileid);
-        self.ids.db_ids.insert(fileid, dbid);
+        let file = self.graph.files.id_from_canonical(name);
+        let dbid = self.ids.fileids.push(file.clone());
+        self.ids
+            .db_ids
+            .insert(file.as_ref() as *const graph::File, dbid);
         Ok(())
     }
 
@@ -217,7 +222,7 @@ impl<'a> Reader<'a> {
                 // keep reading to parse through it.
                 continue;
             }
-            match self.graph.file(self.ids.fileids[fileid]).input {
+            match *self.ids.fileids[fileid].input.lock().unwrap() {
                 None => {
                     obsolete = true;
                 }
@@ -238,10 +243,10 @@ impl<'a> Reader<'a> {
         }
 
         let len = self.read_u16()?;
-        let mut deps = Vec::new();
+        let mut deps = Vec::with_capacity(len as usize);
         for _ in 0..len {
             let id = self.read_id()?;
-            deps.push(self.ids.fileids[id]);
+            deps.push(self.ids.fileids[id].clone());
         }
 
         let hash = BuildHash(self.read_u64()?);

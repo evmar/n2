@@ -37,6 +37,13 @@ impl<K: Index, V> std::ops::IndexMut<K> for DenseMap<K, V> {
 }
 
 impl<K: Index, V> DenseMap<K, V> {
+    pub fn from_vec(v: Vec<V>) -> Self {
+        Self {
+            vec: v,
+            key_type: PhantomData,
+        }
+    }
+
     pub fn lookup(&self, k: K) -> Option<&V> {
         self.vec.get(k.index())
     }

@@ -14,12 +14,11 @@ use std::time::Duration;
 use std::time::Instant;
 
 /// Compute the message to display on the console for a given build.
-pub fn build_message(build: &Build) -> &str {
+pub fn build_message(build: &Build) -> String {
     build
-        .desc
-        .as_ref()
+        .get_description()
         .filter(|desc| !desc.is_empty())
-        .unwrap_or_else(|| build.cmdline.as_ref().unwrap())
+        .unwrap_or_else(|| build.get_cmdline().unwrap())
 }
 
 /// Trait for build progress notifications.
@@ -80,11 +79,11 @@ impl Progress for DumbConsoleProgress {
     }
 
     fn task_started(&mut self, id: BuildId, build: &Build) {
-        self.log(if self.verbose {
-            build.cmdline.as_ref().unwrap()
+        if self.verbose {
+            self.log(build.get_cmdline().as_ref().unwrap());
         } else {
-            build_message(build)
-        });
+            self.log(&build_message(build));
+        }
         self.last_started = Some(id);
     }
 
@@ -98,11 +97,13 @@ impl Progress for DumbConsoleProgress {
                 if result.output.is_empty() || self.last_started == Some(id) {
                     // Output is empty, or we just printed the command, don't print it again.
                 } else {
-                    self.log(build_message(build))
+                    self.log(&build_message(build))
                 }
             }
-            Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),
-            Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
+            Termination::Interrupted => {
+                self.log(&format!("interrupted: {}", &build_message(build)))
+            }
+            Termination::Failure => self.log(&format!("failed: {}", &build_message(build))),
         };
         if !result.output.is_empty() {
             std::io::stdout().write_all(&result.output).unwrap();
@@ -228,7 +229,7 @@ impl FancyState {
 
     fn task_started(&mut self, id: BuildId, build: &Build) {
         if self.verbose {
-            self.log(build.cmdline.as_ref().unwrap());
+            self.log(build.get_cmdline().as_ref().unwrap());
         }
         let message = build_message(build);
         self.tasks.push_back(Task {
@@ -254,7 +255,7 @@ impl FancyState {
                 if result.output.is_empty() {
                     // Common case: don't show anything.
                 } else {
-                    self.log(build_message(build))
+                    self.log(&build_message(build))
                 }
             }
             Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),

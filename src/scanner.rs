@@ -6,6 +6,7 @@ use std::{io::Read, path::Path};
 pub struct ParseError {
     msg: String,
     ofs: usize,
+    pub chunk_index: usize,
 }
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -13,17 +14,16 @@ pub struct Scanner<'a> {
     buf: &'a [u8],
     pub ofs: usize,
     pub line: usize,
+    pub chunk_index: usize,
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(buf: &'a [u8]) -> Self {
-        if !buf.ends_with(b"\0") {
-            panic!("Scanner requires nul-terminated buf");
-        }
+    pub fn new(buf: &'a [u8], chunk_index: usize) -> Self {
         Scanner {
             buf,
             ofs: 0,
             line: 1,
+            chunk_index,
         }
     }
 
@@ -34,25 +34,28 @@ impl<'a> Scanner<'a> {
         unsafe { *self.buf.get_unchecked(self.ofs) as char }
     }
     pub fn peek_newline(&self) -> bool {
-        if self.peek() == '\n' {
+        let peek = self.peek();
+        if peek == '\n' {
             return true;
         }
         if self.ofs >= self.buf.len() - 1 {
             return false;
         }
         let peek2 = unsafe { *self.buf.get_unchecked(self.ofs + 1) as char };
-        self.peek() == '\r' && peek2 == '\n'
+        peek == '\r' && peek2 == '\n'
     }
     pub fn next(&mut self) {
         if self.peek() == '\n' {
             self.line += 1;
         }
+        #[cfg(debug_assertions)]
         if self.ofs == self.buf.len() {
             panic!("scanned past end")
         }
         self.ofs += 1;
     }
     pub fn back(&mut self) {
+        #[cfg(debug_assertions)]
         if self.ofs == 0 {
             panic!("back at start")
         }
@@ -91,46 +94,46 @@ impl<'a> Scanner<'a> {
         Err(ParseError {
             msg: msg.into(),
             ofs: self.ofs,
+            chunk_index: self.chunk_index,
         })
     }
+}
 
-    pub fn format_parse_error(&self, filename: &Path, err: ParseError) -> String {
-        let mut ofs = 0;
-        let lines = self.buf.split(|&c| c == b'\n');
-        for (line_number, line) in lines.enumerate() {
-            if ofs + line.len() >= err.ofs {
-                let mut msg = "parse error: ".to_string();
-                msg.push_str(&err.msg);
-                msg.push('\n');
+pub fn format_parse_error(mut ofs: usize, buf: &[u8], filename: &Path, err: ParseError) -> String {
+    let lines = buf.split(|&c| c == b'\n');
+    for (line_number, line) in lines.enumerate() {
+        if ofs + line.len() >= err.ofs {
+            let mut msg = "parse error: ".to_string();
+            msg.push_str(&err.msg);
+            msg.push('\n');
 
-                let prefix = format!("{}:{}: ", filename.display(), line_number + 1);
-                msg.push_str(&prefix);
+            let prefix = format!("{}:{}: ", filename.display(), line_number + 1);
+            msg.push_str(&prefix);
 
-                let mut context = unsafe { std::str::from_utf8_unchecked(line) };
-                let mut col = err.ofs - ofs;
-                if col > 40 {
-                    // Trim beginning of line to fit it on screen.
-                    msg.push_str("...");
-                    context = &context[col - 20..];
-                    col = 3 + 20;
-                }
-                if context.len() > 40 {
-                    context = &context[0..40];
-                    msg.push_str(context);
-                    msg.push_str("...");
-                } else {
-                    msg.push_str(context);
-                }
-                msg.push('\n');
-
-                msg.push_str(&" ".repeat(prefix.len() + col));
-                msg.push_str("^\n");
-                return msg;
+            let mut context = unsafe { std::str::from_utf8_unchecked(line) };
+            let mut col = err.ofs - ofs;
+            if col > 40 {
+                // Trim beginning of line to fit it on screen.
+                msg.push_str("...");
+                context = &context[col - 20..];
+                col = 3 + 20;
             }
-            ofs += line.len() + 1;
+            if context.len() > 40 {
+                context = &context[0..40];
+                msg.push_str(context);
+                msg.push_str("...");
+            } else {
+                msg.push_str(context);
+            }
+            msg.push('\n');
+
+            msg.push_str(&" ".repeat(prefix.len() + col));
+            msg.push_str("^\n");
+            return msg;
         }
-        panic!("invalid offset when formatting error")
+        ofs += line.len() + 1;
     }
+    panic!("invalid offset when formatting error")
 }
 
 /// Scanner wants its input buffer to end in a trailing nul.

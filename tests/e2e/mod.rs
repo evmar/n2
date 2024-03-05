@@ -3,6 +3,7 @@
 mod basic;
 mod directories;
 mod discovered;
+mod include_and_subninja;
 mod missing;
 mod regen;
 mod validations;

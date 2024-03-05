@@ -8,6 +8,15 @@ use std::{borrow::Borrow, fmt::Debug};
 /// number of entries in the map is small.
 pub struct SmallMap<K, V>(Vec<(K, V)>);
 
+impl<K, V> SmallMap<K, V> {
+    pub fn with_capacity(cap: usize) -> Self {
+        Self(Vec::with_capacity(cap))
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 impl<K, V> Default for SmallMap<K, V> {
     fn default() -> Self {
         SmallMap(Vec::default())
@@ -23,6 +32,17 @@ impl<K: PartialEq, V> SmallMap<K, V> {
             }
         }
         self.0.push((k, v));
+    }
+
+    // returns true if value was inserted, false if the key was already present.
+    pub fn insert_if_absent(&mut self, k: K, v: V) -> bool {
+        for (ik, _) in self.0.iter_mut() {
+            if *ik == k {
+                return false;
+            }
+        }
+        self.0.push((k, v));
+        true
     }
 
     pub fn get<Q>(&self, q: &Q) -> Option<&V>

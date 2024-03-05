@@ -12,7 +12,7 @@ use crate::{
     depfile,
     graph::{Build, BuildId, RspFile},
     process,
-    scanner::{self, Scanner},
+    scanner::{self, format_parse_error, Scanner},
 };
 use anyhow::{anyhow, bail};
 use std::path::{Path, PathBuf};
@@ -46,9 +46,9 @@ fn read_depfile(path: &Path) -> anyhow::Result<Vec<String>> {
         Err(e) => bail!("read {}: {}", path.display(), e),
     };
 
-    let mut scanner = Scanner::new(&bytes);
+    let mut scanner = Scanner::new(&bytes, 0);
     let parsed_deps = depfile::parse(&mut scanner)
-        .map_err(|err| anyhow!(scanner.format_parse_error(path, err)))?;
+        .map_err(|err| anyhow!(format_parse_error(0, &bytes, path, err)))?;
     // TODO verify deps refers to correct output
     let deps: Vec<String> = parsed_deps
         .values()
@@ -210,11 +210,11 @@ impl Runner {
         self.running > 0
     }
 
-    pub fn start(&mut self, id: BuildId, build: &Build) {
-        let cmdline = build.cmdline.clone().unwrap();
-        let depfile = build.depfile.clone().map(PathBuf::from);
-        let rspfile = build.rspfile.clone();
-        let parse_showincludes = build.parse_showincludes;
+    pub fn start(&mut self, id: BuildId, build: &Build) -> anyhow::Result<()> {
+        let cmdline = build.get_cmdline().clone().unwrap();
+        let depfile = build.get_depfile().clone().map(PathBuf::from);
+        let rspfile = build.get_rspfile()?;
+        let parse_showincludes = build.get_parse_showincludes()?;
 
         let tid = self.tids.claim();
         let tx = self.tx.clone();
@@ -246,6 +246,7 @@ impl Runner {
             let _ = tx.send(Message::Done(task));
         });
         self.running += 1;
+        Ok(())
     }
 
     /// Wait for a build to complete.  May block for a long time.

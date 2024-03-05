@@ -1,8 +1,10 @@
 pub mod canon;
+mod concurrent_linked_list;
 mod db;
 mod densemap;
 mod depfile;
 mod eval;
+mod file_pool;
 mod graph;
 mod hash;
 pub mod load;
