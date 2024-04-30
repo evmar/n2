@@ -11,7 +11,7 @@ readme = "README.md"
 repository = "https://github.com/evmar/n2"
 # https://github.com/evmar/n2/issues/74
 # Note: if we bump this, may need to bump .github/workflows/ci.yml version too.
-rust-version = "1.70.0"
+rust-version = "1.75.0"
 description = "a ninja compatible build system"
 
 [dependencies]
@@ -37,7 +37,6 @@ jemallocator = "0.5.0"
 [dev-dependencies]
 tempfile = "3.6.0"
 criterion = { version = "0.5.1", features = ["html_reports"] }
-filetime = "0.2"
 
 [profile.release]
 debug = true
