@@ -80,7 +80,8 @@ impl TestSpace {
     pub fn sub_mtime(&self, path: &str, dur: std::time::Duration) -> anyhow::Result<()> {
         let path = self.dir.path().join(path);
         let t = std::time::SystemTime::now() - dur;
-        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(t))?;
+        let f = std::fs::File::options().write(true).open(path)?;
+        f.set_modified(t)?;
         Ok(())
     }
 
