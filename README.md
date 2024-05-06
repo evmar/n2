@@ -13,7 +13,7 @@ missing some features but is faster to build and has a better UI; see
 ## Install
 
 ```
-$ cargo install --git https://github.com/evmar/n2
+$ cargo install --locked --git https://github.com/evmar/n2
 # (installs into ~/.cargo/bin/)
 
 $ n2 -C some/build/dir some-target
