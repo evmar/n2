@@ -392,7 +392,12 @@ impl<'text> Parser<'text> {
     /// Read and interpret the text following a '$' escape character.
     fn read_escape(&mut self) -> ParseResult<EvalPart<&'text str>> {
         Ok(match self.scanner.read() {
-            '\n' | '\r' => {
+            '\n' => {
+                self.scanner.skip_spaces();
+                EvalPart::Literal(self.scanner.slice(0, 0))
+            }
+            '\r' if self.scanner.peek() == '\n' => {
+                self.scanner.next();
                 self.scanner.skip_spaces();
                 EvalPart::Literal(self.scanner.slice(0, 0))
             }
@@ -425,11 +430,12 @@ impl<'text> Parser<'text> {
             match self.scanner.read() {
                 ' ' => {}
                 '$' => {
-                    if self.scanner.peek() != '\n' {
+                    if !self.scanner.peek_newline() {
                         self.scanner.back();
                         return;
                     }
-                    self.scanner.next();
+                    self.scanner.skip('\r');
+                    self.scanner.skip('\n');
                 }
                 _ => {
                     self.scanner.back();
@@ -503,12 +509,17 @@ mod tests {
 
     #[test]
     fn parse_trailing_newline() {
-        let mut buf = test_case_buffer("build$\n foo$\n : $\n  touch $\n\n");
-        let mut parser = Parser::new(&mut buf);
-        let stmt = parser.read().unwrap().unwrap();
-        assert!(matches!(
-            stmt,
-            Statement::Build(Build { rule: "touch", .. })
-        ));
+        test_for_line_endings(
+            &["build$", " foo$", " : $", "  touch $", "", ""],
+            |test_case| {
+                let mut buf = test_case_buffer(test_case);
+                let mut parser = Parser::new(&mut buf);
+                let stmt = parser.read().unwrap().unwrap();
+                assert!(matches!(
+                    stmt,
+                    Statement::Build(Build { rule: "touch", .. })
+                ));
+            },
+        );
     }
 }
