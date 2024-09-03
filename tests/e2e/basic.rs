@@ -393,6 +393,26 @@ build foo: copy_rspfile
 
 #[cfg(unix)]
 #[test]
+fn looks_up_values_from_rule() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        "
+rule copy_rspfile
+    command = cp $rspfile $out
+    rspfile = $out.rsp
+    rspfile_content = Hello, world!
+
+build foo: copy_rspfile
+",
+    )?;
+    space.run_expect(&mut n2_command(vec!["foo"]))?;
+    assert_eq!(space.read("foo")?, b"Hello, world!");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn build_bindings_arent_recursive() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
     space.write(

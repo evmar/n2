@@ -2,7 +2,7 @@
 
 use crate::{
     canon::{canon_path, canon_path_fast},
-    eval::{EvalPart, EvalString},
+    eval::{Env, EvalPart, EvalString},
     graph::{FileId, RspFile},
     parse::Statement,
     scanner,
@@ -42,6 +42,42 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
             "out_newline" => string_to_evalstring(self.file_list(self.build.explicit_outs(), '\n')),
             _ => None,
         }
+    }
+}
+
+/// A lookup that caches the results of evaluating a rule's variables.
+struct Lookup<'a> {
+    rule: &'a SmallMap<String, EvalString<String>>,
+    envs: Vec<&'a dyn Env>,
+    default_env: &'a SmallMap<&'a str, EvalString<&'a str>>,
+    vars: SmallMap<&'a str, String>,
+}
+impl<'a> Lookup<'a> {
+    pub fn new(
+        rule: &'a SmallMap<String, EvalString<String>>,
+        envs: Vec<&'a dyn Env>,
+        default_env: &'a SmallMap<&'a str, EvalString<&'a str>>,
+    ) -> Self {
+        Lookup {
+            rule,
+            envs,
+            default_env,
+            vars: SmallMap::default(),
+        }
+    }
+    pub fn find(&mut self, key: &'a str) -> Option<String> {
+        let mut combined_list: Vec<&dyn Env> = vec![&self.vars];
+        self.envs.iter().for_each(|&value| {
+            combined_list.push(value);
+        });
+        let result = match self.rule.get(key) {
+            Some(val) => Some(val.evaluate(combined_list.as_slice())),
+            None => Some(self.default_env.get(key)?.evaluate(&self.envs)),
+        };
+        if result.is_some() {
+            self.vars.insert(key, result.clone().unwrap());
+        }
+        return result;
     }
 }
 
@@ -129,28 +165,12 @@ impl Loader {
 
         // temp variable in order to not move all of b into the closure
         let build_vars = &b.vars;
-        let lookup = |key: &str| -> Option<String> {
-            // Look up `key = ...` binding in build and rule block.
-            Some(match rule.get(key) {
-                Some(val) => val.evaluate(&[&implicit_vars, build_vars, env]),
-                None => build_vars.get(key)?.evaluate(&[env]),
-            })
-        };
+        let env_list: Vec<&dyn Env> = vec![&implicit_vars, build_vars, env];
+        let mut lookup = Lookup::new(rule, env_list, build_vars);
 
-        let cmdline = lookup("command");
-        let desc = lookup("description");
-        let depfile = lookup("depfile");
-        let parse_showincludes = match lookup("deps").as_deref() {
-            None => false,
-            Some("gcc") => false,
-            Some("msvc") => true,
-            Some(other) => bail!("invalid deps attribute {:?}", other),
-        };
-        let pool = lookup("pool");
-
-        let rspfile_path = lookup("rspfile");
-        let rspfile_content = lookup("rspfile_content");
-        let rspfile = match (rspfile_path, rspfile_content) {
+        let rspfile_path = lookup.find("rspfile");
+        let rspfile_content = lookup.find("rspfile_content");
+        let rspfile = match (&rspfile_path, rspfile_content) {
             (None, None) => None,
             (Some(path), Some(content)) => Some(RspFile {
                 path: std::path::PathBuf::from(path),
@@ -158,6 +178,17 @@ impl Loader {
             }),
             _ => bail!("rspfile and rspfile_content need to be both specified"),
         };
+
+        let cmdline = lookup.find("command");
+        let desc = lookup.find("description");
+        let depfile = lookup.find("depfile");
+        let parse_showincludes = match lookup.find("deps").as_deref() {
+            None => false,
+            Some("gcc") => false,
+            Some("msvc") => true,
+            Some(other) => bail!("invalid deps attribute {:?}", other),
+        };
+        let pool = lookup.find("pool");
 
         build.cmdline = cmdline;
         build.desc = desc;
