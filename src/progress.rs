@@ -5,6 +5,7 @@ use crate::{
     graph::Build, graph::BuildId, process::Termination, task::TaskResult, terminal,
     work::BuildState, work::StateCounts,
 };
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::Arc;
@@ -25,22 +26,22 @@ pub fn build_message(build: &Build) -> &str {
 /// Trait for build progress notifications.
 pub trait Progress {
     /// Called as individual build tasks progress through build states.
-    fn update(&mut self, counts: &StateCounts);
+    fn update(&self, counts: &StateCounts);
 
     /// Called when a task starts.
-    fn task_started(&mut self, id: BuildId, build: &Build);
+    fn task_started(&self, id: BuildId, build: &Build);
 
     /// Called when a task's last line of output changes.
-    fn task_output(&mut self, id: BuildId, line: Vec<u8>);
+    fn task_output(&self, id: BuildId, line: Vec<u8>);
 
     /// Called when a task completes.
-    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult);
+    fn task_finished(&self, id: BuildId, build: &Build, result: &TaskResult);
 
     /// Log a line of output without corrupting the progress display.
     /// This line is persisted beyond further progress updates.  For example,
     /// used when a task fails; we want the final output to show that failed
     /// task's output even if we do more work after it fails.
-    fn log(&mut self, msg: &str);
+    fn log(&self, msg: &str);
 }
 
 /// Currently running build task, as tracked for progress updates.
@@ -62,40 +63,40 @@ pub struct DumbConsoleProgress {
 
     /// The id of the last command printed, used to avoid printing it twice
     /// when we have two updates from the same command in a row.
-    last_started: Option<BuildId>,
+    last_started: Cell<Option<BuildId>>,
 }
 
 impl DumbConsoleProgress {
     pub fn new(verbose: bool) -> Self {
         Self {
             verbose,
-            last_started: None,
+            last_started: Default::default(),
         }
     }
 }
 
 impl Progress for DumbConsoleProgress {
-    fn update(&mut self, _counts: &StateCounts) {
+    fn update(&self, _counts: &StateCounts) {
         // ignore
     }
 
-    fn task_started(&mut self, id: BuildId, build: &Build) {
+    fn task_started(&self, id: BuildId, build: &Build) {
         self.log(if self.verbose {
             build.cmdline.as_ref().unwrap()
         } else {
             build_message(build)
         });
-        self.last_started = Some(id);
+        self.last_started.set(Some(id));
     }
 
-    fn task_output(&mut self, _id: BuildId, _line: Vec<u8>) {
+    fn task_output(&self, _id: BuildId, _line: Vec<u8>) {
         // ignore
     }
 
-    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
+    fn task_finished(&self, id: BuildId, build: &Build, result: &TaskResult) {
         match result.termination {
             Termination::Success => {
-                if result.output.is_empty() || self.last_started == Some(id) {
+                if result.output.is_empty() || self.last_started.get() == Some(id) {
                     // Output is empty, or we just printed the command, don't print it again.
                 } else {
                     self.log(build_message(build))
@@ -109,7 +110,7 @@ impl Progress for DumbConsoleProgress {
         }
     }
 
-    fn log(&mut self, msg: &str) {
+    fn log(&self, msg: &str) {
         println!("{}", msg);
     }
 }
@@ -174,23 +175,23 @@ impl FancyConsoleProgress {
 }
 
 impl Progress for FancyConsoleProgress {
-    fn update(&mut self, counts: &StateCounts) {
+    fn update(&self, counts: &StateCounts) {
         self.state.lock().unwrap().update(counts);
     }
 
-    fn task_started(&mut self, id: BuildId, build: &Build) {
+    fn task_started(&self, id: BuildId, build: &Build) {
         self.state.lock().unwrap().task_started(id, build);
     }
 
-    fn task_output(&mut self, id: BuildId, line: Vec<u8>) {
+    fn task_output(&self, id: BuildId, line: Vec<u8>) {
         self.state.lock().unwrap().task_output(id, line);
     }
 
-    fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
+    fn task_finished(&self, id: BuildId, build: &Build, result: &TaskResult) {
         self.state.lock().unwrap().task_finished(id, build, result);
     }
 
-    fn log(&mut self, msg: &str) {
+    fn log(&self, msg: &str) {
         self.state.lock().unwrap().log(msg);
     }
 }

@@ -12,13 +12,13 @@ fn build(
     targets: Vec<String>,
     verbose: bool,
 ) -> anyhow::Result<Option<usize>> {
-    let (mut dumb_console, mut fancy_console);
-    let progress: &mut dyn Progress = if terminal::use_fancy() {
+    let (dumb_console, fancy_console);
+    let progress: &dyn Progress = if terminal::use_fancy() {
         fancy_console = FancyConsoleProgress::new(verbose);
-        &mut fancy_console
+        &fancy_console
     } else {
         dumb_console = DumbConsoleProgress::new(verbose);
-        &mut dumb_console
+        &dumb_console
     };
 
     let mut state = trace::scope("load::read", || load::read(&build_filename))?;

@@ -317,7 +317,7 @@ pub struct Options {
 pub struct Work<'a> {
     graph: Graph,
     db: db::Writer,
-    pub progress: &'a mut dyn Progress,
+    pub progress: &'a dyn Progress,
     options: Options,
     file_state: RefCell<FileState>,
     last_hashes: Hashes,
@@ -330,7 +330,7 @@ impl<'a> Work<'a> {
         last_hashes: Hashes,
         db: db::Writer,
         options: &Options,
-        progress: &'a mut dyn Progress,
+        progress: &'a dyn Progress,
         pools: SmallMap<String, usize>,
     ) -> Self {
         let file_state = RefCell::new(FileState::new(&graph));
