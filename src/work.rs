@@ -4,6 +4,7 @@ use crate::{
     canon::canon_path, db, densemap::DenseMap, graph::*, hash, process, progress,
     progress::Progress, signal, smallmap::SmallMap, task, trace,
 };
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
@@ -318,7 +319,7 @@ pub struct Work<'a> {
     db: db::Writer,
     pub progress: &'a mut dyn Progress,
     options: Options,
-    file_state: FileState,
+    file_state: RefCell<FileState>,
     last_hashes: Hashes,
     build_states: BuildStates,
 }
@@ -332,7 +333,7 @@ impl<'a> Work<'a> {
         progress: &'a mut dyn Progress,
         pools: SmallMap<String, usize>,
     ) -> Self {
-        let file_state = FileState::new(&graph);
+        let file_state = RefCell::new(FileState::new(&graph));
         let build_count = graph.builds.next_id();
         Work {
             graph,
@@ -368,8 +369,7 @@ impl<'a> Work<'a> {
 
     /// Check whether a given build is ready, generally after one of its inputs
     /// has been updated.
-    fn recheck_ready(&self, id: BuildId) -> bool {
-        let build = &self.graph.builds[id];
+    fn recheck_ready(&self, build: &Build) -> bool {
         // println!("recheck {:?} {} ({}...)", id, build.location, self.graph.file(build.outs()[0]).name);
         for &id in build.ordering_ins() {
             let file = self.graph.file(id);
@@ -393,19 +393,10 @@ impl<'a> Work<'a> {
     /// Return the id of any input file to a ready build step that is missing.
     /// Assumes the input dependencies have already executed, but otherwise
     /// may stat the file on disk.
-    fn ensure_input_files(
-        &mut self,
-        id: BuildId,
-        discovered: bool,
-    ) -> anyhow::Result<Option<FileId>> {
-        let build = &self.graph.builds[id];
-        let ids = if discovered {
-            build.discovered_ins()
-        } else {
-            build.dirtying_ins()
-        };
+    fn ensure_input_files(&self, build: &Build, ids: &[FileId]) -> anyhow::Result<Option<FileId>> {
+        let mut file_state = self.file_state.borrow_mut();
         for &id in ids {
-            let mtime = match self.file_state.get(id) {
+            let mtime = match file_state.get(id) {
                 Some(mtime) => mtime,
                 None => {
                     let file = self.graph.file(id);
@@ -428,7 +419,7 @@ impl<'a> Work<'a> {
                             file.name
                         );
                     }
-                    self.file_state.stat(id, file.path())?
+                    file_state.stat(id, file.path())?
                 }
             };
             if mtime == MTime::Missing {
@@ -441,6 +432,7 @@ impl<'a> Work<'a> {
     /// Given a task that just finished, record any discovered deps and hash.
     /// Postcondition: all outputs have been stat()ed.
     fn record_finished(&mut self, id: BuildId, result: task::TaskResult) -> anyhow::Result<()> {
+        let build = &self.graph.builds[id];
         // Clean up the deps discovered from the task.
         let mut deps = Vec::new();
         if let Some(names) = result.discovered_deps {
@@ -453,7 +445,7 @@ impl<'a> Work<'a> {
                 // Filter out any deps that were already dirtying in the build file.
                 // Note that it's allowed to have a duplicate against an order-only
                 // dep; see `discover_existing_dep` test.
-                if self.graph.builds[id].dirtying_ins().contains(&fileid) {
+                if build.dirtying_ins().contains(&fileid) {
                     continue;
                 }
                 deps.push(fileid);
@@ -462,23 +454,27 @@ impl<'a> Work<'a> {
 
         // We may have discovered new deps, so ensure we have mtimes for those.
         let deps_changed = self.graph.builds[id].update_discovered(deps);
+        let build = &self.graph.builds[id];
         if deps_changed {
-            if let Some(missing) = self.ensure_input_files(id, true)? {
+            if let Some(missing) = self.ensure_input_files(build, build.discovered_ins())? {
                 anyhow::bail!(
                     "{}: depfile references nonexistent {}",
-                    self.graph.builds[id].location,
+                    build.location,
                     self.graph.file(missing).name
                 );
             }
         }
 
-        let input_was_missing = self.graph.builds[id]
-            .dirtying_ins()
-            .iter()
-            .any(|&id| self.file_state.get(id).unwrap() == MTime::Missing);
+        let input_was_missing = {
+            let file_state = self.file_state.borrow();
+            self.graph.builds[id]
+                .dirtying_ins()
+                .iter()
+                .any(|&id| file_state.get(id).unwrap() == MTime::Missing)
+        };
 
         // Update any cached state of the output files to reflect their new state.
-        let output_was_missing = self.stat_all_outputs(id)?.is_some();
+        let output_was_missing = self.stat_all_outputs(build)?.is_some();
 
         if input_was_missing || output_was_missing {
             // If a file is missing, don't record the build in in the db.
@@ -486,8 +482,7 @@ impl<'a> Work<'a> {
             return Ok(());
         }
 
-        let build = &self.graph.builds[id];
-        let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
+        let hash = hash::hash_build(&self.graph.files, &*self.file_state.borrow(), build);
         self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
@@ -508,23 +503,23 @@ impl<'a> Work<'a> {
             }
         }
         for id in dependents {
-            if !self.recheck_ready(id) {
+            let build = &self.graph.builds[id];
+            if !self.recheck_ready(build) {
                 continue;
             }
-            self.build_states
-                .set(id, &self.graph.builds[id], BuildState::Ready);
+            self.build_states.set(id, build, BuildState::Ready);
         }
     }
 
     /// Stat all the outputs of a build.
     /// Called before it's run (for determining whether it's up to date) and
     /// after (to see if it touched any outputs).
-    fn stat_all_outputs(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
-        let build = &self.graph.builds[id];
+    fn stat_all_outputs(&self, build: &Build) -> anyhow::Result<Option<FileId>> {
+        let mut file_state = self.file_state.borrow_mut();
         let mut missing = None;
         for &id in build.outs() {
             let file = self.graph.file(id);
-            let mtime = self.file_state.stat(id, file.path())?;
+            let mtime = file_state.stat(id, file.path())?;
             if mtime == MTime::Missing && missing.is_none() {
                 missing = Some(id);
             }
@@ -538,17 +533,16 @@ impl<'a> Work<'a> {
     /// Returns a build error if any required input files are missing.
     /// Otherwise returns the missing id if any expected but not required files,
     /// e.g. outputs, are missing, implying that the build needs to be executed.
-    fn check_build_files_missing(&mut self, id: BuildId) -> anyhow::Result<Option<FileId>> {
+    fn check_build_files_missing(&self, build: &Build) -> anyhow::Result<Option<FileId>> {
         // Ensure we have state for all input files.
-        if let Some(missing) = self.ensure_input_files(id, false)? {
+        if let Some(missing) = self.ensure_input_files(build, build.dirtying_ins())? {
             let file = self.graph.file(missing);
             if file.input.is_none() {
-                let build = &self.graph.builds[id];
                 anyhow::bail!("{}: input {} missing", build.location, file.name);
             }
             return Ok(Some(missing));
         }
-        if let Some(missing) = self.ensure_input_files(id, true)? {
+        if let Some(missing) = self.ensure_input_files(build, build.discovered_ins())? {
             return Ok(Some(missing));
         }
 
@@ -557,7 +551,7 @@ impl<'a> Work<'a> {
         // and if we're checking if it's dirty we are visiting it the first
         // time, so we stat unconditionally.
         // This is looking at if the outputs are already present.
-        if let Some(missing) = self.stat_all_outputs(id)? {
+        if let Some(missing) = self.stat_all_outputs(build)? {
             return Ok(Some(missing));
         }
 
@@ -567,7 +561,7 @@ impl<'a> Work<'a> {
 
     /// Like check_build_files_missing, but for phony rules, which have
     /// different behavior for inputs.
-    fn check_build_files_missing_phony(&mut self, id: BuildId) -> anyhow::Result<()> {
+    fn check_build_files_missing_phony(&self, build: &Build) -> anyhow::Result<()> {
         // We don't consider the input files.  This works around
         //   https://github.com/ninja-build/ninja/issues/1779
         // which is a bug that a phony rule with a missing input
@@ -581,7 +575,7 @@ impl<'a> Work<'a> {
         // TODO: what should happen if a rule uses a phony output as its own input?
         // The Ninja manual suggests you can use phony rules to aggregate outputs
         // together, so we might need to create some sort of fake mtime here?
-        self.stat_all_outputs(id)?;
+        self.stat_all_outputs(build)?;
         Ok(())
     }
 
@@ -591,15 +585,14 @@ impl<'a> Work<'a> {
         let build = &self.graph.builds[id];
         let phony = build.cmdline.is_none();
         let file_missing = if phony {
-            self.check_build_files_missing_phony(id)?;
+            self.check_build_files_missing_phony(build)?;
             return Ok(false); // Phony builds never need to run anything.
         } else {
-            self.check_build_files_missing(id)?
+            self.check_build_files_missing(build)?
         };
 
         // If any files are missing, the build is dirty without needing
         // to consider hashes.
-        let build = &self.graph.builds[id];
         if let Some(missing) = file_missing {
             if self.options.explain {
                 self.progress.log(&format!(
@@ -630,14 +623,15 @@ impl<'a> Work<'a> {
             Some(prev_hash) => prev_hash,
         };
 
-        let hash = hash::hash_build(&self.graph.files, &self.file_state, build);
+        let file_state = self.file_state.borrow();
+        let hash = hash::hash_build(&self.graph.files, &*file_state, build);
         if prev_hash != hash {
             if self.options.explain {
                 self.progress
                     .log(&format!("explain: {}: manifest changed", build.location));
                 self.progress.log(&hash::explain_hash_build(
                     &self.graph.files,
-                    &self.file_state,
+                    &*file_state,
                     build,
                 ));
             }
