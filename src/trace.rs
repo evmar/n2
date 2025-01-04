@@ -101,9 +101,9 @@ pub fn open(path: &str) -> std::io::Result<()> {
 pub fn if_enabled(f: impl FnOnce(&mut Trace)) {
     // Safety: accessing global mut, not threadsafe.
     unsafe {
-        match &mut TRACE {
+        match TRACE {
             None => {}
-            Some(t) => f(t),
+            Some(ref mut t) => f(t),
         }
     }
 }
@@ -112,9 +112,9 @@ pub fn if_enabled(f: impl FnOnce(&mut Trace)) {
 pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     // Safety: accessing global mut, not threadsafe.
     unsafe {
-        match &mut TRACE {
+        match TRACE {
             None => f(),
-            Some(t) => t.scope(name, f),
+            Some(ref mut t) => t.scope(name, f),
         }
     }
 }
