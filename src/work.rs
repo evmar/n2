@@ -317,7 +317,7 @@ pub struct Options {
 pub struct Work<'a> {
     graph: Graph,
     db: db::Writer,
-    pub progress: &'a dyn Progress,
+    progress: &'a dyn Progress,
     options: Options,
     file_state: RefCell<FileState>,
     last_hashes: Hashes,
@@ -346,7 +346,7 @@ impl<'a> Work<'a> {
         }
     }
 
-    pub fn lookup(&mut self, name: &str) -> Option<FileId> {
+    pub fn lookup(&self, name: &str) -> Option<FileId> {
         self.graph.files.lookup(&canon_path(name))
     }
 
@@ -581,7 +581,7 @@ impl<'a> Work<'a> {
 
     /// Check a ready build for whether it needs to run, returning true if so.
     /// Prereq: any dependent input is already generated.
-    fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
+    fn check_build_dirty(&self, id: BuildId) -> anyhow::Result<bool> {
         let build = &self.graph.builds[id];
         let phony = build.cmdline.is_none();
         let file_missing = if phony {
