@@ -393,8 +393,12 @@ impl<'a> Work<'a> {
     /// Return the id of any input file to a ready build step that is missing.
     /// Assumes the input dependencies have already executed, but otherwise
     /// may stat the file on disk.
-    fn ensure_input_files(&self, build: &Build, ids: &[FileId]) -> anyhow::Result<Option<FileId>> {
-        let mut file_state = self.file_state.borrow_mut();
+    fn ensure_input_files(
+        &self,
+        file_state: &mut FileState,
+        build: &Build,
+        ids: &[FileId],
+    ) -> anyhow::Result<Option<FileId>> {
         for &id in ids {
             let mtime = match file_state.get(id) {
                 Some(mtime) => mtime,
@@ -461,15 +465,13 @@ impl<'a> Work<'a> {
         // in Meson a build step modifies an input in place(!) so just stat
         // everything.
         let mut input_was_missing = false;
-        {
-            let mut file_state = self.file_state.borrow_mut();
-            for &id in build.dirtying_ins().iter().chain(build.discovered_ins()) {
-                if file_state.stat(id, self.graph.file(id).path())? == MTime::Missing {
-                    input_was_missing = true;
-                }
+        let mut file_state = self.file_state.borrow_mut();
+        for &id in build.dirtying_ins().iter().chain(build.discovered_ins()) {
+            if file_state.stat(id, self.graph.file(id).path())? == MTime::Missing {
+                input_was_missing = true;
             }
         }
-        let output_was_missing = self.stat_all_outputs(build)?.is_some();
+        let output_was_missing = self.stat_all_outputs(&mut *file_state, build)?.is_some();
 
         if input_was_missing || output_was_missing {
             // If a file is missing, don't record the build in in the db.
@@ -477,7 +479,7 @@ impl<'a> Work<'a> {
             return Ok(());
         }
 
-        let hash = hash::hash_build(&self.graph.files, &*self.file_state.borrow(), build);
+        let hash = hash::hash_build(&self.graph.files, &*file_state, build);
         self.db.write_build(&self.graph, id, hash)?;
 
         Ok(())
@@ -509,8 +511,11 @@ impl<'a> Work<'a> {
     /// Stat all the outputs of a build.
     /// Called before it's run (for determining whether it's up to date) and
     /// after (to see if it touched any outputs).
-    fn stat_all_outputs(&self, build: &Build) -> anyhow::Result<Option<FileId>> {
-        let mut file_state = self.file_state.borrow_mut();
+    fn stat_all_outputs(
+        &self,
+        file_state: &mut FileState,
+        build: &Build,
+    ) -> anyhow::Result<Option<FileId>> {
         let mut missing = None;
         for &id in build.outs() {
             let file = self.graph.file(id);
@@ -528,16 +533,20 @@ impl<'a> Work<'a> {
     /// Returns a build error if any required input files are missing.
     /// Otherwise returns the missing id if any expected but not required files,
     /// e.g. outputs, are missing, implying that the build needs to be executed.
-    fn check_build_files_missing(&self, build: &Build) -> anyhow::Result<Option<FileId>> {
+    fn check_build_files_missing(
+        &self,
+        file_state: &mut FileState,
+        build: &Build,
+    ) -> anyhow::Result<Option<FileId>> {
         // Ensure we have state for all input files.
-        if let Some(missing) = self.ensure_input_files(build, build.dirtying_ins())? {
+        if let Some(missing) = self.ensure_input_files(file_state, build, build.dirtying_ins())? {
             let file = self.graph.file(missing);
             if file.input.is_none() {
                 anyhow::bail!("{}: input {} missing", build.location, file.name);
             }
             return Ok(Some(missing));
         }
-        if let Some(missing) = self.ensure_input_files(build, build.discovered_ins())? {
+        if let Some(missing) = self.ensure_input_files(file_state, build, build.discovered_ins())? {
             return Ok(Some(missing));
         }
 
@@ -546,7 +555,7 @@ impl<'a> Work<'a> {
         // and if we're checking if it's dirty we are visiting it the first
         // time, so we stat unconditionally.
         // This is looking at if the outputs are already present.
-        if let Some(missing) = self.stat_all_outputs(build)? {
+        if let Some(missing) = self.stat_all_outputs(&mut *file_state, build)? {
             return Ok(Some(missing));
         }
 
@@ -556,7 +565,11 @@ impl<'a> Work<'a> {
 
     /// Like check_build_files_missing, but for phony rules, which have
     /// different behavior for inputs.
-    fn check_build_files_missing_phony(&self, build: &Build) -> anyhow::Result<()> {
+    fn check_build_files_missing_phony(
+        &self,
+        file_state: &mut FileState,
+        build: &Build,
+    ) -> anyhow::Result<()> {
         // We don't consider the input files.  This works around
         //   https://github.com/ninja-build/ninja/issues/1779
         // which is a bug that a phony rule with a missing input
@@ -570,20 +583,21 @@ impl<'a> Work<'a> {
         // TODO: what should happen if a rule uses a phony output as its own input?
         // The Ninja manual suggests you can use phony rules to aggregate outputs
         // together, so we might need to create some sort of fake mtime here?
-        self.stat_all_outputs(build)?;
+        self.stat_all_outputs(file_state, build)?;
         Ok(())
     }
 
     /// Check a ready build for whether it needs to run, returning true if so.
     /// Prereq: any dependent input is already generated.
-    fn check_build_dirty(&self, id: BuildId) -> anyhow::Result<bool> {
+    fn check_build_dirty(&mut self, id: BuildId) -> anyhow::Result<bool> {
+        let mut file_state = self.file_state.borrow_mut();
         let build = &self.graph.builds[id];
         let phony = build.cmdline.is_none();
         let file_missing = if phony {
-            self.check_build_files_missing_phony(build)?;
+            self.check_build_files_missing_phony(&mut *file_state, build)?;
             return Ok(false); // Phony builds never need to run anything.
         } else {
-            self.check_build_files_missing(build)?
+            self.check_build_files_missing(&mut *file_state, build)?
         };
 
         // If any files are missing, the build is dirty without needing
@@ -618,7 +632,6 @@ impl<'a> Work<'a> {
             Some(prev_hash) => prev_hash,
         };
 
-        let file_state = self.file_state.borrow();
         let hash = hash::hash_build(&self.graph.files, &*file_state, build);
         if prev_hash != hash {
             if self.options.explain {
