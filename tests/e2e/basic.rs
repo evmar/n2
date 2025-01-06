@@ -232,9 +232,8 @@ rule touch_in
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "ran 1 task");
 
-    // TODO: to support meson, we need this second invocation to not build anything.
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
-    assert_output_contains(&out, "ran 1 task");
+    assert_output_contains(&out, "no work to do");
 
     Ok(())
 }

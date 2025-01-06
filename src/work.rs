@@ -433,7 +433,8 @@ impl<'a> Work<'a> {
     /// Postcondition: all outputs have been stat()ed.
     fn record_finished(&mut self, id: BuildId, result: task::TaskResult) -> anyhow::Result<()> {
         let build = &self.graph.builds[id];
-        // Clean up the deps discovered from the task.
+
+        // Update the deps discovered from the task.
         let mut deps = Vec::new();
         if let Some(names) = result.discovered_deps {
             for name in names {
@@ -451,29 +452,23 @@ impl<'a> Work<'a> {
                 deps.push(fileid);
             }
         }
-
-        // We may have discovered new deps, so ensure we have mtimes for those.
-        let deps_changed = self.graph.builds[id].update_discovered(deps);
+        self.graph.builds[id].set_discovered_ins(deps);
         let build = &self.graph.builds[id];
-        if deps_changed {
-            if let Some(missing) = self.ensure_input_files(build, build.discovered_ins())? {
-                anyhow::bail!(
-                    "{}: depfile references nonexistent {}",
-                    build.location,
-                    self.graph.file(missing).name
-                );
+
+        // Unconditionally stat all inputs and outputs.
+        // We need mtimes for all the files to record the finished build.
+        // We just stat()ed the inputs before running the build, but
+        // in Meson a build step modifies an input in place(!) so just stat
+        // everything.
+        let mut input_was_missing = false;
+        {
+            let mut file_state = self.file_state.borrow_mut();
+            for &id in build.dirtying_ins().iter().chain(build.discovered_ins()) {
+                if file_state.stat(id, self.graph.file(id).path())? == MTime::Missing {
+                    input_was_missing = true;
+                }
             }
         }
-
-        let input_was_missing = {
-            let file_state = self.file_state.borrow();
-            self.graph.builds[id]
-                .dirtying_ins()
-                .iter()
-                .any(|&id| file_state.get(id).unwrap() == MTime::Missing)
-        };
-
-        // Update any cached state of the output files to reflect their new state.
         let output_was_missing = self.stat_all_outputs(build)?.is_some();
 
         if input_was_missing || output_was_missing {

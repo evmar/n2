@@ -218,16 +218,6 @@ impl Build {
         &self.ins.ids[(self.ins.order_only + self.ins.explicit + self.ins.implicit)..]
     }
 
-    /// Potentially update discovered_ins with a new set of deps, returning true if they changed.
-    pub fn update_discovered(&mut self, deps: Vec<FileId>) -> bool {
-        if deps == self.discovered_ins {
-            false
-        } else {
-            self.set_discovered_ins(deps);
-            true
-        }
-    }
-
     pub fn set_discovered_ins(&mut self, deps: Vec<FileId>) {
         self.discovered_ins = deps;
     }

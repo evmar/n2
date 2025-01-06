@@ -38,28 +38,6 @@ build out: gendep
     Ok(())
 }
 
-/// depfile contains reference to missing file.
-#[test]
-fn depfile_missing_file() -> anyhow::Result<()> {
-    let space = TestSpace::new()?;
-    space.write(
-        "build.ninja",
-        &[
-            GENDEP_RULE,
-            "
-build out: gendep
-  dep_content = out: missing_file
-",
-            "",
-        ]
-        .join("\n"),
-    )?;
-
-    let out = space.run(&mut n2_command(vec!["out"]))?;
-    assert_output_contains(&out, "depfile references nonexistent missing_file");
-    Ok(())
-}
-
 /// depfile contains reference to existing order-only dep.
 #[test]
 fn discover_existing_dep() -> anyhow::Result<()> {
