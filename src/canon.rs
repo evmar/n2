@@ -86,25 +86,25 @@ pub fn canon_path_fast(path: &mut str) -> usize {
                             // ".."
                             peek = peek.add(1);
                             if !(peek == end || *peek == b'/' || *peek == b'\\') {
-                                // Componet that happens to start with "..".
+                                // Component that happens to start with "..".
                                 // Handle as an ordinary component.
-                                break;
-                            }
-                            // ".." component, try to back up.
-                            if let Some(ofs) = components.pop() {
-                                dst = ofs;
                             } else {
-                                *dst = b'.';
-                                dst = dst.add(1);
-                                *dst = b'.';
-                                dst = dst.add(1);
-                                if peek != end {
-                                    *dst = *peek;
+                                // ".." component, try to back up.
+                                if let Some(ofs) = components.pop() {
+                                    dst = ofs;
+                                } else {
+                                    *dst = b'.';
                                     dst = dst.add(1);
+                                    *dst = b'.';
+                                    dst = dst.add(1);
+                                    if peek != end {
+                                        *dst = *peek;
+                                        dst = dst.add(1);
+                                    }
                                 }
+                                src = src.add(3);
+                                continue;
                             }
-                            src = src.add(3);
-                            continue;
                         }
                         _ => {}
                     }
@@ -172,6 +172,12 @@ mod tests {
         assert_canon_path_eq("././", ".");
         assert_canon_path_eq("././.", ".");
         assert_canon_path_eq(".", ".");
+    }
+
+    #[test]
+    fn not_dot() {
+        assert_canon_path_eq("t/.hidden", "t/.hidden");
+        assert_canon_path_eq("t/.._lib.c.o", "t/.._lib.c.o");
     }
 
     #[test]
