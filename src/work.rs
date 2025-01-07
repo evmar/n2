@@ -197,25 +197,36 @@ impl BuildStates {
 
     /// Visits a BuildId that is an input to the desired output.
     /// Will recursively visit its own inputs.
+    /// Returns the state of the build after visiting it.
     fn want_build(
         &mut self,
         graph: &Graph,
         stack: &mut Vec<FileId>,
         id: BuildId,
-    ) -> anyhow::Result<()> {
-        if self.get(id) != BuildState::Unknown {
-            return Ok(()); // Already visited.
+    ) -> anyhow::Result<BuildState> {
+        let state = self.get(id);
+        if state != BuildState::Unknown {
+            return Ok(state); // Already visited.
         }
 
         let build = &graph.builds[id];
-        self.set(id, build, BuildState::Want);
+        let mut state = BuildState::Want;
 
-        // Any Build that doesn't depend on an output of another Build is ready.
+        // Any Build whose inputs are already in place is ready.
         let mut ready = true;
         for &id in build.ordering_ins() {
-            self.want_file(graph, stack, id)?;
-            ready = ready && graph.file(id).input.is_none();
+            if !self.want_file(graph, stack, id)? {
+                ready = false;
+            }
         }
+        if ready {
+            state = BuildState::Ready;
+        }
+
+        self.set(id, build, state);
+        // Warning: validations somehow allow cycles and rely on the build state
+        // being set here to avoid infinite loops.
+
         for &id in build.validation_ins() {
             // This build doesn't technically depend on the validation inputs, so
             // allocate a new stack. Validation inputs could in theory depend on this build's
@@ -224,20 +235,19 @@ impl BuildStates {
             self.want_file(graph, &mut stack, id)?;
         }
 
-        if ready {
-            self.set(id, build, BuildState::Ready);
-        }
-        Ok(())
+        Ok(state)
     }
 
     /// Visits a FileId that is an input to the desired output.
     /// Will recursively visit its own inputs.
+    /// Returns true if the file is ready to be used in a dependent build
+    /// (i.e. its inputs are already done).
     pub fn want_file(
         &mut self,
         graph: &Graph,
         stack: &mut Vec<FileId>,
         id: FileId,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         // Check for a dependency cycle.
         if let Some(cycle) = stack.iter().position(|&sid| sid == id) {
             let mut err = "dependency cycle: ".to_string();
@@ -248,12 +258,20 @@ impl BuildStates {
             anyhow::bail!(err);
         }
 
+        let mut ready = true;
         if let Some(bid) = graph.file(id).input {
             stack.push(id);
-            self.want_build(graph, stack, bid)?;
+            let state = self.want_build(graph, stack, bid)?;
+            // state can already be Done in the case where we executed a prior
+            // build (to generate build.ninja), brought the dependent
+            // up to date, and are reusing that state.
+            // In all other cases we expect it to not be Done.
+            if state != BuildState::Done {
+                ready = false;
+            }
             stack.pop();
         }
-        Ok(())
+        Ok(ready)
     }
 
     pub fn pop_ready(&mut self) -> Option<BuildId> {
@@ -351,7 +369,8 @@ impl<'a> Work<'a> {
 
     pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
         let mut stack = Vec::new();
-        self.build_states.want_file(&self.graph, &mut stack, id)
+        self.build_states.want_file(&self.graph, &mut stack, id)?;
+        Ok(())
     }
 
     pub fn want_every_file(&mut self, exclude: Option<FileId>) -> anyhow::Result<()> {

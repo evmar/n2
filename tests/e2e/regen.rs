@@ -41,6 +41,45 @@ EOT
 
 #[cfg(unix)]
 #[test]
+fn shared_regen_input() -> anyhow::Result<()> {
+    // When we attempt to build build.ninja and it already up to date,
+    // we attempt to reuse some build state.
+    // Ensure a dependency shared by build.ninja and the desired target,
+    // which itself has a build rule (here, phony) doesn't wedge the build.
+    let space = TestSpace::new()?;
+    let build_ninja = "
+rule regen
+  command = cp build.ninja.in build.ninja
+  description = regenerating
+  generator = 1
+build build.ninja: regen | build.ninja.in sharedinput
+rule touch
+  command = touch out
+build out: touch | sharedinput
+
+build sharedinput: phony
+";
+    space.write("build.ninja.in", build_ninja)?;
+    space.write("build.ninja", build_ninja)?;
+    // If this 'sharedinput' file doesn't exist, ninja will die after looping
+    // 100 times(!).
+    space.write("sharedinput", "")?;
+
+    // Run: expect to regenerate because we don't know how the file was made.
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "regenerating");
+    assert_output_contains(&out, "ran 2 tasks");
+
+    // Run: everything should be up to date.
+    let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    assert_output_not_contains(&out, "regenerating build.ninja");
+    assert_output_contains(&out, "no work");
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn generate_specified_build_file() -> anyhow::Result<()> {
     // Run a project where a build rule generates specified_build.ninja.
     let space = TestSpace::new()?;
