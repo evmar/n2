@@ -7,6 +7,9 @@ mod unix {
     }
 
     pub fn get_cols() -> Option<usize> {
+        if cfg!(miri) {
+            return None;
+        }
         unsafe {
             let mut winsize = std::mem::zeroed::<libc::winsize>();
             if libc::ioctl(0, libc::TIOCGWINSZ, &mut winsize) < 0 {
