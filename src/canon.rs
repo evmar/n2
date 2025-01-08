@@ -4,17 +4,16 @@ use std::mem::MaybeUninit;
 
 /// An on-stack stack of values.
 /// Used for tracking locations of parent components within a path.
-struct StackStack<T> {
+struct StackStack<T, const CAPACITY: usize> {
     n: usize,
-    vals: [MaybeUninit<T>; 60],
+    vals: [MaybeUninit<T>; CAPACITY],
 }
 
-impl<T: Copy> StackStack<T> {
+impl<T: Copy, const CAPACITY: usize> StackStack<T, CAPACITY> {
     fn new() -> Self {
         StackStack {
             n: 0,
-            // Safety: we only access vals[i] after setting it.
-            vals: unsafe { MaybeUninit::uninit().assume_init() },
+            vals: [MaybeUninit::uninit(); CAPACITY],
         }
     }
 
@@ -49,7 +48,7 @@ pub fn canon_path_fast(path: &mut str) -> usize {
     // We maintain the invariant that *dst always points to a point within
     // the buffer, and that src is always checked against end before reading.
     unsafe {
-        let mut components = StackStack::<*mut u8>::new();
+        let mut components = StackStack::<*mut u8, 60>::new();
         let mut dst = path.as_mut_ptr();
         let mut src = path.as_ptr();
         let start = path.as_mut_ptr();
