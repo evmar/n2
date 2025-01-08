@@ -2,7 +2,7 @@
 name = "n2"
 version = "0.1.0"
 categories = ["development-tools", "development-tools::build-utils"]
-edition = "2018"
+edition = "2021"
 exclude = [".github/*", ".vscode/*"]
 homepage = "https://github.com/evmar/n2"
 keywords = ["ninja", "build"]
