@@ -1,8 +1,15 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::{
-    canon::canon_path, db, densemap::DenseMap, graph::*, hash, process, progress,
-    progress::Progress, signal, smallmap::SmallMap, task, trace,
+    canon::{canon_path, canon_path_fast},
+    db,
+    densemap::DenseMap,
+    graph::*,
+    hash, process, progress,
+    progress::Progress,
+    signal,
+    smallmap::SmallMap,
+    task, trace,
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -461,8 +468,9 @@ impl<'a> Work<'a> {
         // Update the deps discovered from the task.
         let mut deps = Vec::new();
         if let Some(names) = result.discovered_deps {
-            for name in names {
-                let fileid = self.graph.files.id_from_canonical(canon_path(name));
+            for mut name in names {
+                canon_path_fast(&mut name);
+                let fileid = self.graph.files.id_from_canonical(name);
                 // Filter duplicates from the file list.
                 if deps.contains(&fileid) {
                     continue;

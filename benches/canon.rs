@@ -43,8 +43,7 @@ mod inplace {
     fn run(b: Bencher, path: &str) {
         b.with_inputs(|| path.to_string()).bench_values(|path| {
             let mut path = black_box(path);
-            let new_len = n2::canon::canon_path_fast(&mut path);
-            unsafe { path.as_mut_vec().set_len(new_len) };
+            n2::canon::canon_path_fast(&mut path);
             // Return the String buffer, so that the deallocation is not benchmarked.
             black_box(path)
         })

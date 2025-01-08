@@ -40,51 +40,49 @@ impl<T: Copy, const CAPACITY: usize> StackStack<T, CAPACITY> {
 /// Does not access the disk, but only simplifies things like
 /// "foo/./bar" => "foo/bar".
 /// These paths can show up due to variable expansion in particular.
-/// Returns the new length of the path, guaranteed <= the original length.
-#[must_use]
-pub fn canon_path_fast(path: &mut str) -> usize {
+pub fn canon_path_fast(path: &mut String) {
     assert!(!path.is_empty());
     // Safety: this traverses the path buffer to move data around.
     // We maintain the invariant that *dst always points to a point within
     // the buffer, and that src is always checked against end before reading.
     unsafe {
-        let mut components = StackStack::<*mut u8, 60>::new();
-        let mut dst = path.as_mut_ptr();
-        let mut src = path.as_ptr();
-        let start = path.as_mut_ptr();
-        let end = src.add(path.len());
+        let mut components = StackStack::<usize, 60>::new();
+        let mut dst = 0;
+        let mut src = 0;
+        let end = path.len();
+        let data = path.as_mut_ptr();
 
         if src == end {
-            return 0;
+            return;
         }
-        if *src == b'/' || *src == b'\\' {
-            src = src.add(1);
-            dst = dst.add(1);
+        if let b'/' | b'\\' = data.add(src).read() {
+            src += 1;
+            dst += 1;
         }
 
         // Outer loop: one iteration per path component.
         while src < end {
             // Peek ahead for special path components: "/", ".", and "..".
-            match *src {
+            match data.add(src).read() {
                 b'/' | b'\\' => {
-                    src = src.add(1);
+                    src += 1;
                     continue;
                 }
                 b'.' => {
-                    let mut peek = src.add(1);
+                    let mut peek = src + 1;
                     if peek == end {
                         break; // Trailing '.', trim.
                     }
-                    match *peek {
+                    match data.add(peek).read() {
                         b'/' | b'\\' => {
                             // "./", skip.
-                            src = src.add(2);
+                            src += 2;
                             continue;
                         }
                         b'.' => {
                             // ".."
-                            peek = peek.add(1);
-                            if !(peek == end || *peek == b'/' || *peek == b'\\') {
+                            peek = peek + (1);
+                            if !(peek == end || matches!(data.add(peek).read(), b'/' | b'\\')) {
                                 // Component that happens to start with "..".
                                 // Handle as an ordinary component.
                             } else {
@@ -92,16 +90,16 @@ pub fn canon_path_fast(path: &mut str) -> usize {
                                 if let Some(ofs) = components.pop() {
                                     dst = ofs;
                                 } else {
-                                    *dst = b'.';
-                                    dst = dst.add(1);
-                                    *dst = b'.';
-                                    dst = dst.add(1);
+                                    data.add(dst).write(b'.');
+                                    dst += 1;
+                                    data.add(dst).write(b'.');
+                                    dst += 1;
                                     if peek != end {
-                                        *dst = *peek;
-                                        dst = dst.add(1);
+                                        data.add(dst).write(data.add(peek).read());
+                                        dst += 1;
                                     }
                                 }
-                                src = src.add(3);
+                                src += 3;
                                 continue;
                             }
                         }
@@ -116,28 +114,28 @@ pub fn canon_path_fast(path: &mut str) -> usize {
 
             // Inner loop: copy one path component, including trailing '/'.
             while src < end {
-                *dst = *src;
-                src = src.add(1);
-                dst = dst.add(1);
-                if *src.offset(-1) == b'/' || *src.offset(-1) == b'\\' {
+                data.add(dst).write(data.add(src).read());
+                src += 1;
+                dst += 1;
+                if let b'/' | b'\\' = data.add(src - 1).read() {
                     break;
                 }
             }
         }
 
-        if dst == start {
-            *start = b'.';
-            1
+        if dst == 0 {
+            path.clear();
+            path.push_str(".");
         } else {
-            dst.offset_from(start) as usize
+            path.as_mut_vec().set_len(dst);
         }
     }
 }
 
-pub fn canon_path<T: Into<String>>(path: T) -> String {
+#[must_use = "this methods returns the canonicalized version; if possible, prefer `canon_path_fast`"]
+pub fn canon_path(path: impl Into<String>) -> String {
     let mut path = path.into();
-    let len = canon_path_fast(&mut path);
-    path.truncate(len);
+    canon_path_fast(&mut path);
     path
 }
 
