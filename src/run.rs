@@ -17,6 +17,7 @@ struct BuildArgs {
     verbose: bool,
 }
 
+/// Returns the number of completed tasks on a successful build.
 fn build(args: BuildArgs) -> anyhow::Result<Option<usize>> {
     let (dumb_console, fancy_console);
     let progress: &dyn Progress = if terminal::use_fancy() {
@@ -38,33 +39,32 @@ fn build(args: BuildArgs) -> anyhow::Result<Option<usize>> {
         state.pools,
     );
 
-    let mut tasks_finished = 0;
+    let mut tasks_run = 0;
 
     // Attempt to rebuild build.ninja.
     let build_file_target = work.lookup(&build_filename);
     if let Some(target) = build_file_target {
         work.want_file(target)?;
-        match trace::scope("work.run", || work.run())? {
-            None => return Ok(None),
-            Some(0) => {
-                // build.ninja already up to date.
-                // TODO: this logic is not right in the case where a build has
-                // a step that doesn't touch build.ninja.  We should instead
-                // verify the specific FileId was updated.
-            }
-            Some(n) => {
-                // Regenerated build.ninja; start over.
-                tasks_finished = n;
-                state = trace::scope("load::read", || load::read(&build_filename))?;
-                work = work::Work::new(
-                    state.graph,
-                    state.hashes,
-                    state.db,
-                    &args.options,
-                    progress,
-                    state.pools,
-                );
-            }
+        if !trace::scope("work.run", || work.run())? {
+            return Ok(None);
+        }
+        if work.tasks_run == 0 {
+            // build.ninja already up to date.
+            // TODO: this logic is not right in the case where a build has
+            // a step that doesn't touch build.ninja.  We should instead
+            // verify the specific FileId was updated.
+        } else {
+            // Regenerated build.ninja; start over.
+            tasks_run = work.tasks_run;
+            state = trace::scope("load::read", || load::read(&build_filename))?;
+            work = work::Work::new(
+                state.graph,
+                state.hashes,
+                state.db,
+                &args.options,
+                progress,
+                state.pools,
+            );
         }
     }
 
@@ -87,9 +87,11 @@ fn build(args: BuildArgs) -> anyhow::Result<Option<usize>> {
         work.want_every_file(build_file_target)?;
     }
 
-    let tasks = trace::scope("work.run", || work.run())?;
+    if !trace::scope("work.run", || work.run())? {
+        return Ok(None);
+    }
     // Include any tasks from initial build in final count of steps.
-    Ok(tasks.map(|n| n + tasks_finished))
+    Ok(Some(tasks_run + work.tasks_run))
 }
 
 fn default_parallelism() -> anyhow::Result<usize> {

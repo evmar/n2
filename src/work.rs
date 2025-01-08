@@ -30,7 +30,7 @@ pub enum BuildState {
     Queued,
     /// Currently executing.
     Running,
-    /// Finished executing successfully.
+    /// Already up to date, or finished executing successfully.
     Done,
     /// Finished executing but failed.
     Failed,
@@ -339,6 +339,7 @@ pub struct Work<'a> {
     file_state: FileState,
     last_hashes: Hashes,
     build_states: BuildStates,
+    pub tasks_run: usize,
 }
 
 impl<'a> Work<'a> {
@@ -360,6 +361,7 @@ impl<'a> Work<'a> {
             file_state,
             last_hashes,
             build_states: BuildStates::new(build_count, pools),
+            tasks_run: 0,
         }
     }
 
@@ -688,11 +690,10 @@ impl<'a> Work<'a> {
     }
 
     /// Runs the build.
-    /// Returns the number of tasks executed on successful builds, or None on failed builds.
-    pub fn run(&mut self) -> anyhow::Result<Option<usize>> {
+    /// Returns true on successful builds.
+    pub fn run(&mut self) -> anyhow::Result<bool> {
         #[cfg(unix)]
         signal::register_sigint();
-        let mut tasks_done = 0;
         let mut tasks_failed = 0;
         let mut runner = task::Runner::new(self.options.parallelism);
         while self.build_states.unfinished() {
@@ -771,7 +772,7 @@ impl<'a> Work<'a> {
                     if let Some(failures_left) = &mut self.options.failures_left {
                         *failures_left -= 1;
                         if *failures_left == 0 {
-                            return Ok(None);
+                            return Ok(false);
                         }
                     }
                     tasks_failed += 1;
@@ -780,10 +781,10 @@ impl<'a> Work<'a> {
                 }
                 process::Termination::Interrupted => {
                     // If the task was interrupted bail immediately.
-                    return Ok(None);
+                    return Ok(false);
                 }
                 process::Termination::Success => {
-                    tasks_done += 1;
+                    self.tasks_run += 1;
                     self.record_finished(task.buildid, task.result)?;
                     self.ready_dependents(task.buildid);
                 }
@@ -795,7 +796,7 @@ impl<'a> Work<'a> {
         // "interrupted by user" and exit with success, and in that case we
         // don't want n2 to print a "succeeded" message afterwards.
         let success = tasks_failed == 0 && !signal::was_interrupted();
-        Ok(success.then_some(tasks_done))
+        Ok(success)
     }
 }
 
