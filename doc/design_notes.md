@@ -137,8 +137,7 @@ there have been lots of bug reports over the years from people with Chinese
 output that is failing to parse right due to Windows code page mess.
 
 In any case, n2 doesn't support any of this for now, and instead just follows
-Ninja in treating paths as bytes. (n2 doesn't support `/showIncludes` or MSVC at
-all yet.)
+Ninja in treating paths as bytes.
 
 It's possibly a better design to require input files to always be UTF-8, though
 I think I'd want to better understand the `/showIncludes` situation. (The above
