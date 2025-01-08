@@ -48,14 +48,6 @@ impl Trace {
         .unwrap();
     }
 
-    fn scope<T>(&mut self, name: &str, f: impl FnOnce() -> T) -> T {
-        let start = Instant::now();
-        let result = f();
-        let end = Instant::now();
-        self.write_complete(name, 0, start, end);
-        result
-    }
-
     /*
     These functions were useful when developing, but are currently unused.
 
@@ -97,28 +89,33 @@ pub fn open(path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-#[inline]
-pub fn if_enabled(f: impl FnOnce(&mut Trace)) {
+pub fn enabled() -> bool {
+    // Safety: accessing global mut, not threadsafe.
+    unsafe { TRACE.is_some() }
+}
+
+pub fn write_complete(name: &str, tid: usize, start: Instant, end: Instant) {
     // Safety: accessing global mut, not threadsafe.
     unsafe {
-        match TRACE {
-            None => {}
-            Some(ref mut t) => f(t),
+        if let Some(ref mut t) = TRACE {
+            t.write_complete(name, tid, start, end);
         }
     }
 }
 
-#[inline]
 pub fn scope<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
-    // Safety: accessing global mut, not threadsafe.
-    unsafe {
-        match TRACE {
-            None => f(),
-            Some(ref mut t) => t.scope(name, f),
-        }
-    }
+    let start = Instant::now();
+    let result = f();
+    let end = Instant::now();
+    write_complete(name, 0, start, end);
+    result
 }
 
 pub fn close() {
-    if_enabled(|t| t.close());
+    // Safety: accessing global mut, not threadsafe.
+    unsafe {
+        if let Some(ref mut t) = TRACE {
+            t.close()
+        }
+    }
 }

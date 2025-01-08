@@ -759,10 +759,10 @@ impl<'a> Work<'a> {
                 self.progress.task_output(id, line);
             });
             let build = &self.graph.builds[task.buildid];
-            trace::if_enabled(|t| {
+            if trace::enabled() {
                 let desc = progress::build_message(build);
-                t.write_complete(desc, task.tid + 1, task.span.0, task.span.1);
-            });
+                trace::write_complete(desc, task.tid + 1, task.span.0, task.span.1);
+            }
 
             self.progress
                 .task_finished(task.buildid, build, &task.result);
