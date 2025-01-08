@@ -1,13 +1,14 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::{canon_path, canon_path_fast},
-    eval::{EvalPart, EvalString},
-    graph::{FileId, RspFile},
-    parse::Statement,
+    canon::{canonicalize_path, to_owned_canon_path},
+    db,
+    eval::{self, EvalPart, EvalString},
+    graph::{self, FileId, RspFile},
+    parse::{self, Statement},
     scanner,
     smallmap::SmallMap,
-    {db, eval, graph, parse, trace},
+    trace,
 };
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
@@ -70,7 +71,7 @@ impl Loader {
         // Perf: this is called while parsing build.ninja files.  We go to
         // some effort to avoid allocating in the common case of a path that
         // refers to a file that is already known.
-        canon_path_fast(&mut path);
+        canonicalize_path(&mut path);
         self.graph.files.id_from_canonical(path)
     }
 
@@ -248,7 +249,7 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
         let id = loader
             .graph
             .files
-            .id_from_canonical(canon_path(build_filename));
+            .id_from_canonical(to_owned_canon_path(build_filename));
         loader.read_file(id)
     })?;
     let mut hashes = graph::Hashes::default();

@@ -1,5 +1,6 @@
 //! Path canonicalization.
 
+use std::hint::assert_unchecked;
 use std::mem::MaybeUninit;
 
 /// An on-stack stack of values.
@@ -40,102 +41,105 @@ impl<T: Copy, const CAPACITY: usize> StackStack<T, CAPACITY> {
 /// Does not access the disk, but only simplifies things like
 /// "foo/./bar" => "foo/bar".
 /// These paths can show up due to variable expansion in particular.
-pub fn canon_path_fast(path: &mut String) {
+pub fn canonicalize_path(path: &mut String) {
     assert!(!path.is_empty());
-    // Safety: this traverses the path buffer to move data around.
-    // We maintain the invariant that *dst always points to a point within
-    // the buffer, and that src is always checked against end before reading.
-    unsafe {
-        let mut components = StackStack::<usize, 60>::new();
-        let mut dst = 0;
-        let mut src = 0;
-        let end = path.len();
-        let data = path.as_mut_ptr();
+    let mut components = StackStack::<usize, 60>::new();
 
-        if src == end {
-            return;
-        }
-        if let b'/' | b'\\' = data.add(src).read() {
-            src += 1;
-            dst += 1;
-        }
+    // Safety: we will modify the string by removing some ASCII characters in place
+    // and shifting other contents left to fill the gaps,
+    // so if it was valid UTF-8, it will remain that way.
+    let data = unsafe { path.as_mut_vec() };
+    // Invariant: dst <= src <= data.len()
+    let mut dst = 0;
+    let mut src = 0;
 
-        // Outer loop: one iteration per path component.
-        while src < end {
-            // Peek ahead for special path components: "/", ".", and "..".
-            match data.add(src).read() {
-                b'/' | b'\\' => {
-                    src += 1;
-                    continue;
-                }
-                b'.' => {
-                    let mut peek = src + 1;
-                    if peek == end {
-                        break; // Trailing '.', trim.
+    if let Some(b'/' | b'\\') = data.get(src) {
+        src += 1;
+        dst += 1;
+    };
+
+    // One iteration per path component.
+    while let Some(&current) = data.get(src) {
+        // Peek ahead for special path components: "/", ".", and "..".
+        match current {
+            b'/' | b'\\' => {
+                src += 1;
+                continue;
+            }
+            b'.' => {
+                let Some(&next) = data.get(src + 1) else {
+                    break; // Trailing '.', trim.
+                };
+                match next {
+                    b'/' | b'\\' => {
+                        // "./", skip.
+                        src += 2;
+                        continue;
                     }
-                    match data.add(peek).read() {
-                        b'/' | b'\\' => {
-                            // "./", skip.
-                            src += 2;
+                    // ".."
+                    b'.' => match data.get(src + 2) {
+                        None | Some(b'/' | b'\\') => {
+                            // ".." component, try to back up.
+                            if let Some(ofs) = components.pop() {
+                                dst = ofs;
+                            } else {
+                                // Safety: our invariant is dst <= src and we are inside a branch,
+                                // where even src + 2 < data.len()
+                                unsafe { assert_unchecked(dst < data.len()) };
+                                data[dst] = b'.';
+                                dst += 1;
+                                // Safety: see above
+                                unsafe { assert_unchecked(dst < data.len()) };
+                                data[dst] = b'.';
+                                dst += 1;
+                                if let Some(sep) = data.get(src + 2) {
+                                    // Safety: see above
+                                    unsafe { assert_unchecked(dst < data.len()) };
+                                    data[dst] = *sep;
+                                    dst += 1;
+                                }
+                            }
+                            src += 3;
                             continue;
                         }
-                        b'.' => {
-                            // ".."
-                            peek = peek + (1);
-                            if !(peek == end || matches!(data.add(peek).read(), b'/' | b'\\')) {
-                                // Component that happens to start with "..".
-                                // Handle as an ordinary component.
-                            } else {
-                                // ".." component, try to back up.
-                                if let Some(ofs) = components.pop() {
-                                    dst = ofs;
-                                } else {
-                                    data.add(dst).write(b'.');
-                                    dst += 1;
-                                    data.add(dst).write(b'.');
-                                    dst += 1;
-                                    if peek != end {
-                                        data.add(dst).write(data.add(peek).read());
-                                        dst += 1;
-                                    }
-                                }
-                                src += 3;
-                                continue;
-                            }
+                        _ => {
+                            // Component that happens to start with "..".
+                            // Handle as an ordinary component.
                         }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            }
-
-            // Mark this point as a possible target to pop to.
-            components.push(dst);
-
-            // Inner loop: copy one path component, including trailing '/'.
-            while src < end {
-                data.add(dst).write(data.add(src).read());
-                src += 1;
-                dst += 1;
-                if let b'/' | b'\\' = data.add(src - 1).read() {
-                    break;
+                    },
+                    _ => {}
                 }
             }
+            _ => {}
         }
 
-        if dst == 0 {
-            path.clear();
-            path.push_str(".");
-        } else {
-            path.as_mut_vec().set_len(dst);
-        }
+        // Mark this point as a possible target to pop to.
+        components.push(dst);
+
+        // Copy one path component, including trailing '/'.
+        let stop = match data[src..].iter().position(|c| matches!(c, b'/' | b'\\')) {
+            Some(pos) => src + pos + 1,
+            None => data.len(),
+        };
+        // Safety: dst <= src is out invariant, src <= stop <= data.len() by construction
+        unsafe { assert_unchecked(dst <= src && src <= stop && stop <= data.len()) };
+        data.copy_within(src..stop, dst);
+        dst += stop - src;
+        src = stop;
     }
+
+    if dst == 0 {
+        data[0] = b'.';
+        dst = 1;
+    }
+    // Safety: dst <= src <= len
+    unsafe { data.set_len(dst) };
 }
 
-#[must_use = "this methods returns the canonicalized version; if possible, prefer `canon_path_fast`"]
-pub fn canon_path(path: impl Into<String>) -> String {
+#[must_use = "this methods returns the canonicalized version; if possible, prefer `canonicalize_path`"]
+pub fn to_owned_canon_path(path: impl Into<String>) -> String {
     let mut path = path.into();
-    canon_path_fast(&mut path);
+    canonicalize_path(&mut path);
     path
 }
 
@@ -146,9 +150,9 @@ mod tests {
     // Assert that canon path equals expected path with different path separators
     #[track_caller]
     fn assert_canon_path_eq(left: &str, right: &str) {
-        assert_eq!(canon_path(left), right);
+        assert_eq!(to_owned_canon_path(left), right);
         assert_eq!(
-            canon_path(left.replace('/', "\\")),
+            to_owned_canon_path(left.replace('/', "\\")),
             right.replace('/', "\\")
         );
     }
