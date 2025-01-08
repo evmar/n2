@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::{io::Write, path::PathBuf, str::FromStr};
+use std::{hint::black_box, io::Write, path::PathBuf, str::FromStr};
 
 pub fn bench_canon(c: &mut Criterion) {
     // TODO switch to canon_path_fast
@@ -7,7 +7,7 @@ pub fn bench_canon(c: &mut Criterion) {
         b.iter(|| {
             let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\
                 CMakeFiles/OrcV2CBindingsVeryLazy.dir/OrcV2CBindingsVeryLazy.c.o";
-            n2::canon::canon_path(path);
+            black_box(n2::canon::canon_path(black_box(path)));
         })
     });
 
@@ -16,7 +16,7 @@ pub fn bench_canon(c: &mut Criterion) {
             let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\
                 ../../../\
                 CMakeFiles/OrcV2CBindingsVeryLazy.dir/OrcV2CBindingsVeryLazy.c.o";
-            n2::canon::canon_path(path);
+            black_box(n2::canon::canon_path(black_box(path)));
         })
     });
 }
