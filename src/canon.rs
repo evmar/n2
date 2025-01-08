@@ -146,6 +146,7 @@ mod tests {
     use super::*;
 
     // Assert that canon path equals expected path with different path separators
+    #[track_caller]
     fn assert_canon_path_eq(left: &str, right: &str) {
         assert_eq!(canon_path(left), right);
         assert_eq!(
