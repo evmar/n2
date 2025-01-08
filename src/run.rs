@@ -109,10 +109,6 @@ fn subtool(args: &mut BuildArgs, tool: &str) -> anyhow::Result<Option<i32>> {
             );
             return Ok(Some(1));
         }
-        "compdb" if args.fake_ninja_compat => {
-            // meson wants to invoke this tool.
-            return Ok(Some(0)); // do nothing; TODO
-        }
         "recompact" if args.fake_ninja_compat => {
             // CMake unconditionally invokes this tool, yuck.
             return Ok(Some(0)); // do nothing
@@ -200,11 +196,6 @@ options:
             Short('j') => args.options.parallelism = parser.value()?.parse()?,
             Short('k') => args.options.failures_left = Some(parser.value()?.parse()?),
             Short('v') => args.verbose = true,
-
-            Short('x') => {
-                // This is passed by meson, but we don't support it.
-                // TODO: this is a flag to -t compdb, not a toplevel flag
-            }
 
             Long("version") => {
                 if args.fake_ninja_compat {
