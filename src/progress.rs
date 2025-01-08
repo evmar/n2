@@ -286,25 +286,30 @@ impl FancyState {
     }
 
     fn print_progress(&mut self) {
+        use std::fmt::Write;
         self.clear_progress();
         let failed = self.counts.get(BuildState::Failed);
-        let mut progress_line = format!(
+        let mut buf = String::new();
+        write!(
+            &mut buf,
             "[{}] {}/{} done, ",
             progress_bar(&self.counts, 40),
             self.counts.get(BuildState::Done) + failed,
             self.counts.total()
-        );
+        )
+        .ok();
         if failed > 0 {
-            progress_line.push_str(&format!("{} failed, ", failed));
+            write!(&mut buf, "{} failed, ", failed).ok();
         }
-        progress_line.push_str(&format!(
-            "{}/{} running",
+        write!(
+            &mut buf,
+            "{}/{} running\n",
             self.tasks.len(),
             self.counts.get(BuildState::Queued)
                 + self.counts.get(BuildState::Running)
                 + self.counts.get(BuildState::Ready),
-        ));
-        println!("{}", progress_line);
+        )
+        .ok();
         let mut lines = 1;
 
         let max_cols = terminal::get_cols().unwrap_or(80);
@@ -312,23 +317,30 @@ impl FancyState {
         let now = Instant::now();
         for task in self.tasks.iter().take(max_tasks) {
             let delta = now.duration_since(task.start).as_secs() as usize;
-            println!("{}", task_message(&task.message, delta, max_cols));
+            write!(
+                &mut buf,
+                "{}\n",
+                task_message(&task.message, delta, max_cols)
+            )
+            .ok();
             lines += 1;
             if let Some(line) = &task.last_line {
                 let max_len = max_cols - 2;
-                println!("  {}", truncate(line, max_len));
+                write!(&mut buf, "  {}\n", truncate(line, max_len)).ok();
                 lines += 1;
             }
         }
 
         if self.tasks.len() > max_tasks {
             let remaining = self.tasks.len() - max_tasks;
-            println!("...and {} more", remaining);
+            write!(&mut buf, "...and {} more\n", remaining).ok();
             lines += 1;
         }
 
         // Move cursor up to the first printed line, for overprinting.
-        print!("\x1b[{}A", lines);
+        write!(&mut buf, "\x1b[{}A", lines).ok();
+        std::io::stdout().write_all(buf.as_bytes()).unwrap();
+
         self.dirty = false;
     }
 }
