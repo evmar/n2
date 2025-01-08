@@ -246,58 +246,45 @@ PS: in writing this section I noticed that cmd has
 ## Variable scope
 
 Ninja syntactic structures (`build`, `rule`) are at some level just lists of
-key-value bindings that ultimately combine to set properties on individual build
-steps, such as the `command = ...` command line.
+key-value bindings that ultimately combine to set properties such as the
+`command = ...` command line on individual build steps. Additionally, bindings
+can be referenced by other bindings via the `$foo` or `${foo}` syntax.
 
-Additionally, bindings can be referenced by other bindings via the `$foo` or
-`${foo}` syntax. This means variable lookup traverses through a hierarchy of
-scopes. The intent was this was simple enough that the behavior is
+Together this means variable lookup ("who sets the `command` attribute?") and
+evaluation ("given `command = $foo`, who defines `foo`?") traverse through a
+hierarchy of scopes.
+
+The original intent was this was simple enough that the behavior is
 straightforward, which in retrospect's insight really just means
-"underspecified". (Forgive me! I hacked Ninja together in a few weekends and
-made the all too easy mistake of "this is so simple I don't really need to think
-it through".)
-
-### Basics
-
-First, here's a high level description that conveys the idea but omits details.
-
-Consider a build file like the following:
-
-```
-var = $A
-
-rule r
-  command = $B
-
-build output-$C: r
-  var2 = $D
-```
-
-The `build` block stamps out a build step using the rule `r`, and the properties
-of that build step are found by looking up attributes like `command`.
-
-When evaluating the expressions marked `$A`/`$B`/`$C`/`$D` above, these are the
-scopes to consider, in order of nesting:
-
-1. The toplevel scope, which defines `var` above.
-1. The build variable scope, which defines `var2` above.
-1. The build file list scope, which defines the implicit `$in` etc. variables.
-1. The rule scope, which defines `command` above.
-
-References found in each may refer to the scopes above in the list. For example,
-at the time the `command = ...` is evaluated, the in-scope variables include
-`$in`, `$var2`, and `$var`.
-
-### Details
+"underspecified". I was working with some simple use cases like "override a C
+compiler flag in an otherwise simple build file". Forgive me! I hacked Ninja
+together in a few weekends and made the all too easy mistake of "this is so
+simple I don't really need to think it through".
 
 Unfortunately, [Hyrum's Law](https://www.hyrumslaw.com/) means that Ninja files
-in the wild depend on whatever the Ninja implementation allows, which is more
-complex than the above. I don't think it's really worth fleshing out all the
-idiosyncracies of Ninja's implementation as long as existing builds work, but
-some details do matter.
+in the wild depend on whatever the Ninja implementation allows, which ends up
+being complex. Since my time someone added a thing that even detects loops
+between variable references!
 
-In particular, Ninja has particular behaviors around variable references found
-within the same scope. Consider:
+I don't think it's really worth fleshing out all the idiosyncracies of Ninja's
+implementation as long as existing builds work, so here I hope to only write
+down the details that matter.
+
+### Edge lookup
+
+Given a `build`, what is its `command`? (Ninja calls `build` blocks "edges",
+which I will use here to reduce confusion with other "build" usages.)
+
+Ninja evaluates edge variable lookup in the following order:
+
+1. magic `$in`/`$out`
+1. edge attributes, expanded with file as scope
+1. rule attributes, expanded with edge as scope (this very list!)
+
+### Cycles
+
+Ninja has particular behaviors around variable references found within the same
+scope. Consider:
 
 ```
 var = 1
@@ -307,7 +294,6 @@ rule ...
   depfile = abc
 ```
 
-In Ninja, the value of `var` is `12`: the assignment proceeds from top down. But
+In Ninja, the value of `var` is `12`: the assignments proceed from top down. But
 within a `rule` block, the variable lookup of `$depfile` instead refers forward
-to `abc`, which means there is a possibility of circular references, along with
-logic that attempts to detect and warn in those cases(!).
+to `abc`, which means there is a possibility of circular references(!).
