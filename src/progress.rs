@@ -122,17 +122,24 @@ impl Progress for DumbConsoleProgress {
 /// clearing the console too.
 pub struct FancyConsoleProgress {
     state: Arc<Mutex<FancyState>>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Screen updates happen after this duration passes, to reduce the amount
 /// of printing in the case of rapid updates.  This helps with terminal flicker.
 const UPDATE_DELAY: Duration = std::time::Duration::from_millis(50);
 
+/// If there are no updates for this duration, the progress will print anyway.
+/// This lets the progress show ticking timers for long-running tasks so things
+/// do not appear hung.
+const TIMEOUT_DELAY: Duration = std::time::Duration::from_millis(500);
+
 impl FancyConsoleProgress {
     pub fn new(verbose: bool) -> Self {
         let dirty_cond = Arc::new(Condvar::new());
         let state = Arc::new(Mutex::new(FancyState {
             done: false,
+            pending: Vec::new(),
             dirty: false,
             dirty_cond: dirty_cond.clone(),
             counts: StateCounts::default(),
@@ -142,35 +149,37 @@ impl FancyConsoleProgress {
 
         // Thread to debounce status updates -- waits a bit, then prints after
         // any dirty state.
-        std::thread::spawn({
-            let state = state.clone();
+        let thread = std::thread::spawn({
+            let state_lock = state.clone();
             move || loop {
-                // Wait to be notified of a display update, or timeout at 500ms.
-                // The timeout is for the case where there are lengthy build
-                // steps and the progress will show how long they've been
-                // running.
+                // Wait to be notified of a display update or timeout.
                 {
                     let (state, _) = dirty_cond
                         .wait_timeout_while(
-                            state.lock().unwrap(),
-                            Duration::from_millis(500),
-                            |state| !state.dirty,
+                            state_lock.lock().unwrap(),
+                            TIMEOUT_DELAY - UPDATE_DELAY,
+                            |state| !state.done && !state.dirty,
                         )
                         .unwrap();
                     if state.done {
+                        std::io::stdout().write_all(&state.pending).unwrap();
                         break;
                     }
                 }
 
                 // Delay a little bit in case more display updates come in.
+                // We know .dirty will only ever be cleared below, so we
+                // can drop the lock here while we sleep.
                 std::thread::sleep(UPDATE_DELAY);
 
-                // Update regardless of whether we timed out or not.
-                state.lock().unwrap().print_progress();
+                state_lock.lock().unwrap().print_progress();
             }
         });
 
-        FancyConsoleProgress { state }
+        FancyConsoleProgress {
+            state,
+            thread: Some(thread),
+        }
     }
 }
 
@@ -199,11 +208,19 @@ impl Progress for FancyConsoleProgress {
 impl Drop for FancyConsoleProgress {
     fn drop(&mut self) {
         self.state.lock().unwrap().cleanup();
+        self.thread.take().unwrap().join().unwrap();
     }
 }
 
 struct FancyState {
     done: bool,
+
+    /// Text to print on the next update.
+    /// Typically starts with the "clear any existing progress bar" sequence.
+    pending: Vec<u8>,
+
+    /// True when there is new progress to display.
+    /// When set, will notify dirty_cond.
     dirty: bool,
     dirty_cond: Arc<Condvar>,
 
@@ -255,41 +272,33 @@ impl FancyState {
                 if result.output.is_empty() {
                     // Common case: don't show anything.
                 } else {
-                    self.log(build_message(build))
+                    self.log(build_message(build));
+                    self.pending.extend_from_slice(&result.output);
+                    if !result.output.ends_with(b"\n") {
+                        self.pending.push(b'\n');
+                    }
                 }
             }
             Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),
             Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
         };
-        if !result.output.is_empty() {
-            std::io::stdout().write_all(&result.output).unwrap();
-        }
         self.dirty();
     }
 
     fn log(&mut self, msg: &str) {
-        self.clear_progress();
-        println!("{}", msg);
+        self.pending.extend_from_slice(msg.as_bytes());
+        self.pending.push(b'\n');
         self.dirty();
     }
 
     fn cleanup(&mut self) {
-        self.clear_progress();
         self.done = true;
-        self.dirty(); // let thread quit
-    }
-
-    fn clear_progress(&self) {
-        // If the user hit ctl-c, it may have printed something on the line.
-        // So \r to go to first column first, then clear anything below.
-        std::io::stdout().write_all(b"\r\x1b[J").unwrap();
+        self.dirty(); // let thread print final time
     }
 
     fn print_progress(&mut self) {
-        use std::fmt::Write;
-        self.clear_progress();
         let failed = self.counts.get(BuildState::Failed);
-        let mut buf = String::new();
+        let mut buf: &mut Vec<u8> = &mut self.pending;
         write!(
             &mut buf,
             "[{}] {}/{} done, ",
@@ -339,7 +348,13 @@ impl FancyState {
 
         // Move cursor up to the first printed line, for overprinting.
         write!(&mut buf, "\x1b[{}A", lines).ok();
-        std::io::stdout().write_all(buf.as_bytes()).unwrap();
+        std::io::stdout().write_all(&buf).unwrap();
+
+        // Set up buf for next print.
+        // If the user hit ctl-c, it may have printed something on the line.
+        // So \r to go to first column first, then clear anything below.
+        buf.clear();
+        buf.extend_from_slice(b"\r\x1b[J");
 
         self.dirty = false;
     }
