@@ -1,12 +1,12 @@
 //! Build runner, choosing and executing tasks as determined by out of date inputs.
 
 use crate::{
-    canon::{canon_path, canon_path_fast},
+    canon::{canonicalize_path, to_owned_canon_path},
     db,
     densemap::DenseMap,
     graph::*,
-    hash, process, progress,
-    progress::Progress,
+    hash, process,
+    progress::{self, Progress},
     signal,
     smallmap::SmallMap,
     task, trace,
@@ -373,7 +373,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn lookup(&self, name: &str) -> Option<FileId> {
-        self.graph.files.lookup(&canon_path(name))
+        self.graph.files.lookup(&to_owned_canon_path(name))
     }
 
     pub fn want_file(&mut self, id: FileId) -> anyhow::Result<()> {
@@ -469,7 +469,7 @@ impl<'a> Work<'a> {
         let mut deps = Vec::new();
         if let Some(names) = result.discovered_deps {
             for mut name in names {
-                canon_path_fast(&mut name);
+                canonicalize_path(&mut name);
                 let fileid = self.graph.files.id_from_canonical(name);
                 // Filter duplicates from the file list.
                 if deps.contains(&fileid) {
