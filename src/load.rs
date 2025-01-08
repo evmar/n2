@@ -131,9 +131,10 @@ impl Loader {
         let build_vars = &b.vars;
         let lookup = |key: &str| -> Option<String> {
             // Look up `key = ...` binding in build and rule block.
-            Some(match rule.get(key) {
-                Some(val) => val.evaluate(&[&implicit_vars, build_vars, env]),
-                None => build_vars.get(key)?.evaluate(&[env]),
+            // See "Variable scope" in the design notes.
+            Some(match build_vars.get(key) {
+                Some(val) => val.evaluate(&[env]),
+                None => rule.get(key)?.evaluate(&[&implicit_vars, build_vars, env]),
             })
         };
 
