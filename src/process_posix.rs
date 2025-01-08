@@ -166,12 +166,7 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
 
         let mut actions = PosixSpawnFileActions::new()?;
         // open /dev/null over stdin
-        actions.addopen(
-            0,
-            std::ffi::CStr::from_bytes_with_nul_unchecked(b"/dev/null\0"),
-            libc::O_RDONLY,
-            0,
-        )?;
+        actions.addopen(0, c"/dev/null", libc::O_RDONLY, 0)?;
         // stdout/stderr => pipe
         actions.adddup2(pipe[1], 1)?;
         actions.adddup2(pipe[1], 2)?;
@@ -180,11 +175,11 @@ pub fn run_command(cmdline: &str, mut output_cb: impl FnMut(&[u8])) -> anyhow::R
         actions.addclose(pipe[1])?;
 
         let mut pid: libc::pid_t = 0;
-        let path = std::ffi::CStr::from_bytes_with_nul_unchecked(b"/bin/sh\0");
+        let path = c"/bin/sh";
         let cmdline_nul = std::ffi::CString::new(cmdline).unwrap();
         let argv: [*const libc::c_char; 4] = [
             path.as_ptr(),
-            b"-c\0".as_ptr() as *const _,
+            c"-c".as_ptr(),
             cmdline_nul.as_ptr(),
             std::ptr::null(),
         ];
