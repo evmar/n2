@@ -1,32 +1,39 @@
+//! Command line argument parsing and initial build invocation.
+
 use crate::{
     load,
     progress::{DumbConsoleProgress, FancyConsoleProgress, Progress},
     terminal, trace, work,
 };
 use anyhow::anyhow;
-use std::path::Path;
 
-fn build(
+/// Arguments to start a build, after parsing all the command line etc.
+#[derive(Default)]
+struct BuildArgs {
+    fake_ninja_compat: bool,
     options: work::Options,
-    build_filename: String,
+    build_filename: Option<String>,
     targets: Vec<String>,
     verbose: bool,
-) -> anyhow::Result<Option<usize>> {
+}
+
+fn build(args: BuildArgs) -> anyhow::Result<Option<usize>> {
     let (dumb_console, fancy_console);
     let progress: &dyn Progress = if terminal::use_fancy() {
-        fancy_console = FancyConsoleProgress::new(verbose);
+        fancy_console = FancyConsoleProgress::new(args.verbose);
         &fancy_console
     } else {
-        dumb_console = DumbConsoleProgress::new(verbose);
+        dumb_console = DumbConsoleProgress::new(args.verbose);
         &dumb_console
     };
 
-    let mut state = trace::scope("load::read", || load::read(&build_filename))?;
+    let build_filename = args.build_filename.as_deref().unwrap_or("build.ninja");
+    let mut state = trace::scope("load::read", || load::read(build_filename))?;
     let mut work = work::Work::new(
         state.graph,
         state.hashes,
         state.db,
-        &options,
+        &args.options,
         progress,
         state.pools,
     );
@@ -53,7 +60,7 @@ fn build(
                     state.graph,
                     state.hashes,
                     state.db,
-                    &options,
+                    &args.options,
                     progress,
                     state.pools,
                 );
@@ -61,8 +68,8 @@ fn build(
         }
     }
 
-    if !targets.is_empty() {
-        for name in &targets {
+    if !args.targets.is_empty() {
+        for name in &args.targets {
             let target = work
                 .lookup(name)
                 .ok_or_else(|| anyhow::anyhow!("unknown path requested: {:?}", name))?;
@@ -92,128 +99,143 @@ fn default_parallelism() -> anyhow::Result<usize> {
     Ok(usize::from(par))
 }
 
-#[derive(argh::FromArgs)] // this struct generates the flags and --help output
-/// n2, a ninja compatible build system
-struct Args {
-    /// chdir before running
-    #[argh(option, short = 'C')]
-    chdir: Option<String>,
-
-    /// input build file [default=build.ninja]
-    #[argh(option, short = 'f', default = "(\"build.ninja\".into())")]
-    build_file: String,
-
-    /// debugging tools
-    #[argh(option, short = 'd')]
-    debug: Option<String>,
-
-    /// subcommands
-    #[argh(option, short = 't')]
-    tool: Option<String>,
-
-    /// parallelism [default uses system thread count]
-    #[argh(option, short = 'j')] // tododefault_parallelism()")]
-    parallelism: Option<usize>,
-
-    /// keep going until at least N failures (0 means infinity) [default=1]
-    #[argh(option, short = 'k', default = "1")]
-    keep_going: usize,
-
-    /// print version (required by cmake)
-    #[argh(switch, hidden_help)]
-    version: bool,
-
-    /// compdb flag (required by meson)
-    #[allow(dead_code)]
-    #[argh(switch, short = 'x', hidden_help)]
-    expand_rspfile: bool,
-
-    /// print executed command lines
-    #[argh(switch, short = 'v')]
-    verbose: bool,
-
-    /// targets to build
-    #[argh(positional)]
-    targets: Vec<String>,
+/// Run a tool as specified by the `-t` flag`.
+fn subtool(args: &mut BuildArgs, tool: &str) -> anyhow::Result<Option<i32>> {
+    match tool {
+        "list" => {
+            println!("subcommands:");
+            println!(
+                "  (none yet, but see README if you're looking here trying to get CMake to work)"
+            );
+            return Ok(Some(1));
+        }
+        "compdb" if args.fake_ninja_compat => {
+            // meson wants to invoke this tool.
+            return Ok(Some(0)); // do nothing; TODO
+        }
+        "recompact" if args.fake_ninja_compat => {
+            // CMake unconditionally invokes this tool, yuck.
+            return Ok(Some(0)); // do nothing
+        }
+        "restat" if args.fake_ninja_compat => {
+            // CMake invokes this after generating build files; mark build
+            // targets as up to date by running the build with "adopt" flag
+            // on.
+            args.options.adopt = true;
+        }
+        _ => {
+            anyhow::bail!("unknown -t {:?}, use -t list to list", tool);
+        }
+    }
+    Ok(None)
 }
 
-fn run_impl() -> anyhow::Result<i32> {
-    let mut fake_ninja_compat = Path::new(&std::env::args().next().unwrap())
+/// Run a debug tool as specified by the `-d` flag.
+fn debugtool(args: &mut BuildArgs, tool: &str) -> anyhow::Result<Option<i32>> {
+    match tool {
+        "list" => {
+            println!("debug tools:");
+            println!("  ninja_compat  enable ninja quirks compatibility mode");
+            println!("  explain       print why each target is considered out of date");
+            println!("  trace         generate json performance trace");
+            return Ok(Some(1));
+        }
+
+        "ninja_compat" => args.fake_ninja_compat = true,
+        "explain" => args.options.explain = true,
+        "trace" => trace::open("trace.json")?,
+
+        _ => anyhow::bail!("unknown -d {:?}, use -d list to list", tool),
+    }
+    Ok(None)
+}
+
+fn parse_args() -> anyhow::Result<Result<BuildArgs, i32>> {
+    let mut args = BuildArgs::default();
+    args.fake_ninja_compat = std::path::Path::new(&std::env::args().next().unwrap())
         .file_name()
         .unwrap()
         == std::ffi::OsStr::new(&format!("ninja{}", std::env::consts::EXE_SUFFIX));
 
-    let args: Args = argh::from_env();
+    use lexopt::prelude::*;
+    let mut parser = lexopt::Parser::from_env();
+    while let Some(arg) = parser.next()? {
+        match arg {
+            Short('h') | Long("help") => {
+                println!(
+                    "n2: a ninja-compatible build tool
+usage: n2 [options] [targets...]
 
-    let mut options = work::Options {
-        parallelism: match args.parallelism {
-            Some(p) => p,
-            None => default_parallelism()?,
-        },
-        failures_left: Some(args.keep_going).filter(|&n| n > 0),
-        explain: false,
-        adopt: false,
+options:
+-C dir   chdir before running
+-f file  input build file [default: build.ninja]
+-j N     parallelism [default: use system thread count]
+-k N     keep going until at least N failures [default: 1]
+-v       print executed command lines
+
+-t tool  tools (`-t list` to list)
+-d tool  debugging tools (use `-d list` to list)
+"
+                );
+                return Ok(Err(0));
+            }
+
+            Short('C') => {
+                let dir = parser.value()?;
+                std::env::set_current_dir(&dir)
+                    .map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
+            }
+
+            Short('f') => args.build_filename = Some(parser.value()?.to_string_lossy().into()),
+            Short('t') => {
+                if let Some(exit) = subtool(&mut args, &*parser.value()?.to_string_lossy())? {
+                    return Ok(Err(exit));
+                }
+            }
+            Short('d') => {
+                if let Some(exit) = debugtool(&mut args, &*parser.value()?.to_string_lossy())? {
+                    return Ok(Err(exit));
+                }
+            }
+            Short('j') => args.options.parallelism = parser.value()?.parse()?,
+            Short('k') => args.options.failures_left = Some(parser.value()?.parse()?),
+            Short('v') => args.verbose = true,
+
+            Short('x') => {
+                // This is passed by meson, but we don't support it.
+                // TODO: this is a flag to -t compdb, not a toplevel flag
+            }
+
+            Long("version") => {
+                if args.fake_ninja_compat {
+                    // CMake requires a particular Ninja version.
+                    println!("1.10.2");
+                } else {
+                    println!("{}", env!("CARGO_PKG_VERSION"));
+                }
+                return Ok(Err(0));
+            }
+
+            Value(arg) => args.targets.push(arg.to_string_lossy().into()),
+
+            _ => anyhow::bail!("{}", arg.unexpected()),
+        }
+    }
+
+    if args.options.parallelism == 0 {
+        args.options.parallelism = default_parallelism()?;
+    }
+
+    Ok(Ok(args))
+}
+
+fn run_impl() -> anyhow::Result<i32> {
+    let args = match parse_args()? {
+        Ok(args) => args,
+        Err(exit) => return Ok(exit),
     };
 
-    if let Some(dir) = args.chdir {
-        let dir = Path::new(&dir);
-        std::env::set_current_dir(dir).map_err(|err| anyhow!("chdir {:?}: {}", dir, err))?;
-    }
-
-    if let Some(debug) = args.debug {
-        match debug.as_str() {
-            "ninja_compat" => fake_ninja_compat = true,
-            "explain" => options.explain = true,
-            "list" => {
-                println!("debug tools:");
-                println!("  explain  print why each target is considered out of date");
-                println!("  trace    generate json performance trace");
-                return Ok(1);
-            }
-            "trace" => trace::open("trace.json")?,
-            _ => anyhow::bail!("unknown -d {:?}, use -d list to list", debug),
-        }
-    }
-
-    if args.version {
-        if fake_ninja_compat {
-            // CMake requires a particular Ninja version.
-            println!("1.10.2");
-            return Ok(0);
-        } else {
-            println!("{}", env!("CARGO_PKG_VERSION"));
-        }
-        return Ok(0);
-    }
-
-    if let Some(tool) = args.tool {
-        match tool.as_str() {
-            "list" => {
-                println!("subcommands:");
-                println!("  (none yet, but see README if you're looking here trying to get CMake to work)");
-                return Ok(1);
-            }
-            "compdb" if fake_ninja_compat => {
-                // meson wants to invoke this tool.
-                return Ok(0); // do nothing; TODO
-            }
-            "recompact" if fake_ninja_compat => {
-                // CMake unconditionally invokes this tool, yuck.
-                return Ok(0); // do nothing
-            }
-            "restat" if fake_ninja_compat => {
-                // CMake invokes this after generating build files; mark build
-                // targets as up to date by running the build with "adopt" flag
-                // on.
-                options.adopt = true;
-            }
-            _ => {
-                anyhow::bail!("unknown -t {:?}, use -t list to list", tool);
-            }
-        }
-    }
-
-    match build(options, args.build_file, args.targets, args.verbose)? {
+    match build(args)? {
         None => {
             // Don't print any summary, the failing task is enough info.
             return Ok(1);

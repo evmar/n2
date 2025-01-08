@@ -16,7 +16,7 @@ description = "a ninja compatible build system"
 
 [dependencies]
 anyhow = "1.0"
-argh = "0.1.10"
+lexopt = "0.3.0"
 libc = "0.2"
 rustc-hash = "1.1.0"
 

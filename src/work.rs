@@ -321,7 +321,7 @@ impl BuildStates {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub failures_left: Option<usize>,
     pub parallelism: usize,
