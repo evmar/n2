@@ -46,12 +46,9 @@ lto = true
 name = "parse"
 harness = false
 
-# For Criterion reasons, we need bench=false for our lib/bin.
-[lib]
-bench = false
-[[bin]]
-name = "n2"
-bench = false
+[[bench]]
+name = "canon"
+harness = false
 
 [features]
 crlf = []
