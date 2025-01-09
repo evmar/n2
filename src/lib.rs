@@ -13,6 +13,8 @@ mod process_posix;
 #[cfg(windows)]
 mod process_win;
 mod progress;
+mod progress_dumb;
+mod progress_fancy;
 pub mod run;
 pub mod scanner;
 mod signal;

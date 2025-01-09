@@ -1,9 +1,8 @@
 //! Command line argument parsing and initial build invocation.
 
 use crate::{
-    load,
-    progress::{DumbConsoleProgress, FancyConsoleProgress, Progress},
-    terminal, trace, work,
+    load, progress::Progress, progress_dumb::DumbConsoleProgress,
+    progress_fancy::FancyConsoleProgress, terminal, trace, work,
 };
 use anyhow::anyhow;
 
