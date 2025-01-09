@@ -246,7 +246,7 @@ impl FancyState {
 
     fn task_started(&mut self, id: BuildId, build: &Build) {
         if self.verbose {
-            self.log(build.cmdline.as_ref().unwrap());
+            write!(&mut self.pending, "{}\n", build.cmdline.as_ref().unwrap()).ok();
         }
         let message = build_message(build);
         self.tasks.push_back(Task {
@@ -267,21 +267,23 @@ impl FancyState {
     fn task_finished(&mut self, id: BuildId, build: &Build, result: &TaskResult) {
         self.tasks
             .remove(self.tasks.iter().position(|t| t.id == id).unwrap());
+
+        // Show task name, status, and output.
+        let buf = &mut self.pending;
         match result.termination {
-            Termination::Success => {
-                if result.output.is_empty() {
-                    // Common case: don't show anything.
-                } else {
-                    self.log(build_message(build));
-                    self.pending.extend_from_slice(&result.output);
-                    if !result.output.ends_with(b"\n") {
-                        self.pending.push(b'\n');
-                    }
-                }
+            Termination::Success if result.output.is_empty() => {
+                // Common case: don't show anything.
+                return;
             }
-            Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),
-            Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
+            Termination::Success => write!(buf, "{}\n", build_message(build)).ok(),
+            Termination::Interrupted => write!(buf, "interrupted: {}\n", build_message(build)).ok(),
+            Termination::Failure => write!(buf, "failed: {}\n", build_message(build)).ok(),
         };
+        buf.extend_from_slice(&result.output);
+        if !result.output.ends_with(b"\n") {
+            buf.push(b'\n');
+        }
+
         self.dirty();
     }
 
