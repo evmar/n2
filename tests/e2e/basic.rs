@@ -304,3 +304,29 @@ fn builddir() -> anyhow::Result<()> {
     space.read("foo/.n2_db")?;
     Ok(())
 }
+
+/// Verify the error message when a command doesn't exist.
+#[test]
+fn missing_command() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            "rule nope",
+            "  command = n2_no_such_command",
+            "build out: nope",
+            "",
+        ]
+        .join("\n"),
+    )?;
+    let out = space.run(&mut n2_command(vec!["out"]))?;
+
+    if cfg!(windows) {
+        assert_output_contains(&out, "The system cannot find the file specified.");
+    } else {
+        // Note on my local shell it prints "command not found" but the GitHub CI
+        // /bin/sh prints "not found", so just look for that substring.
+        assert_output_contains(&out, "not found");
+    }
+    Ok(())
+}
