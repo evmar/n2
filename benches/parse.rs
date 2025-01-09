@@ -1,26 +1,5 @@
-use divan::{black_box, Bencher};
+use divan::Bencher;
 use std::{io::Write, path::PathBuf, str::FromStr};
-
-mod canon {
-    use super::*;
-    use n2::canon::canon_path;
-
-    #[divan::bench]
-    pub fn noop() {
-        // TODO switch to canon_path_fast
-        let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\
-CMakeFiles/OrcV2CBindingsVeryLazy.dir/OrcV2CBindingsVeryLazy.c.o";
-        black_box(canon_path(black_box(path)));
-    }
-
-    #[divan::bench]
-    pub fn with_parents() {
-        let path = "examples/OrcV2Examples/OrcV2CBindingsVeryLazy/\
-../../../\
-CMakeFiles/OrcV2CBindingsVeryLazy.dir/OrcV2CBindingsVeryLazy.c.o";
-        black_box(canon_path(black_box(path)));
-    }
-}
 
 fn generate_build_ninja(statement_count: usize) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
@@ -48,11 +27,7 @@ mod parser {
 
         bencher.bench_local(|| {
             let mut parser = Parser::new(&input);
-            loop {
-                if parser.read().unwrap().is_none() {
-                    break;
-                }
-            }
+            while let Some(_) = parser.read().unwrap() {}
         });
     }
 
@@ -69,11 +44,7 @@ mod parser {
         };
         bencher.bench_local(|| {
             let mut parser = n2::parse::Parser::new(&input);
-            loop {
-                if parser.read().unwrap().is_none() {
-                    break;
-                }
-            }
+            while let Some(_) = parser.read().unwrap() {}
         });
     }
 }
