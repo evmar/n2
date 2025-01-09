@@ -91,7 +91,7 @@ pub fn open(path: &str) -> std::io::Result<()> {
 
 pub fn enabled() -> bool {
     // Safety: accessing global mut, not threadsafe.
-    unsafe { TRACE.is_some() }
+    unsafe { matches!(TRACE, Some(_)) }
 }
 
 pub fn write_complete(name: &str, tid: usize, start: Instant, end: Instant) {
