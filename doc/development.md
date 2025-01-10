@@ -93,3 +93,5 @@ $ cargo bench --bench parse -- parse
 When iterating on benchmarks, it can help build time to disable `lto` in release
 mode by commenting out the `lto =` line in `Cargo.toml`. (On my system, `lto` is
 worth ~13% of parsing performance.)
+
+Read the test output in `target/criterion/report/index.html`.
