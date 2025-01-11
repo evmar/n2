@@ -118,35 +118,51 @@ Ninja
 which is to say it treated input build files as any byte stream that is ASCII
 compatible. In other words, any string of bytes found in a `build.ninja` is
 passed verbatim through printing to stdout and to the OS for path operations,
-which meant Ninja was compatible with both UTF-8 and other encodings. The intent
-is that those other encodings occur on Linuxes, especially in East Asia, and
-also it means Ninja doesn't need any specific handling of even UTF-8.
+which meant Ninja was compatible with both UTF-8 and other encodings where
+slashes were the ASCII slash byte. The intent is that those other encodings
+occur on Linuxes, especially in East Asia, and also it means Ninja doesn't need
+any specific handling of even UTF-8.
 
 It looks like since my time,
-[Ninja on Windows changed its input files to require UTF-8](https://github.com/ninja-build/ninja/pull/1915).
-As you can see from the comments on that bug, this area is unfortunately pretty
-subtle.
+[Ninja on Windows changed to require UTF-8 in its input files](https://github.com/ninja-build/ninja/pull/1915).
+As you can see from the comments on that bug, this was a breaking change in an
+area that is unfortunately pretty subtle.
 
 Windows is particularly fiddly not only because its native path representation
 is UTF-16 -- which is incompatible with the original byte stream assumption made
 by Ninja and which requires conversions -- but further because Ninja needs to
-parse the `/showIncludes` output from the MSVC compiler, which is localized. See
-the `msvc_deps_prefix` variable in
-[the Ninja docs on deps handling](https://ninja-build.org/manual.html#_deps);
-there have been lots of bug reports over the years from people with Chinese
+parse the `/showIncludes` output from the MSVC compiler, which includes
+localized strings. See the `msvc_deps_prefix` variable in
+[the Ninja docs on deps handling](https://ninja-build.org/manual.html#_deps).
+There have been lots of bug reports over the years from people with Chinese
 output that is failing to parse right due to Windows code page mess.
 
-In any case, n2 doesn't support any of this for now, and instead just follows
-Ninja in treating paths as bytes.
+For these reasons it's not clear to me that it's a better design to require
+input files to always be UTF-8. Perhaps in a UTF-8 world if you needed something
+other than UTF-8 in your `msvc_deps_prefix` we could provide some mechanism to
+encode escaped byte strings in the file, but it feels pretty gross.
 
-It's possibly a better design to require input files to always be UTF-8, though
-I think I'd want to better understand the `/showIncludes` situation. (The above
-Ninja bug observed this was a breaking change in Ninja, too.) Possibly we could
-mandate "input files are UTF-8, and if you need something other than UTF-8 in
-your `msvc_deps_prefix` it's on you to escape the exact byte sequence you
-desire". However, I'm not clear on whether all possible Windows paths are
-representable as UTF-8 or if we'd need to go down the WTF-8 route for full
-compatibility.
+### Path handling and Unicode safety
+
+In any case, n2 doesn't support any of this for now, and instead just follows
+old Ninja in treating paths as bytes. This will work up until people start
+attempting to use n2 with Chinese versions of Visual Studio, I guess.
+
+Concretely, we currently use Rust `String` for all paths and file contents, but
+internally interpret them as as bytes (not UTF-8) including using `unsafe`
+sometimes to convert. Based on my superficial understanding of how safety
+relates to UTF-8 in Rust strings, it's probably harmless given that we never
+treat strings as Unicode, but it's also possible some code outside of our
+control relies on this. But it does mean there's some extra `unsafe`s in the
+code, and some of them are possibly actually doing something bad.
+
+This has made some people upset, but in reality this is just some hobbyist code
+and non-ASCII build files are not at the top of my worries. Changing the type of
+strings to bags of bytes is a relatively straightforward but extremely tedious
+change, with impact on not only paths but also console output, error messages,
+debugging, etc. And it's ultimately not clear that using bags of bytes or even
+UTF-8 is the desired end state, so it's probably not worth doing until I figure
+that out.
 
 ## Tracking build state
 
