@@ -30,9 +30,11 @@ impl<'a> Scanner<'a> {
     pub fn slice(&self, start: usize, end: usize) -> &'a str {
         unsafe { std::str::from_utf8_unchecked(self.buf.get_unchecked(start..end)) }
     }
+
     pub fn peek(&self) -> char {
         unsafe { *self.buf.get_unchecked(self.ofs) as char }
     }
+
     pub fn peek_newline(&self) -> bool {
         if self.peek() == '\n' {
             return true;
@@ -43,6 +45,7 @@ impl<'a> Scanner<'a> {
         let peek2 = unsafe { *self.buf.get_unchecked(self.ofs + 1) as char };
         self.peek() == '\r' && peek2 == '\n'
     }
+
     pub fn next(&mut self) {
         if self.peek() == '\n' {
             self.line += 1;
@@ -52,6 +55,7 @@ impl<'a> Scanner<'a> {
         }
         self.ofs += 1;
     }
+
     pub fn back(&mut self) {
         if self.ofs == 0 {
             panic!("back at start")
@@ -61,11 +65,13 @@ impl<'a> Scanner<'a> {
             self.line -= 1;
         }
     }
+
     pub fn read(&mut self) -> char {
         let c = self.peek();
         self.next();
         c
     }
+
     pub fn skip(&mut self, ch: char) -> bool {
         if self.peek() == ch {
             self.next();
