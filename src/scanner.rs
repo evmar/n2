@@ -150,3 +150,23 @@ pub fn read_file_with_nul(path: &Path) -> std::io::Result<Vec<u8>> {
     bytes.push(0);
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scanner() {
+        let buf = b"1\n12\n\0";
+        let mut s = Scanner::new(buf);
+        assert_eq!(s.peek(), '1');
+        s.next();
+        assert_eq!(s.read(), '\n');
+        assert_eq!(s.line, 2);
+        assert_eq!(s.peek(), '1');
+
+        s.back();
+        assert_eq!(s.line, 1);
+        assert_eq!(s.read(), '\n');
+    }
+}
