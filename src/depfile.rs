@@ -11,7 +11,6 @@ fn skip_spaces(scanner: &mut Scanner) -> ParseResult<()> {
         match scanner.read() {
             ' ' => {}
             '\\' => match scanner.read() {
-                '\r' => scanner.expect('\n')?,
                 '\n' => {}
                 _ => return scanner.parse_error("invalid backslash escape"),
             },
@@ -33,12 +32,12 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
     let start = scanner.ofs;
     loop {
         match scanner.read() {
-            '\0' | ' ' | '\r' | '\n' => {
+            '\0' | ' ' | '\n' => {
                 scanner.back();
                 break;
             }
             '\\' => {
-                if scanner.peek_newline() {
+                if scanner.peek() == '\n' {
                     scanner.back();
                     break;
                 }
@@ -57,7 +56,7 @@ fn read_path<'a>(scanner: &mut Scanner<'a>) -> ParseResult<Option<&'a str>> {
 pub fn parse<'a>(scanner: &mut Scanner<'a>) -> ParseResult<SmallMap<&'a str, Vec<&'a str>>> {
     let mut result = SmallMap::default();
     loop {
-        while scanner.peek() == ' ' || scanner.peek_newline() {
+        while matches!(scanner.peek(), ' ' | '\n') {
             scanner.next();
         }
         let target = match read_path(scanner)? {
@@ -105,14 +104,15 @@ mod tests {
     }
 
     fn test_for_crlf(input: &str, test: fn(String)) {
-        let crlf = input.replace('\n', "\r\n");
-        for test_case in [String::from(input), crlf] {
-            test(test_case);
+        test(input.to_string());
+        if cfg!(feature = "crlf") {
+            let crlf = input.replace('\n', "\r\n");
+            test(crlf);
         }
     }
 
     #[test]
-    fn test_parse() {
+    fn test_parse_simple() {
         test_for_crlf(
             "build/browse.o: src/browse.cc src/browse.h build/browse_py.h\n",
             |text| {

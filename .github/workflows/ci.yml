@@ -31,6 +31,6 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
         path: ~/.cargo/registry
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose -F crlf
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose -F crlf
