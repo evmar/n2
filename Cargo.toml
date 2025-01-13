@@ -52,3 +52,6 @@ bench = false
 [[bin]]
 name = "n2"
 bench = false
+
+[features]
+crlf = []

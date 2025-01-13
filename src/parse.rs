@@ -74,7 +74,7 @@ impl<'text> Parser<'text> {
         loop {
             match self.scanner.peek() {
                 '\0' => return Ok(None),
-                '\n' | '\r' => self.scanner.next(),
+                '\n' => self.scanner.next(),
                 '#' => self.skip_comment()?,
                 ' ' | '\t' => return self.scanner.parse_error("unexpected whitespace"),
                 _ => {
@@ -111,13 +111,11 @@ impl<'text> Parser<'text> {
         self.scanner.expect('=')?;
         self.skip_spaces();
         // read_eval will error out if there's nothing to read
-        if self.scanner.peek_newline() {
-            self.scanner.skip('\r');
+        if self.scanner.peek() == '\n' {
             self.scanner.expect('\n')?;
             return Ok(EvalString::new(Vec::new()));
         }
         let result = self.read_eval(false);
-        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         result
     }
@@ -144,7 +142,6 @@ impl<'text> Parser<'text> {
 
     fn read_rule(&mut self) -> ParseResult<Rule<'text>> {
         let name = self.read_ident()?;
-        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars(|var| {
             matches!(
@@ -167,7 +164,6 @@ impl<'text> Parser<'text> {
 
     fn read_pool(&mut self) -> ParseResult<Pool<'text>> {
         let name = self.read_ident()?;
-        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars(|var| matches!(var, "depth"))?;
         let mut depth = 0;
@@ -186,10 +182,7 @@ impl<'text> Parser<'text> {
         v: &mut Vec<EvalString<&'text str>>,
     ) -> ParseResult<()> {
         self.skip_spaces();
-        while self.scanner.peek() != ':'
-            && self.scanner.peek() != '|'
-            && !self.scanner.peek_newline()
-        {
+        while !matches!(self.scanner.peek(), ':' | '|' | '\n') {
             v.push(self.read_eval(true)?);
             self.skip_spaces();
         }
@@ -244,7 +237,6 @@ impl<'text> Parser<'text> {
         }
         let validation_ins = ins.len() - order_only_ins - implicit_ins - explicit_ins;
 
-        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         let vars = self.read_scoped_vars(|_| true)?;
         Ok(Build {
@@ -267,7 +259,6 @@ impl<'text> Parser<'text> {
         if defaults.is_empty() {
             return self.scanner.parse_error("expected path");
         }
-        self.scanner.skip('\r');
         self.scanner.expect('\n')?;
         Ok(defaults)
     }
@@ -320,10 +311,6 @@ impl<'text> Parser<'text> {
                         self.scanner.back();
                         break self.scanner.ofs;
                     }
-                    '\r' if self.scanner.peek() == '\n' => {
-                        self.scanner.back();
-                        break self.scanner.ofs;
-                    }
                     '$' => {
                         let end = self.scanner.ofs - 1;
                         if end > ofs {
@@ -342,10 +329,6 @@ impl<'text> Parser<'text> {
                 match self.scanner.read() {
                     '\0' => return self.scanner.parse_error("unexpected EOF"),
                     '\n' => {
-                        self.scanner.back();
-                        break self.scanner.ofs;
-                    }
-                    '\r' if self.scanner.peek() == '\n' => {
                         self.scanner.back();
                         break self.scanner.ofs;
                     }
@@ -396,11 +379,6 @@ impl<'text> Parser<'text> {
                 self.scanner.skip_spaces();
                 EvalPart::Literal(self.scanner.slice(0, 0))
             }
-            '\r' if self.scanner.peek() == '\n' => {
-                self.scanner.next();
-                self.scanner.skip_spaces();
-                EvalPart::Literal(self.scanner.slice(0, 0))
-            }
             ' ' | '$' | ':' => {
                 EvalPart::Literal(self.scanner.slice(self.scanner.ofs - 1, self.scanner.ofs))
             }
@@ -430,11 +408,10 @@ impl<'text> Parser<'text> {
             match self.scanner.read() {
                 ' ' => {}
                 '$' => {
-                    if !self.scanner.peek_newline() {
+                    if self.scanner.peek() != '\n' {
                         self.scanner.back();
                         return;
                     }
-                    self.scanner.skip('\r');
                     self.scanner.skip('\n');
                 }
                 _ => {
@@ -458,9 +435,10 @@ mod tests {
 
     fn test_for_line_endings(input: &[&str], test: fn(&str)) {
         let test_case_lf = input.join("\n");
-        let test_case_crlf = input.join("\r\n");
-        for test_case in [test_case_lf, test_case_crlf] {
-            test(&test_case);
+        test(&test_case_lf);
+        if cfg!(feature = "crlf") {
+            let test_case_crlf = input.join("\r\n");
+            test(&test_case_crlf);
         }
     }
 

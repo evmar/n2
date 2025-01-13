@@ -31,29 +31,32 @@ impl<'a> Scanner<'a> {
         unsafe { std::str::from_utf8_unchecked(self.buf.get_unchecked(start..end)) }
     }
 
-    pub fn peek(&self) -> char {
+    /// Assert the current position points at a \r\n pair.
+    /// Used to skip over \r\n pairs in the input.
+    #[cfg(feature = "crlf")]
+    #[track_caller]
+    fn assert_crlf(&self) {
+        assert!(self.ofs < self.buf.len() - 2);
+        assert!(self.buf[self.ofs] == b'\r');
+        assert!(self.buf[self.ofs + 1] == b'\n');
+    }
+
+    fn get(&self) -> char {
         unsafe { *self.buf.get_unchecked(self.ofs) as char }
     }
 
-    pub fn peek_newline(&self) -> bool {
-        if self.peek() == '\n' {
-            return true;
+    pub fn peek(&self) -> char {
+        let c = self.get();
+        #[cfg(feature = "crlf")]
+        if c == '\r' {
+            self.assert_crlf();
+            return '\n';
         }
-        if self.ofs >= self.buf.len() - 1 {
-            return false;
-        }
-        let peek2 = unsafe { *self.buf.get_unchecked(self.ofs + 1) as char };
-        self.peek() == '\r' && peek2 == '\n'
+        c
     }
 
     pub fn next(&mut self) {
-        if self.peek() == '\n' {
-            self.line += 1;
-        }
-        if self.ofs == self.buf.len() {
-            panic!("scanned past end")
-        }
-        self.ofs += 1;
+        self.read();
     }
 
     pub fn back(&mut self) {
@@ -61,23 +64,39 @@ impl<'a> Scanner<'a> {
             panic!("back at start")
         }
         self.ofs -= 1;
-        if self.peek() == '\n' {
+        if self.get() == '\n' {
+            if self.ofs > 0 && self.buf[self.ofs - 1] == b'\r' {
+                self.ofs -= 1;
+            }
             self.line -= 1;
         }
     }
 
     pub fn read(&mut self) -> char {
-        let c = self.peek();
-        self.next();
+        #[allow(unused_mut)]
+        let mut c = self.get();
+        #[cfg(feature = "crlf")]
+        if c == '\r' {
+            self.assert_crlf();
+            self.ofs += 1;
+            c = '\n';
+        }
+        if c == '\n' {
+            self.line += 1;
+        }
+        if self.ofs == self.buf.len() {
+            panic!("scanned past end")
+        }
+        self.ofs += 1;
         c
     }
 
     pub fn skip(&mut self, ch: char) -> bool {
-        if self.peek() == ch {
-            self.next();
-            return true;
+        if self.read() != ch {
+            self.back();
+            return false;
         }
-        false
+        true
     }
 
     pub fn skip_spaces(&mut self) {

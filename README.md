@@ -15,6 +15,8 @@ missing some features but is faster to build and has a better UI; see
 ```
 $ cargo install --locked --git https://github.com/evmar/n2
 # (installs into ~/.cargo/bin/)
+# On Windows, add `--features crlf` to support files with CRLF linefeeds --
+# costs 10% in file parse time.
 
 $ n2 -C some/build/dir some-target
 ```
