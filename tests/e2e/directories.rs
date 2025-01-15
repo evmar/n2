@@ -14,10 +14,18 @@ build out: list_files .
 ",
     )?;
     space.write("foo", "")?;
-    space.run_expect(&mut n2_command(vec!["out"]))?;
+
+    let out = space.run_expect(&mut n2_command(vec!["-d", "explain", "out"]))?;
+    assert_output_contains(&out, "ran 1 task");
     assert_eq!(space.read("out")?, b"build.ninja\nfoo\nout\n");
+
+    let out = space.run_expect(&mut n2_command(vec!["-d", "explain", "out"]))?;
+    assert_output_contains(&out, "no work to do");
+
+    // Expect: writing a file modifies the current directory's mtime, triggering a build.
     space.write("foo2", "")?;
-    space.run_expect(&mut n2_command(vec!["out"]))?;
+    let out = space.run_expect(&mut n2_command(vec!["-d", "explain", "out"]))?;
+    assert_output_contains(&out, "ran 1 task");
     assert_eq!(space.read("out")?, b"build.ninja\nfoo\nfoo2\nout\n");
 
     Ok(())
