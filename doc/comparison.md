@@ -19,10 +19,10 @@ Here are some things n2 improves over Ninja:
 
 Some extra build variables are available only in n2:
 
-- `hide_progress`: build edges with this flag will not show the last
-line of output in the fancy progress output.
-- `hide_success`: build edges with this flag will not show the complete
-command output when the command completes successfully.
+- `hide_progress`: build edges with this flag will not show the last line of
+  output in the fancy progress output.
+- `hide_success`: build edges with this flag will not show the complete command
+  output when the command completes successfully.
 
 ## Missing
 
