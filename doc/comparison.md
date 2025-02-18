@@ -15,6 +15,15 @@ Here are some things n2 improves over Ninja:
 - `-d trace` generates a performance trace that can be visualized by Chrome's
   `about:tracing` or alternatives (speedscope, perfetto).
 
+### Extensions
+
+Some extra build variables are available only in n2:
+
+- `hide_progress`: build edges with this flag will not show the last
+line of output in the fancy progress output.
+- `hide_success`: build edges with this flag will not show the complete
+command output when the command completes successfully.
+
 ## Missing
 
 - Windows is incomplete.
