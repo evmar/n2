@@ -158,8 +158,8 @@ impl Loader {
             }),
             _ => bail!("rspfile and rspfile_content need to be both specified"),
         };
-        let hide_success = lookup("hide_success").as_deref() == Some("1");
-        let hide_progress = lookup("hide_progress").as_deref() == Some("1");
+        let hide_success = lookup("hide_success").is_some();
+        let hide_progress = lookup("hide_progress").is_some();
 
         build.cmdline = cmdline;
         build.desc = desc;
