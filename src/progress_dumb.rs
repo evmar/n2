@@ -46,6 +46,7 @@ impl Progress for DumbConsoleProgress {
     }
 
     fn task_finished(&self, id: BuildId, build: &Build, result: &TaskResult) {
+        let mut hide_output = result.output.is_empty();
         match result.termination {
             Termination::Success => {
                 if result.output.is_empty() || self.last_started.get() == Some(id) {
@@ -53,11 +54,14 @@ impl Progress for DumbConsoleProgress {
                 } else {
                     self.log(build_message(build))
                 }
+                if build.hide_success {
+                    hide_output = true;
+                }
             }
             Termination::Interrupted => self.log(&format!("interrupted: {}", build_message(build))),
             Termination::Failure => self.log(&format!("failed: {}", build_message(build))),
         };
-        if !result.output.is_empty() {
+        if !hide_output {
             std::io::stdout().write_all(&result.output).unwrap();
         }
     }
