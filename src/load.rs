@@ -159,7 +159,7 @@ impl Loader {
             _ => bail!("rspfile and rspfile_content need to be both specified"),
         };
         let hide_success = lookup("hide_success").as_deref() == Some("1");
-        let hide_last_line = lookup("hide_last_line").as_deref() == Some("1");
+        let hide_progress = lookup("hide_progress").as_deref() == Some("1");
 
         build.cmdline = cmdline;
         build.desc = desc;
@@ -168,7 +168,7 @@ impl Loader {
         build.rspfile = rspfile;
         build.pool = pool;
         build.hide_success = hide_success;
-        build.hide_last_line = hide_last_line;
+        build.hide_progress = hide_progress;
 
         self.graph.add_build(build)
     }
