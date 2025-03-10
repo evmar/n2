@@ -24,9 +24,11 @@ mod terminal;
 mod trace;
 mod work;
 
+#[cfg(feature = "jemalloc")]
 #[cfg(not(any(miri, windows, target_arch = "wasm32")))]
 use jemallocator::Jemalloc;
 
+#[cfg(feature = "jemalloc")]
 #[cfg(not(any(miri, windows, target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
