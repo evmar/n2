@@ -49,7 +49,7 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 /// Internal state used while loading.
 #[derive(Default)]
 pub struct Loader {
-    graph: graph::Graph,
+    pub graph: graph::Graph,
     default: Vec<FileId>,
     /// rule name -> list of (key, val)
     rules: HashMap<String, SmallMap<String, eval::EvalString<String>>>,
