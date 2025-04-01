@@ -50,6 +50,10 @@ impl<K: Index, V> DenseMap<K, V> {
         self.vec.push(val);
         id
     }
+
+    pub fn all_ids(&self) -> impl Iterator<Item = K> {
+        (0..self.vec.len()).map(|id| K::from(id))
+    }
 }
 
 impl<K: Index, V: Clone> DenseMap<K, V> {
