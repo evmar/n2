@@ -155,11 +155,11 @@ pub struct Build {
     /// Command line to run.  Absent for phony builds.
     pub cmdline: Option<String>,
 
+    /// Controls how dependency information is processed after compilation.
+    pub deps: Option<String>,
+
     /// Path to generated `.d` file, if any.
     pub depfile: Option<String>,
-
-    /// If true, extract "/showIncludes" lines from output.
-    pub parse_showincludes: bool,
 
     // Struct that contains the path to the rsp file and its contents, if any.
     pub rspfile: Option<RspFile>,
@@ -186,8 +186,8 @@ impl Build {
             location: loc,
             desc: None,
             cmdline: None,
+            deps: None,
             depfile: None,
-            parse_showincludes: false,
             rspfile: None,
             pool: None,
             ins,
@@ -243,6 +243,15 @@ impl Build {
     pub fn outs(&self) -> &[FileId] {
         &self.outs.ids
     }
+
+    /// If true, extract "/showIncludes" lines from output.
+    pub fn parse_showincludes(&self) -> bool {
+        match self.deps.as_deref() {
+            Some("msvc") => true,
+            _ => false,
+        }
+    }
+
 }
 
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them.
