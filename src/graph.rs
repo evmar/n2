@@ -6,9 +6,12 @@ use crate::{
     densemap::{self, DenseMap},
     hash::BuildHash,
 };
-use std::collections::{hash_map::Entry, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    ops::{Deref, DerefMut},
+};
 
 /// Id for File nodes in the Graph.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -74,6 +77,7 @@ pub struct RspFile {
 }
 
 /// Input files to a Build.
+#[derive(Clone)]
 pub struct BuildIns {
     /// Internally we stuff explicit/implicit/order-only ins all into one Vec.
     /// This is mostly to simplify some of the iteration and is a little more
@@ -88,6 +92,7 @@ pub struct BuildIns {
 }
 
 /// Output files from a Build.
+#[derive(Clone)]
 pub struct BuildOuts {
     /// Similar to ins, we keep both explicit and implicit outs in one Vec.
     pub ids: Vec<FileId>,
@@ -144,29 +149,9 @@ mod tests {
     }
 }
 
-/// A single build action, generating File outputs from File inputs with a command.
-pub struct Build {
-    /// Source location this Build was declared.
-    pub location: FileLoc,
-
-    /// User-provided description of the build step.
-    pub desc: Option<String>,
-
-    /// Command line to run.  Absent for phony builds.
-    pub cmdline: Option<String>,
-
-    /// Controls how dependency information is processed after compilation.
-    pub deps: Option<String>,
-
-    /// Path to generated `.d` file, if any.
-    pub depfile: Option<String>,
-
-    // Struct that contains the path to the rsp file and its contents, if any.
-    pub rspfile: Option<RspFile>,
-
-    /// Pool to execute this build in, if any.
-    pub pool: Option<String>,
-
+#[derive(Clone)]
+pub struct BuildDependencies {
+    /// Input files.
     pub ins: BuildIns,
 
     /// Additional inputs discovered from a previous build.
@@ -174,30 +159,9 @@ pub struct Build {
 
     /// Output files.
     pub outs: BuildOuts,
-
-    /// True if output of command should be hidden on successful completion.
-    pub hide_success: bool,
-    /// True if last line of output should not be shown in status.
-    pub hide_progress: bool,
 }
-impl Build {
-    pub fn new(loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
-        Build {
-            location: loc,
-            desc: None,
-            cmdline: None,
-            deps: None,
-            depfile: None,
-            rspfile: None,
-            pool: None,
-            ins,
-            discovered_ins: Vec::new(),
-            outs,
-            hide_success: false,
-            hide_progress: false,
-        }
-    }
 
+impl BuildDependencies {
     /// Input paths that appear in `$in`.
     pub fn explicit_ins(&self) -> &[FileId] {
         &self.ins.ids[0..self.ins.explicit]
@@ -243,6 +207,58 @@ impl Build {
     pub fn outs(&self) -> &[FileId] {
         &self.outs.ids
     }
+}
+
+/// A single build action, generating File outputs from File inputs with a command.
+pub struct Build {
+    /// Source location this Build was declared.
+    pub location: FileLoc,
+
+    /// Inputs and outputs for this build.
+    pub dependencies: BuildDependencies,
+
+    /// User-provided description of the build step.
+    pub desc: Option<String>,
+
+    /// Command line to run.  Absent for phony builds.
+    pub cmdline: Option<String>,
+
+    /// Controls how dependency information is processed after compilation.
+    pub deps: Option<String>,
+
+    /// Path to generated `.d` file, if any.
+    pub depfile: Option<String>,
+
+    // Struct that contains the path to the rsp file and its contents, if any.
+    pub rspfile: Option<RspFile>,
+
+    /// Pool to execute this build in, if any.
+    pub pool: Option<String>,
+
+    /// True if output of command should be hidden on successful completion.
+    pub hide_success: bool,
+    /// True if last line of output should not be shown in status.
+    pub hide_progress: bool,
+}
+impl Build {
+    pub fn new(loc: FileLoc, ins: BuildIns, outs: BuildOuts) -> Self {
+        Build {
+            location: loc,
+            dependencies: BuildDependencies {
+                ins,
+                discovered_ins: Vec::new(),
+                outs,
+            },
+            desc: None,
+            cmdline: None,
+            deps: None,
+            depfile: None,
+            rspfile: None,
+            pool: None,
+            hide_success: false,
+            hide_progress: false,
+        }
+    }
 
     /// If true, extract "/showIncludes" lines from output.
     pub fn parse_showincludes(&self) -> bool {
@@ -251,7 +267,20 @@ impl Build {
             _ => false,
         }
     }
+}
 
+impl Deref for Build {
+    type Target = BuildDependencies;
+
+    fn deref(&self) -> &Self::Target {
+        &self.dependencies
+    }
+}
+
+impl DerefMut for Build {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.dependencies
+    }
 }
 
 /// The build graph: owns Files/Builds and maps FileIds/BuildIds to them.
