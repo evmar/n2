@@ -19,6 +19,7 @@ anyhow = "1.0"
 lexopt = "0.3.0"
 libc = "0.2"
 rustc-hash = "1.1.0"
+memmap2 = "0.9.5"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.48"
@@ -48,6 +49,10 @@ harness = false
 
 [[bench]]
 name = "canon"
+harness = false
+
+[[bench]]
+name = "loader"
 harness = false
 
 [features]

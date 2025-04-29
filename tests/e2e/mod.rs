@@ -7,6 +7,7 @@ mod discovered;
 mod missing;
 mod regen;
 mod validations;
+mod loader_memmap;
 
 use anyhow::anyhow;
 
@@ -65,6 +66,10 @@ impl TestSpace {
 
     /// Write a file into the working space.
     pub fn write(&self, path: &str, content: &str) -> std::io::Result<()> {
+        std::fs::write(self.dir.path().join(path), content)
+    }
+
+    pub fn write_raw(&self, path: &str, content: &[u8]) -> std::io::Result<()> {
         std::fs::write(self.dir.path().join(path), content)
     }
 

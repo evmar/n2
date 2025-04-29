@@ -1,17 +1,10 @@
 //! Graph loading: runs .ninja parsing and constructs the build graph from it.
 
 use crate::{
-    canon::{canonicalize_path, to_owned_canon_path},
-    db,
-    eval::{self, EvalPart, EvalString},
-    graph::{self, FileId, RspFile},
-    parse::{self, Statement},
-    scanner,
-    smallmap::SmallMap,
-    trace,
+    canon::{canonicalize_path, to_owned_canon_path}, db, eval::{self, EvalPart, EvalString}, file_loader::FileLoader, graph::{self, FileId, RspFile}, parse::{self, Statement}, scanner, smallmap::SmallMap, trace
 };
 use anyhow::{anyhow, bail};
-use std::collections::HashMap;
+use std::{cell::{Ref, RefCell}, collections::HashMap, rc::Rc};
 use std::path::PathBuf;
 use std::{borrow::Cow, path::Path};
 
@@ -47,14 +40,29 @@ impl<'a> eval::Env for BuildImplicitVars<'a> {
 }
 
 /// Internal state used while loading.
-#[derive(Default)]
 pub struct Loader {
-    pub graph: graph::Graph,
+    _graph: Rc<RefCell<graph::Graph>>,
     default: Vec<FileId>,
     /// rule name -> list of (key, val)
     rules: HashMap<String, SmallMap<String, eval::EvalString<String>>>,
     pools: SmallMap<String, usize>,
     builddir: Option<String>,
+    file_loader: FileLoader,
+}
+
+impl Default for Loader {
+    fn default() -> Self {
+        let graph: Rc<RefCell<graph::Graph>> = Default::default();
+
+        Self { 
+            _graph: graph.clone(),
+            default: Default::default(),
+            rules: Default::default(),
+            pools: Default::default(),
+            builddir: Default::default(),
+            file_loader: FileLoader::new(graph.clone()),
+        }
+    }
 }
 
 impl Loader {
@@ -66,13 +74,17 @@ impl Loader {
         loader
     }
 
+    pub fn graph<'a>(&'a self) -> Ref<'a, graph::Graph> {
+        self._graph.borrow()
+    }
+
     /// Convert a path string to a FileId.
     fn path(&mut self, mut path: String) -> FileId {
         // Perf: this is called while parsing build.ninja files.  We go to
         // some effort to avoid allocating in the common case of a path that
         // refers to a file that is already known.
         canonicalize_path(&mut path);
-        self.graph.files.id_from_canonical(path)
+        self._graph.borrow_mut().files.id_from_canonical(path)
     }
 
     fn evaluate_path(&mut self, path: EvalString<&str>, envs: &[&dyn eval::Env]) -> FileId {
@@ -121,65 +133,73 @@ impl Loader {
             None => bail!("unknown rule {:?}", b.rule),
         };
 
-        let implicit_vars = BuildImplicitVars {
-            graph: &self.graph,
-            build: &build,
+        {
+            let implicit_vars = BuildImplicitVars {
+                graph: &self.graph(),
+                build: &build,
+            };
+
+            // temp variable in order to not move all of b into the closure
+            let build_vars = &b.vars;
+            
+            let lookup = |key: &str| -> Option<String> {
+                // Look up `key = ...` binding in build and rule block.
+                // See "Variable scope" in the design notes.
+                Some(match build_vars.get(key) {
+                    Some(val) => val.evaluate(&[env]),
+                    None => rule.get(key)?.evaluate(&[&implicit_vars, build_vars, env]),
+                })
+            };
+
+            let cmdline = lookup("command");
+            let desc = lookup("description");
+            let depfile = lookup("depfile");
+            let deps = match lookup("deps").as_deref() {
+                None => None,
+                Some("gcc") => Some("gcc".to_string()),
+                Some("msvc") => Some("msvc".to_string()),
+                Some(other) => bail!("invalid deps attribute {:?}", other),
+            };
+            let pool = lookup("pool");
+
+            let rspfile_path = lookup("rspfile");
+            let rspfile_content = lookup("rspfile_content");
+            let rspfile = match (rspfile_path, rspfile_content) {
+                (None, None) => None,
+                (Some(path), Some(content)) => Some(RspFile {
+                    path: std::path::PathBuf::from(path),
+                    content,
+                }),
+                _ => bail!("rspfile and rspfile_content need to be both specified"),
+            };
+            let hide_success = lookup("hide_success").is_some();
+            let hide_progress = lookup("hide_progress").is_some();
+
+            build.cmdline = cmdline;
+            build.desc = desc;
+            build.depfile = depfile;
+            build.deps = deps;
+            build.rspfile = rspfile;
+            build.pool = pool;
+            build.hide_success = hide_success;
+            build.hide_progress = hide_progress;
         };
 
-        // temp variable in order to not move all of b into the closure
-        let build_vars = &b.vars;
-        let lookup = |key: &str| -> Option<String> {
-            // Look up `key = ...` binding in build and rule block.
-            // See "Variable scope" in the design notes.
-            Some(match build_vars.get(key) {
-                Some(val) => val.evaluate(&[env]),
-                None => rule.get(key)?.evaluate(&[&implicit_vars, build_vars, env]),
-            })
-        };
-
-        let cmdline = lookup("command");
-        let desc = lookup("description");
-        let depfile = lookup("depfile");
-        let deps = match lookup("deps").as_deref() {
-            None => None,
-            Some("gcc") => Some("gcc".to_string()),
-            Some("msvc") => Some("msvc".to_string()),
-            Some(other) => bail!("invalid deps attribute {:?}", other),
-        };
-        let pool = lookup("pool");
-
-        let rspfile_path = lookup("rspfile");
-        let rspfile_content = lookup("rspfile_content");
-        let rspfile = match (rspfile_path, rspfile_content) {
-            (None, None) => None,
-            (Some(path), Some(content)) => Some(RspFile {
-                path: std::path::PathBuf::from(path),
-                content,
-            }),
-            _ => bail!("rspfile and rspfile_content need to be both specified"),
-        };
-        let hide_success = lookup("hide_success").is_some();
-        let hide_progress = lookup("hide_progress").is_some();
-
-        build.cmdline = cmdline;
-        build.desc = desc;
-        build.depfile = depfile;
-        build.deps = deps;
-        build.rspfile = rspfile;
-        build.pool = pool;
-        build.hide_success = hide_success;
-        build.hide_progress = hide_progress;
-
-        self.graph.add_build(build)
+        self._graph.borrow_mut().add_build(build)
     }
 
     fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
-        let path = self.graph.file(id).path().to_path_buf();
-        let bytes = match trace::scope("read file", || scanner::read_file_with_nul(&path)) {
-            Ok(b) => b,
-            Err(e) => bail!("read {}: {}", path.display(), e),
-        };
-        self.parse(path, &bytes)
+        let file = trace::scope("read file", || self.file_loader.read_file(id))?;
+
+        self.parse(file.path.clone(), file.as_ref())
+    }
+
+    // For benchmark comparison against memmapings
+    pub(in crate::load) fn read_file_slow(&mut self, id: FileId) -> anyhow::Result<()> {
+        let path = self._graph.borrow().file(id).path().to_path_buf();
+        let file = trace::scope("read file", || scanner::read_file_with_nul(&path))?;
+
+        self.parse(path, file.as_ref())
     }
 
     fn evaluate_and_read_file(
@@ -250,10 +270,13 @@ pub struct State {
 pub fn read(build_filename: &str) -> anyhow::Result<State> {
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || {
-        let id = loader
-            .graph
-            .files
-            .id_from_canonical(to_owned_canon_path(build_filename));
+        let id = {
+            loader
+                ._graph
+                .borrow_mut()
+                .files
+                .id_from_canonical(to_owned_canon_path(build_filename))
+        };
         loader.read_file(id)
     })?;
     let mut hashes = graph::Hashes::default();
@@ -265,16 +288,49 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
                 std::fs::create_dir_all(parent)?;
             }
         };
-        db::open(&db_path, &mut loader.graph, &mut hashes)
+        db::open(&db_path, &mut loader._graph.borrow_mut(), &mut hashes)
     })
     .map_err(|err| anyhow!("load .n2_db: {}", err))?;
+
+    let graph = loader._graph;
+    let default = loader.default;
+    let pools = loader.pools;
+
     Ok(State {
-        graph: loader.graph,
+        graph: graph.take(),
         db,
         hashes,
-        default: loader.default,
-        pools: loader.pools,
+        default,
+        pools,
     })
+}
+
+pub mod testing {
+    use super::*;
+
+    pub fn read_internal(build_filename: &str) -> anyhow::Result<()> {
+        let mut loader = Loader::new();
+        let id = {
+            loader
+                ._graph
+                .borrow_mut()
+                .files
+                .id_from_canonical(to_owned_canon_path(build_filename))
+        };
+        loader.read_file(id)
+    }
+
+    pub fn read_internal_slow(build_filename: &str) -> anyhow::Result<()> {
+        let mut loader = Loader::new();
+        let id = {
+            loader
+                ._graph
+                .borrow_mut()
+                .files
+                .id_from_canonical(to_owned_canon_path(build_filename))
+        };
+        loader.read_file_slow(id)
+    }
 }
 
 /// Parse a single file's content.
@@ -285,5 +341,7 @@ pub fn parse(name: &str, mut content: Vec<u8>) -> anyhow::Result<graph::Graph> {
     trace::scope("loader.read_file", || {
         loader.parse(PathBuf::from(name), &content)
     })?;
-    Ok(loader.graph)
+    let graph = loader._graph;
+
+    Ok(graph.take())
 }
