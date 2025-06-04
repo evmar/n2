@@ -69,9 +69,14 @@ fn build(args: BuildArgs) -> anyhow::Result<Option<usize>> {
 
     if !args.targets.is_empty() {
         for name in &args.targets {
-            let target = work
-                .lookup(name)
-                .ok_or_else(|| anyhow::anyhow!("unknown path requested: {:?}", name))?;
+            let Some(target) = work.lookup(name) else {
+                if args.options.adopt {
+                    // cmake invokes -t restat with paths that don't exist
+                    // https://github.com/evmar/n2/issues/142
+                    continue;
+                }
+                return Err(anyhow::anyhow!("unknown path requested: {:?}", name));
+            };
             if Some(target) == build_file_target {
                 // Already built above.
                 continue;
