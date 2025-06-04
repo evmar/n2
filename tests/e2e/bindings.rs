@@ -42,7 +42,7 @@ build out: my_rule
     )?;
 
     let out = space.run(&mut n2_command(vec!["out"]))?;
-    assert_output_contains(&out, "unexpected variable \"my_var\"");
+    assert_stderr_contains(&out, "unexpected variable \"my_var\"");
     Ok(())
 }
 
