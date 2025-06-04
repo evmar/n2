@@ -160,6 +160,7 @@ fn restat() -> anyhow::Result<()> {
         "-t",
         "restat",
         "build.ninja",
+        "path_that_does_not_exist", // ninja doesn't check path existence
     ]))?;
     assert_output_not_contains(&out, "touch build.ninja");
 
