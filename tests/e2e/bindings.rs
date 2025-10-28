@@ -147,3 +147,35 @@ build foo: write_file
     assert_eq!(space.read("foo")?, b"Hello, world!\n");
     Ok(())
 }
+
+// Test for https://github.com/evmar/n2/issues/145: a variable in one file is visible
+// in an included file.
+#[test]
+fn across_files() -> anyhow::Result<()> {
+    let space = TestSpace::new()?;
+    space.write(
+        "build.ninja",
+        &[
+            ECHO_RULE,
+            "
+var = hello
+include other.ninja
+",
+        ]
+        .join("\n"),
+    )?;
+    space.write(
+        "other.ninja",
+        "
+build out: echo $var/world
+",
+    )?;
+
+    let out = space.run(&mut n2_command(vec!["out"]))?;
+    assert_output_contains(&out, "input /world missing");
+
+    // TODO: should instead be something like:
+    // let out = space.run_expect(&mut n2_command(vec!["out"]))?;
+    // assert_output_contains(&out, "echo hello/world");
+    Ok(())
+}
