@@ -194,7 +194,7 @@ fn explain() -> anyhow::Result<()> {
     let out = space.run_expect(&mut n2_command(vec!["out"]))?;
     assert_output_contains(&out, "up to date");
 
-    space.write("in", "")?;
+    space.write("in", "x")?;
     let out = space.run_expect(&mut n2_command(vec!["-d", "explain", "out"]))?;
     // The main "explain" log line:
     assert_output_contains(&out, "explain: build.ninja:6: manifest changed");
