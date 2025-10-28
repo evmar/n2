@@ -11,7 +11,7 @@ use std::borrow::Cow;
 /// This represents one "frame" of evaluation context, a given EvalString may
 /// need multiple environments in order to be fully expanded.
 pub trait Env {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>>;
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>>;
 }
 
 /// One token within an EvalString, either literal text or a variable reference.
@@ -93,7 +93,7 @@ impl EvalString<&str> {
 }
 
 impl EvalString<String> {
-    pub fn as_cow(&self) -> EvalString<Cow<str>> {
+    pub fn as_cow(&self) -> EvalString<Cow<'_, str>> {
         EvalString(
             self.0
                 .iter()
@@ -107,7 +107,7 @@ impl EvalString<String> {
 }
 
 impl EvalString<&str> {
-    pub fn as_cow(&self) -> EvalString<Cow<str>> {
+    pub fn as_cow(&self) -> EvalString<Cow<'_, str>> {
         EvalString(
             self.0
                 .iter()
@@ -133,7 +133,7 @@ impl<'text> Vars<'text> {
     }
 }
 impl<'a> Env for Vars<'a> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>> {
         Some(EvalString::new(vec![EvalPart::Literal(
             std::borrow::Cow::Borrowed(self.get(var)?),
         )]))
@@ -141,19 +141,19 @@ impl<'a> Env for Vars<'a> {
 }
 
 impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<String>> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>> {
         Some(self.get(var)?.as_cow())
     }
 }
 
 impl<K: Borrow<str> + PartialEq> Env for SmallMap<K, EvalString<&str>> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>> {
         Some(self.get(var)?.as_cow())
     }
 }
 
 impl Env for SmallMap<&str, String> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>> {
         Some(EvalString::new(vec![EvalPart::Literal(
             std::borrow::Cow::Borrowed(self.get(var)?),
         )]))

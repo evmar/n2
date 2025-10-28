@@ -33,7 +33,7 @@ impl<'a> BuildImplicitVars<'a> {
     }
 }
 impl<'a> eval::Env for BuildImplicitVars<'a> {
-    fn get_var(&self, var: &str) -> Option<EvalString<Cow<str>>> {
+    fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>> {
         let string_to_evalstring =
             |s: String| Some(EvalString::new(vec![EvalPart::Literal(Cow::Owned(s))]));
         match var {
