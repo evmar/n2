@@ -173,13 +173,13 @@ impl Loader {
         self.graph.add_build(build)
     }
 
-    fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
+    fn read_file(&mut self, id: FileId, envs: &[&dyn eval::Env]) -> anyhow::Result<()> {
         let path = self.graph.file(id).path().to_path_buf();
         let bytes = match trace::scope("read file", || scanner::read_file_with_nul(&path)) {
             Ok(b) => b,
             Err(e) => bail!("read {}: {}", path.display(), e),
         };
-        self.parse(path, &bytes)
+        self.parse(path, &bytes, envs)
     }
 
     fn evaluate_and_read_file(
@@ -188,10 +188,15 @@ impl Loader {
         envs: &[&dyn eval::Env],
     ) -> anyhow::Result<()> {
         let evaluated = self.evaluate_path(file, envs);
-        self.read_file(evaluated)
+        self.read_file(evaluated, envs)
     }
 
-    pub fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
+    pub fn parse(
+        &mut self,
+        path: PathBuf,
+        bytes: &[u8],
+        envs: &[&dyn eval::Env],
+    ) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
 
         let mut parser = parse::Parser::new(&bytes);
@@ -204,6 +209,10 @@ impl Loader {
                 None => break,
                 Some(s) => s,
             };
+
+            let mut combined_envs: Vec<&dyn eval::Env> = vec![&parser.vars];
+            combined_envs.extend(envs);
+
             match stmt {
                 Statement::Include(id) => trace::scope("include", || {
                     self.evaluate_and_read_file(id, &[&parser.vars])
@@ -254,7 +263,7 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
             .graph
             .files
             .id_from_canonical(to_owned_canon_path(build_filename));
-        loader.read_file(id)
+        loader.read_file(id, &[])
     })?;
     let mut hashes = graph::Hashes::default();
     let db = trace::scope("db::open", || {
@@ -283,7 +292,7 @@ pub fn parse(name: &str, mut content: Vec<u8>) -> anyhow::Result<graph::Graph> {
     content.push(0);
     let mut loader = Loader::new();
     trace::scope("loader.read_file", || {
-        loader.parse(PathBuf::from(name), &content)
+        loader.parse(PathBuf::from(name), &content, &[])
     })?;
     Ok(loader.graph)
 }

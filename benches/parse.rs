@@ -56,7 +56,7 @@ fn load_synthetic(bencher: Bencher) {
     bencher.bench_local(|| {
         let mut loader = n2::load::Loader::new();
         loader
-            .parse(PathBuf::from_str("build.ninja").unwrap(), &input)
+            .parse(PathBuf::from_str("build.ninja").unwrap(), &input, &[])
             .unwrap();
     });
 }
