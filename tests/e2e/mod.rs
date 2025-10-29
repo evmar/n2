@@ -43,6 +43,16 @@ pub fn assert_output_contains(out: &std::process::Output, text: &str) {
     }
 }
 
+pub fn assert_stderr_contains(out: &std::process::Output, text: &str) {
+    let out = std::str::from_utf8(&out.stderr).unwrap();
+    if !out.contains(text) {
+        panic!(
+            "assertion failed; expected stderr to contain {:?} but got:\n{}",
+            text, out
+        );
+    }
+}
+
 pub fn assert_output_not_contains(out: &std::process::Output, text: &str) {
     let out = std::str::from_utf8(&out.stdout).unwrap();
     if out.contains(text) {
