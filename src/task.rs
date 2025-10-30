@@ -214,7 +214,7 @@ impl Runner {
         let cmdline = build.cmdline.clone().unwrap();
         let depfile = build.depfile.clone().map(PathBuf::from);
         let rspfile = build.rspfile.clone();
-        let parse_showincludes = build.parse_showincludes;
+        let parse_showincludes = build.parse_showincludes();
         let hide_progress = build.hide_progress;
 
         let tid = self.tids.claim();

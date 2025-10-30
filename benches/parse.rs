@@ -32,7 +32,7 @@ mod parser {
     }
 
     // This can take a while to run (~100ms per sample), so reduce total count.
-    #[divan::bench(sample_size = 3, max_time = 1)]
+    #[divan::bench(sample_size = 3, sample_count = 3)]
     fn file(bencher: Bencher) {
         let input = match n2::scanner::read_file_with_nul("benches/build.ninja".as_ref()) {
             Ok(input) => input,

@@ -1,9 +1,9 @@
 pub mod canon;
 mod db;
-mod densemap;
-mod depfile;
+pub mod densemap;
+pub mod depfile;
 mod eval;
-mod graph;
+pub mod graph;
 mod hash;
 pub mod load;
 pub mod parse;
@@ -23,6 +23,7 @@ mod task;
 mod terminal;
 mod trace;
 mod work;
+mod file_loader;
 
 #[cfg(feature = "jemalloc")]
 #[cfg(not(any(miri, windows, target_arch = "wasm32")))]
