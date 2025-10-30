@@ -383,7 +383,7 @@ impl<'a> Work<'a> {
     }
 
     pub fn want_every_file(&mut self, exclude: Option<FileId>) -> anyhow::Result<()> {
-        for id in self.graph.files.all_ids() {
+        for id in self.graph.files.by_id.all_ids() {
             if let Some(exclude) = exclude {
                 if id == exclude {
                     continue;

@@ -140,10 +140,10 @@ impl Loader {
         let cmdline = lookup("command");
         let desc = lookup("description");
         let depfile = lookup("depfile");
-        let parse_showincludes = match lookup("deps").as_deref() {
-            None => false,
-            Some("gcc") => false,
-            Some("msvc") => true,
+        let deps = match lookup("deps").as_deref() {
+            None => None,
+            Some("gcc") => Some("gcc".to_string()),
+            Some("msvc") => Some("msvc".to_string()),
             Some(other) => bail!("invalid deps attribute {:?}", other),
         };
         let pool = lookup("pool");
@@ -164,7 +164,7 @@ impl Loader {
         build.cmdline = cmdline;
         build.desc = desc;
         build.depfile = depfile;
-        build.parse_showincludes = parse_showincludes;
+        build.deps = deps;
         build.rspfile = rspfile;
         build.pool = pool;
         build.hide_success = hide_success;
