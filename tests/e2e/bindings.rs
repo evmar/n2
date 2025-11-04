@@ -153,12 +153,13 @@ build foo: write_file
 #[test]
 fn across_files() -> anyhow::Result<()> {
     let space = TestSpace::new()?;
+    space.write("world.txt", "<t>")?;
     space.write(
         "build.ninja",
         &[
             ECHO_RULE,
             "
-var = hello
+ext = txt
 include other.ninja
 ",
         ]
@@ -167,15 +168,13 @@ include other.ninja
     space.write(
         "other.ninja",
         "
-build out: echo $var/world
+build hello: echo world.$ext
+    text = what a beautiful day
 ",
     )?;
 
-    let out = space.run(&mut n2_command(vec!["out"]))?;
-    assert_output_contains(&out, "input /world missing");
+    let out = space.run_expect(&mut n2_command(vec!["hello"]))?;
+    assert_output_contains(&out, "what a beautiful day");
 
-    // TODO: should instead be something like:
-    // let out = space.run_expect(&mut n2_command(vec!["out"]))?;
-    // assert_output_contains(&out, "echo hello/world");
     Ok(())
 }

@@ -66,6 +66,12 @@ impl<'text> Parser<'text> {
         }
     }
 
+    pub fn inherit<'b>(&mut self, from: &'b Self) {
+        for (k, v) in from.vars.get_all() {
+            self.vars.insert(k, v.clone());
+        }
+    }
+
     pub fn format_parse_error(&self, filename: &Path, err: ParseError) -> String {
         self.scanner.format_parse_error(filename, err)
     }

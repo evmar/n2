@@ -128,10 +128,16 @@ impl<'text> Vars<'text> {
     pub fn insert(&mut self, key: &'text str, val: String) {
         self.0.insert(key, val);
     }
+
     pub fn get(&self, key: &str) -> Option<&String> {
         self.0.get(key)
     }
+
+    pub fn get_all(&self) -> &FxHashMap<&'text str, String> {
+        &self.0
+    }
 }
+
 impl<'a> Env for Vars<'a> {
     fn get_var(&self, var: &str) -> Option<EvalString<Cow<'_, str>>> {
         Some(EvalString::new(vec![EvalPart::Literal(
