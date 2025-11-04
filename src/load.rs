@@ -173,28 +173,22 @@ impl Loader {
         self.graph.add_build(build)
     }
 
-    fn read_file(&mut self, id: FileId) -> anyhow::Result<()> {
+    pub fn read_file_by_id(&self, id: FileId) -> anyhow::Result<(PathBuf, Vec<u8>)> {
         let path = self.graph.file(id).path().to_path_buf();
-        let bytes = match trace::scope("read file", || scanner::read_file_with_nul(&path)) {
-            Ok(b) => b,
+
+        match trace::scope("read file", || scanner::read_file_with_nul(&path)) {
+            Ok(b) => Ok((path, b)),
             Err(e) => bail!("read {}: {}", path.display(), e),
-        };
-        self.parse(path, &bytes)
+        }
     }
 
-    fn evaluate_and_read_file(
+    pub fn parse_with_parser(
         &mut self,
-        file: EvalString<&str>,
+        parser: &mut parse::Parser,
+        path: PathBuf,
         envs: &[&dyn eval::Env],
     ) -> anyhow::Result<()> {
-        let evaluated = self.evaluate_path(file, envs);
-        self.read_file(evaluated)
-    }
-
-    pub fn parse(&mut self, path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
         let filename = std::rc::Rc::new(path);
-
-        let mut parser = parse::Parser::new(&bytes);
 
         loop {
             let stmt = match parser
@@ -204,18 +198,26 @@ impl Loader {
                 None => break,
                 Some(s) => s,
             };
+
             match stmt {
-                Statement::Include(id) => trace::scope("include", || {
-                    self.evaluate_and_read_file(id, &[&parser.vars])
-                })?,
-                // TODO: implement scoping for subninja
-                Statement::Subninja(id) => trace::scope("subninja", || {
-                    self.evaluate_and_read_file(id, &[&parser.vars])
-                })?,
+                // TODO: Support new scope for 'subninja' statements.
+                //   This will require, at the very least, merging the
+                //   variables of the sub-parser back into the parent parser.
+                Statement::Include(in_path) | Statement::Subninja(in_path) => {
+                    let id = self.evaluate_path(in_path, &[&parser.vars]);
+                    let (path, bytes) = self.read_file_by_id(id)?;
+                    let bytes = std::rc::Rc::new(bytes);
+                    let mut sub_parser = parse::Parser::new(&bytes);
+
+                    sub_parser.inherit(&parser);
+                    self.parse_with_parser(&mut sub_parser, path, envs)?;
+                }
+
                 Statement::Default(defaults) => {
                     let evaluated = self.evaluate_paths(defaults, &[&parser.vars]);
                     self.default.extend(evaluated);
                 }
+
                 Statement::Rule(rule) => {
                     let mut vars: SmallMap<String, eval::EvalString<String>> = SmallMap::default();
                     for (name, val) in rule.vars.into_iter() {
@@ -226,12 +228,15 @@ impl Loader {
                     }
                     self.rules.insert(rule.name.to_owned(), vars);
                 }
+
                 Statement::Build(build) => self.add_build(filename.clone(), &parser.vars, build)?,
+
                 Statement::Pool(pool) => {
                     self.pools.insert(pool.name.to_string(), pool.depth);
                 }
             };
         }
+
         self.builddir = parser.vars.get("builddir").cloned();
         Ok(())
     }
@@ -254,8 +259,12 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
             .graph
             .files
             .id_from_canonical(to_owned_canon_path(build_filename));
-        loader.read_file(id)
+        let (path, bytes) = loader.read_file_by_id(id)?;
+        let mut parser = parse::Parser::new(&bytes);
+
+        loader.parse_with_parser(&mut parser, path, &[])
     })?;
+
     let mut hashes = graph::Hashes::default();
     let db = trace::scope("db::open", || {
         let mut db_path = PathBuf::from(".n2_db");
@@ -268,6 +277,7 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
         db::open(&db_path, &mut loader.graph, &mut hashes)
     })
     .map_err(|err| anyhow!("load .n2_db: {}", err))?;
+
     Ok(State {
         graph: loader.graph,
         db,
@@ -282,8 +292,11 @@ pub fn read(build_filename: &str) -> anyhow::Result<State> {
 pub fn parse(name: &str, mut content: Vec<u8>) -> anyhow::Result<graph::Graph> {
     content.push(0);
     let mut loader = Loader::new();
+
     trace::scope("loader.read_file", || {
-        loader.parse(PathBuf::from(name), &content)
+        let mut parser = parse::Parser::new(&content);
+        loader.parse_with_parser(&mut parser, PathBuf::from(name), &[])
     })?;
+
     Ok(loader.graph)
 }

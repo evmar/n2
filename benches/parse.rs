@@ -1,5 +1,6 @@
 use divan::Bencher;
-use std::{io::Write, path::PathBuf, str::FromStr};
+use std::io::Write;
+use std::path::PathBuf;
 
 fn generate_build_ninja(statement_count: usize) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
@@ -55,8 +56,10 @@ fn load_synthetic(bencher: Bencher) {
     input.push(0);
     bencher.bench_local(|| {
         let mut loader = n2::load::Loader::new();
+        let mut parser = n2::parse::Parser::new(&input);
+
         loader
-            .parse(PathBuf::from_str("build.ninja").unwrap(), &input)
+            .parse_with_parser(&mut parser, PathBuf::from("<synthetic>"), &[])
             .unwrap();
     });
 }
