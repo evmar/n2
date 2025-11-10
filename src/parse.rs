@@ -67,6 +67,7 @@ impl<'text> Parser<'text> {
     }
 
     pub fn inherit<'b>(&mut self, from: &'b Self) {
+        // TODO: should use from parser as a scope rather than copying.
         for (k, v) in from.vars.get_all() {
             self.vars.insert(k, v.clone());
         }
