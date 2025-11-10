@@ -200,9 +200,6 @@ impl Loader {
             };
 
             match stmt {
-                // TODO: Support new scope for 'subninja' statements.
-                //   This will require, at the very least, merging the
-                //   variables of the sub-parser back into the parent parser.
                 Statement::Include(in_path) | Statement::Subninja(in_path) => {
                     let id = self.evaluate_path(in_path, &[&parser.vars]);
                     let (path, bytes) = self.read_file_by_id(id)?;
