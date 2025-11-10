@@ -200,7 +200,7 @@ impl Loader {
             };
 
             match stmt {
-                // TODO: Support new scope for 'include' statements.
+                // TODO: Support new scope for 'subninja' statements.
                 //   This will require, at the very least, merging the
                 //   variables of the sub-parser back into the parent parser.
                 Statement::Include(in_path) | Statement::Subninja(in_path) => {
