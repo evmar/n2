@@ -11,7 +11,7 @@ fn missing_input() -> anyhow::Result<()> {
     )?;
 
     let out = space.run(&mut n2_command(vec!["out"]))?;
-    assert_output_contains(&out, "input in missing");
+    assert_stderr_contains(&out, "input in missing");
 
     Ok(())
 }
